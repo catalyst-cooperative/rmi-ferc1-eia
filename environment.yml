@@ -1,0 +1,10 @@
+name: pudl-rmi
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - catalystcoop.pudl
+  - jupyter
+  - jupyterlab
+  - pip
+  - python>=3.7
