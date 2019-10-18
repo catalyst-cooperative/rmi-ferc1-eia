@@ -8,4 +8,4 @@ PUDL.
 
 RMI Collaborators include:
  * @UdayVaradarajan
- * Sam Mardell
+ * @SamMardell
