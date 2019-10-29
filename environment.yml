@@ -8,3 +8,4 @@ dependencies:
   - jupyterlab
   - pip
   - python>=3.7
+  - seaborn
