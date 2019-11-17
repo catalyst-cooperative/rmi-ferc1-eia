@@ -9,12 +9,14 @@ plant_parts = {
         'denorm_table': None,
         'denorm_cols': None,
         'ag_cols': {
-            'fuel_cost_per_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
             'total_fuel_cost': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
-            'fuel_cost_per_mmbtu': 'wtavg_mw',
             'capacity_mw': pudl.helpers.sum_na,
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
         },
     },
     'plant_gen': {
@@ -25,10 +27,12 @@ plant_parts = {
         'ag_cols': {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
-            'fuel_cost_per_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mmbtu': 'wtavg_mw',  # 'wtavg_mwh',
             'total_fuel_cost': pudl.helpers.sum_na,
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
         },
         'ag_tables': {
             'generators_eia860': {
@@ -37,6 +41,7 @@ plant_parts = {
                 'ag_cols': {
                     'capacity_mw': pudl.helpers.sum_na,
                 },
+                'wtavg_cols': None,
             },
             'generation_eia923': {
                 'denorm_table': None,
@@ -44,16 +49,19 @@ plant_parts = {
                 'ag_cols': {
                     'net_generation_mwh': pudl.helpers.sum_na,
                 },
+                'wtavg_cols': None,
             },
 
             'mcoe': {
                 'denorm_table': None,
                 'denorm_cols': None,
                 'ag_cols': {
-                    'fuel_cost_per_mwh': 'wtavg_mw',
-                    'heat_rate_mmbtu_mwh': 'wtavg_mw',
-                    'fuel_cost_per_mmbtu': 'wtavg_mw',
                     'total_fuel_cost': pudl.helpers.sum_na,
+                },
+                'wtavg_cols': {
+                    'fuel_cost_per_mwh': 'capacity_mw',  # 'wtavg_mwh',
+                    'heat_rate_mmbtu_mwh': 'capacity_mw',  # 'wtavg_mwh',
+                    'fuel_cost_per_mmbtu': 'capacity_mw',  # 'wtavg_mwh',
                 },
             }
         },
@@ -66,34 +74,12 @@ plant_parts = {
         'ag_cols': {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
-            'fuel_cost_per_mwh': 'wtavg_mw',
             'total_fuel_cost': pudl.helpers.sum_na,
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mmbtu': 'wtavg_mw',  # 'wtavg_mwh',
         },
-        'ag_tables': {
-            'generators_eia860': {
-                'ag_cols': {
-                    'capacity_mw': pudl.helpers.sum_na,
-                },
-            },
-
-            'generation_eia923': {
-                'ag_cols': {
-                    'net_generation_mwh': pudl.helpers.sum_na,
-                },
-            },
-            'fuel_cost': {
-                'ag_cols': {
-                    'fuel_cost_per_mwh': 'wtavg_mw',
-                },
-
-            },
-            'mcoe': {
-                'ag_cols': {
-                    'total_fuel_cost': pudl.helpers.sum_na,
-                },
-            },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
         },
     },
     'plant_technology': {
@@ -107,9 +93,11 @@ plant_parts = {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
             'total_fuel_cost': pudl.helpers.sum_na,
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mmbtu': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mwh': 'wtavg_mw',  # 'wtavg_mwh',
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
         },
         'ag_tables': {
             'generators_eia860': {
@@ -132,9 +120,11 @@ plant_parts = {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
             'total_fuel_cost': pudl.helpers.sum_na,
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mmbtu': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mwh': 'wtavg_mw',  # 'wtavg_mwh',
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
         },
     },
     'plant_prime_mover': {
@@ -145,9 +135,11 @@ plant_parts = {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': pudl.helpers.sum_na,
             'total_fuel_cost': pudl.helpers.sum_na,
-            'heat_rate_mmbtu_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mmbtu': 'wtavg_mw',  # 'wtavg_mwh',
-            'fuel_cost_per_mwh': 'wtavg_mw',  # 'wtavg_mwh',
-        }
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+        },
     }
 }

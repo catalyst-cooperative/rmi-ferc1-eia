@@ -3,7 +3,7 @@
 
 import logging
 
-import numpy as np
+# import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 
@@ -174,11 +174,11 @@ class CompileTables(object):
         own860 = own860.append(own860_fake_totals, sort=True)
         return own860
 
-    def aggregate_plant_part(self, plant_parts):
+    def aggregate_plant_part(self, plant_part):
         """Generate dataframe of aggregated plant part."""
-        cols_to_grab = plant_parts['id_cols'] + ['report_date']
+        cols_to_grab = plant_part['id_cols'] + ['report_date']
         plant_part_df = pd.DataFrame(columns=cols_to_grab)
-        for table, table_details in plant_parts['ag_tables'].items():
+        for table, table_details in plant_part['ag_tables'].items():
             # grab the table
             logger.info(f'   begining the aggregation for {table}')
 
@@ -187,7 +187,7 @@ class CompileTables(object):
                 table,
                 denorm_table=table_details['denorm_table'],
                 denorm_cols=table_details['denorm_cols'],
-                id_cols=plant_parts['id_cols'],
+                id_cols=plant_part['id_cols'],
             )
             plant_part_df = (
                 table.
@@ -195,12 +195,20 @@ class CompileTables(object):
                 # use the groupby object to aggregate on the ag_cols
                 # this runs whatever function we've defined in the
                 # ag_cols dictionary
-                agg(self.update_ag_funcs(table_details['ag_cols'], table)).
+                agg(table_details['ag_cols']).
                 # reset the index because the output of the agg
                 reset_index().
                 # merge the new table into the compiled df
                 merge(plant_part_df, how='outer', on=cols_to_grab)
             )
+            if table_details['wtavg_cols']:
+                for data_col, weight_col in table_details['wtavg_cols'].items():
+                    plant_part_df = weighted_average(
+                        table,
+                        data_col=data_col,
+                        weight_col=weight_col,
+                        by_col=cols_to_grab
+                    ).merge(plant_part_df, how='outer', on=cols_to_grab)
         return plant_part_df
 
     def slice_by_ownership(self, plant_gen_df):
@@ -218,39 +226,36 @@ class CompileTables(object):
         plant_gen_df[cols_to_cast] = (plant_gen_df[cols_to_cast].
                                       multiply(plant_gen_df['fraction_owned'],
                                                axis='index'))
+        logger.info(
+            f"droping {str(len(plant_gen_df[plant_gen_df['capacity_mw'].isnull()]))} records without capacity")
+        plant_gen_df = plant_gen_df.dropna(subset=['capacity_mw'])
         return plant_gen_df
 
-    def update_ag_funcs(self, ag_cols, df):
-        """
-        Insert new funcs into ag_cols using the preped df.
-
-        The functions used for aggregating are typically not dependent
-        on the dataframe being aggreated, but in the case of wieghted
-        averages we need to use a column from the prepped dataframe.
-        So, we can use a code in the original 'ag_cols' as a placeholder
-        until we have the prepped dataframes and then swap in the func.
-        """
-        for k, v in ag_cols.items():
-            if v == 'wtavg_mw':
-                ag_cols[k] = lambda x: np.average(
-                    x, weights=df.loc[x.index, "capacity_mw"])
-            if v == 'wtavg_mwh':
-                ag_cols[k] = lambda x: np.average(
-                    x, weights=df.loc[x.index, "net_generation_mwh"])
-        return ag_cols
-
-    def agg_cols(self, plant_part, prepped_df):
+    def agg_cols(self, plant_part, df_in):
         """Aggregate dataframe."""
-        cols_to_grab = plant_part['id_cols'] + ['report_date']
-        ag_cols = self.update_ag_funcs(plant_part['ag_cols'], prepped_df)
+        cols_to_grab = plant_part['id_cols'] + \
+            ['report_date', 'utility_id_eia']
+        cols_to_grab = [x for x in cols_to_grab if x in list(df_in.columns)]
+        ag_cols = plant_part['ag_cols']
         logger.info('   aggregate the parts')
-        return (prepped_df.groupby(cols_to_grab).
-                # use the groupby object to aggregate on the ag_cols
-                # this runs whatever function we've defined in the
-                # ag_cols dictionary
-                agg(ag_cols).
-                # reset the index because the output of the agg
-                reset_index())
+        logger.debug(f'     grouping by on {cols_to_grab}')
+        logger.debug(f'     agg-ing on by on {ag_cols}')
+        df_out = (df_in.groupby(cols_to_grab).
+                  # use the groupby object to aggregate on the ag_cols
+                  # this runs whatever function we've defined in the
+                  # ag_cols dictionary
+                  agg(ag_cols).
+                  # reset the index because the output of the agg
+                  reset_index())
+        if plant_part['wtavg_cols']:
+            for data_col, weight_col in plant_part['wtavg_cols'].items():
+                df_out = weighted_average(
+                    df_in,
+                    data_col=data_col,
+                    weight_col=weight_col,
+                    by_col=cols_to_grab
+                ).merge(df_out, how='outer', on=cols_to_grab)
+        return df_out
 
     def generate_master_unit_list(self, plant_parts):
         """
@@ -262,7 +267,7 @@ class CompileTables(object):
 
         Args:
             plant_parts (dict): a dictionary of information required to
-                aggregate
+                aggregate each plant part.
 
         """
         # 1) aggregate the data points by generator
@@ -304,3 +309,13 @@ freq_ag_cols = {
     'ownership_eia860': None,
     'generators_entity_eia': None,
 }
+
+
+def weighted_average(df, data_col, weight_col, by_col):
+    """Generate a weighted average."""
+    df['_data_times_weight'] = df[data_col] * df[weight_col]
+    df['_weight_where_notnull'] = df[weight_col] * pd.notnull(df[data_col])
+    g = df.groupby(by_col)
+    result = g['_data_times_weight'].sum() / g['_weight_where_notnull'].sum()
+    del df['_data_times_weight'], df['_weight_where_notnull']
+    return result.to_frame(name=data_col).reset_index()
