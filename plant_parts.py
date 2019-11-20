@@ -1,6 +1,5 @@
 """The definitions of the things we need to aggregate each plant part."""
 
-
 import pudl
 
 plant_parts = {
@@ -9,9 +8,9 @@ plant_parts = {
         'denorm_table': None,
         'denorm_cols': None,
         'ag_cols': {
-            'total_fuel_cost': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'capacity_mw': pudl.helpers.sum_na,
+            'total_fuel_cost': 'sum',
+            'net_generation_mwh': 'sum',
+            'capacity_mw': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',
@@ -26,8 +25,8 @@ plant_parts = {
         'denorm_cols': None,
         'ag_cols': {
             'capacity_mw': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'total_fuel_cost': pudl.helpers.sum_na,
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',
@@ -39,7 +38,7 @@ plant_parts = {
                 'denorm_table': None,
                 'denorm_cols': None,
                 'ag_cols': {
-                    'capacity_mw': pudl.helpers.sum_na,
+                    'capacity_mw': 'sum',
                 },
                 'wtavg_cols': None,
             },
@@ -47,7 +46,7 @@ plant_parts = {
                 'denorm_table': None,
                 'denorm_cols': None,
                 'ag_cols': {
-                    'net_generation_mwh': pudl.helpers.sum_na,
+                    'net_generation_mwh': 'sum',
                 },
                 'wtavg_cols': None,
             },
@@ -56,7 +55,7 @@ plant_parts = {
                 'denorm_table': None,
                 'denorm_cols': None,
                 'ag_cols': {
-                    'total_fuel_cost': pudl.helpers.sum_na,
+                    'total_fuel_cost': 'sum',
                 },
                 'wtavg_cols': {
                     'fuel_cost_per_mwh': 'capacity_mw',  # 'wtavg_mwh',
@@ -72,9 +71,9 @@ plant_parts = {
         'denorm_table': 'boiler_generator_assn_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'ag_cols': {
-            'capacity_mw': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'total_fuel_cost': pudl.helpers.sum_na,
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',
@@ -90,9 +89,9 @@ plant_parts = {
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'ag_cols': {
-            'capacity_mw': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'total_fuel_cost': pudl.helpers.sum_na,
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',
@@ -102,12 +101,12 @@ plant_parts = {
         'ag_tables': {
             'generators_eia860': {
                 'ag_cols': {
-                    'capacity_mw': pudl.helpers.sum_na,
+                    'capacity_mw': 'sum',
                 },
             },
             'generation_eia923': {
                 'ag_cols': {
-                    'net_generation_mwh': pudl.helpers.sum_na,
+                    'net_generation_mwh': 'sum',
                 },
             },
         },
@@ -117,9 +116,9 @@ plant_parts = {
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'ag_cols': {
-            'capacity_mw': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'total_fuel_cost': pudl.helpers.sum_na,
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',
@@ -132,9 +131,9 @@ plant_parts = {
         'denorm_table': 'generators_entity_eia',
         'denorm_cols': ['plant_id_eia', 'generator_id'],
         'ag_cols': {
-            'capacity_mw': pudl.helpers.sum_na,
-            'net_generation_mwh': pudl.helpers.sum_na,
-            'total_fuel_cost': pudl.helpers.sum_na,
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
         },
         'wtavg_cols': {
             'fuel_cost_per_mwh': 'capacity_mw',

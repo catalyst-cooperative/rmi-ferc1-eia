@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 class CompileTables(object):
     """Compile tables from sqlite db or pudl output object."""
 
-    def __init__(self, pudl_engine, freq=None, start_date=None, end_date=None):
+    def __init__(self, pudl_engine, freq=None, start_date=None, end_date=None,
+                 rolling=False):
         """
         Initialize a table compiler.
 
@@ -49,7 +50,7 @@ class CompileTables(object):
         self.pt = pudl.output.pudltabl.get_table_meta(self.pudl_engine)
 
         self.pudl_out = pudl.output.pudltabl.PudlTabl(
-            pudl_engine=pudl_engine, freq=self.freq)
+            pudl_engine=pudl_engine, freq=self.freq, rolling=rolling)
 
         self._dfs = {
             'generation_fuel_eia923': None,
@@ -90,12 +91,12 @@ class CompileTables(object):
                                      'report_date'], index_col=['id'])
 
                 # bga table has no sumable data cols and is reported annually
-                if self.freq is not None and freq_ag_cols[table] is not None:
-                    by = freq_ag_cols[table] + [pd.Grouper(freq=self.freq)]
+                # if self.freq is not None and freq_ag_cols[table] is not None:
+                #    by = freq_ag_cols[table] + [pd.Grouper(freq=self.freq)]
                     # Create a date index for temporal resampling:
-                    df = (df.set_index(pd.DatetimeIndex(df.report_date)).
-                          groupby(by=by).agg(pudl.helpers.sum_na).
-                          reset_index())
+                #    df = (df.set_index(pd.DatetimeIndex(df.report_date)).
+                #          groupby(by=by).agg(pudl.helpers.sum_na).
+                #          reset_index())
 
                 self._dfs[table] = df
 
