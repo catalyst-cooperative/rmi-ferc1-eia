@@ -91,14 +91,12 @@ class CompileTables(object):
                                      'report_date'], index_col=['id'])
 
                 # bga table has no sumable data cols and is reported annually
-                # if self.freq is not None and freq_ag_cols[table] is not None:
-                #    by = freq_ag_cols[table] + [pd.Grouper(freq=self.freq)]
-                    # Create a date index for temporal resampling:
-                #    df = (df.set_index(pd.DatetimeIndex(df.report_date)).
-                #          groupby(by=by).agg(pudl.helpers.sum_na).
-                #          reset_index())
+                if self.freq is not None and freq_ag_cols[table] is not None:
 
-                self._dfs[table] = df
+                    df = self.agg_cols(id_cols=freq_ag_cols[table]['id_cols'],
+                                       ag_cols=freq_ag_cols[table]['ag_cols'],
+                                       wtavg_cols=None,
+                                       df_in=df)
 
             # if is it not a database table, it is an output function
             # elif hasattr(pudl_out_eia, table):
@@ -106,7 +104,10 @@ class CompileTables(object):
                 # getattr turns the string of the table into an attribute
                 # of the object, so this runs the output function
                 print(f'   grabbing {table} from the output object')
-                self._dfs[table] = getattr(self.pudl_out, table)()
+                df = getattr(self.pudl_out, table)()
+            self._dfs[table] = pudl.helpers.convert_cols_dtypes(df,
+                                                                'eia',
+                                                                name=table)
         return self._dfs[table]
 
     def grab_denormalize_table(self,
@@ -179,50 +180,51 @@ class CompileTables(object):
         """Generate dataframe of aggregated plant part."""
         cols_to_grab = plant_part['id_cols'] + ['report_date']
         plant_part_df = pd.DataFrame(columns=cols_to_grab)
-        for table, table_details in plant_part['ag_tables'].items():
+        for table_name, table_details in plant_part['ag_tables'].items():
             # grab the table
-            logger.info(f'   begining the aggregation for {table}')
+            logger.info(f'beginning the aggregation for {table_name}')
 
             # grab the table
             table = self.grab_denormalize_table(
-                table,
+                table_name,
                 denorm_table=table_details['denorm_table'],
                 denorm_cols=table_details['denorm_cols'],
                 id_cols=plant_part['id_cols'],
             )
-            plant_part_df = (
-                table.
-                groupby(cols_to_grab).
-                # use the groupby object to aggregate on the ag_cols
-                # this runs whatever function we've defined in the
-                # ag_cols dictionary
-                agg(table_details['ag_cols']).
-                # reset the index because the output of the agg
-                reset_index().
-                # merge the new table into the compiled df
-                merge(plant_part_df, how='outer', on=cols_to_grab)
-            )
-            if table_details['wtavg_cols']:
-                for data_col, weight_col in table_details['wtavg_cols'].items():
-                    plant_part_df = weighted_average(
-                        table,
-                        data_col=data_col,
-                        weight_col=weight_col,
-                        by_col=cols_to_grab
-                    ).merge(plant_part_df, how='outer', on=cols_to_grab)
+
+            plant_part_df = self.agg_cols(
+                id_cols=plant_part['id_cols'],
+                ag_cols=table_details['ag_cols'],
+                wtavg_cols=table_details['wtavg_cols'],
+                df_in=table).merge(plant_part_df,
+                                   how='outer')
         return plant_part_df
 
     def slice_by_ownership(self, plant_gen_df):
         """Generate proportional data by ownership %s."""
         own860 = self.grab_ownership()
-        plant_gen_df = plant_gen_df.merge(own860[['plant_id_eia',
-                                                  'generator_id',
-                                                  'report_date',
-                                                  'fraction_owned',
-                                                  'utility_id_eia']],
-                                          on=['plant_id_eia',
-                                              'generator_id',
-                                              'report_date'])
+        plant_gen_df = plant_gen_df.merge(
+            own860[['plant_id_eia', 'generator_id', 'report_date',
+                    'fraction_owned', 'utility_id_eia']],
+            how='outer',
+            on=['plant_id_eia', 'generator_id',
+                'report_date', 'utility_id_eia'],
+            indicator=True
+        )
+        # if there are records that don't show up in the ownership table (and
+        # have a 'left_only' merge indicator and NaN for 'fraction_owned'),
+        # we're going to assume the ownership % is 1 for the reporting utility
+        if len(plant_gen_df[(plant_gen_df['_merge'] == 'right_only') &
+                            (plant_gen_df['fraction_owned'].isnull())]) != 0:
+            # if there are records with null 'fraction_owned' then we've done
+            # something wrong.
+            raise AssertionError(
+                'merge error: ownership and gens produced with null records')
+        # assign 100% ownership for records not in the ownership table
+        plant_gen_df['fraction_owned'] = plant_gen_df['fraction_owned'].fillna(
+            value=1)
+        plant_gen_df = plant_gen_df.drop(columns=['_merge'])
+
         cols_to_cast = ['net_generation_mwh', 'capacity_mw', 'total_fuel_cost']
         plant_gen_df[cols_to_cast] = (plant_gen_df[cols_to_cast].
                                       multiply(plant_gen_df['fraction_owned'],
@@ -232,24 +234,31 @@ class CompileTables(object):
         plant_gen_df = plant_gen_df.dropna(subset=['capacity_mw'])
         return plant_gen_df
 
-    def agg_cols(self, plant_part, df_in):
+    def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
         """Aggregate dataframe."""
-        cols_to_grab = plant_part['id_cols'] + \
-            ['report_date', 'utility_id_eia']
-        cols_to_grab = [x for x in cols_to_grab if x in list(df_in.columns)]
-        ag_cols = plant_part['ag_cols']
+        cols_to_grab = id_cols + ['utility_id_eia', 'fraction_owned']
+        cols_to_grab = list(set(
+            [x for x in cols_to_grab if x in list(df_in.columns)]))
+        if 'report_date' in list(df_in.columns):
+            if len(df_in[df_in['report_date'].dt.month > 2]) > 0:
+                cols_to_grab = cols_to_grab + [pd.Grouper(freq=self.freq)]
+                df_in = df_in.set_index(pd.DatetimeIndex(df_in.report_date))
+            else:
+                cols_to_grab = cols_to_grab + ['report_date']
         logger.info('   aggregate the parts')
-        logger.debug(f'     grouping by on {cols_to_grab}')
-        logger.debug(f'     agg-ing on by on {ag_cols}')
-        df_out = (df_in.groupby(cols_to_grab).
+        logger.info(f'     grouping by on {cols_to_grab}')
+        logger.info(f'     agg-ing on by on {ag_cols}')
+        logger.debug(f'     cols in df are {df_in.columns}')
+        df_in = df_in.astype({'report_date': 'datetime64[ns]'})
+        df_out = (df_in.groupby(by=cols_to_grab).
                   # use the groupby object to aggregate on the ag_cols
                   # this runs whatever function we've defined in the
                   # ag_cols dictionary
                   agg(ag_cols).
                   # reset the index because the output of the agg
                   reset_index())
-        if plant_part['wtavg_cols']:
-            for data_col, weight_col in plant_part['wtavg_cols'].items():
+        if wtavg_cols:
+            for data_col, weight_col in wtavg_cols.items():
                 df_out = weighted_average(
                     df_in,
                     data_col=data_col,
@@ -272,31 +281,44 @@ class CompileTables(object):
 
         """
         # 1) aggregate the data points by generator
-        plant_gen_df = self.aggregate_plant_part(plant_parts['plant_gen'])
+        plant_gen_df = (self.aggregate_plant_part(plant_parts['plant_gen']).
+                        astype({'utility_id_eia': 'Int32'}))
         # 2) generating proportional data by ownership %s
-        plant_gen_df = self.slice_by_ownership(plant_gen_df)
+        plant_gen_df = (self.slice_by_ownership(plant_gen_df).
+                        astype({'utility_id_eia': 'Int32'}))
         # 3) aggreate everything by each plant part
         compiled_dfs = {}
         for part_name, plant_part in plant_parts.items():
             logger.info(part_name)
+            id_cols = plant_part['id_cols']
+            ag_cols = plant_part['ag_cols']
+            wtavg_cols = plant_part['wtavg_cols']
+
             if plant_part['denorm_table']:
                 logger.info('   denormiiee')
                 compiled_dfs[part_name] = self.agg_cols(
-                    plant_part,
-                    self.denoramlize_table(plant_gen_df,
-                                           plant_part['id_cols'],
-                                           plant_part['denorm_table'],
-                                           plant_part['denorm_cols'],
-                                           ))
+                    id_cols=id_cols,
+                    ag_cols=ag_cols,
+                    wtavg_cols=wtavg_cols,
+                    df_in=self.denoramlize_table(plant_gen_df,
+                                                 id_cols,
+                                                 plant_part['denorm_table'],
+                                                 plant_part['denorm_cols'],
+                                                 ))
             else:
                 compiled_dfs[part_name] = self.agg_cols(
-                    plant_part,
-                    plant_gen_df)
+                    id_cols=id_cols,
+                    ag_cols=ag_cols,
+                    wtavg_cols=wtavg_cols,
+                    df_in=plant_gen_df)
         return compiled_dfs
 
 
 freq_ag_cols = {
-    'generation_eia923': ['plant_id_eia', 'generator_id'],
+    'generation_eia923': {
+        'id_cols': ['plant_id_eia', 'generator_id'],
+        'ag_cols': {'net_generation_mwh': 'sum', }
+    },
     'generation_fuel_eia923': ['plant_id_eia', 'nuclear_unit_id',
                                'fuel_type', 'fuel_type_code_pudl',
                                'fuel_type_code_aer', 'prime_mover_code'],
