@@ -75,7 +75,7 @@ class CompileTables(object):
             # if pt[table] is not None:
             try:
                 tbl = self.pt[table]
-                print(f'   grabbing {table} from the sqlite db')
+                print(f'grabbing {table} from the sqlite db')
                 select = sa.sql.select([tbl, ])
 
                 if table == 'generators_entity_eia':
@@ -92,7 +92,6 @@ class CompileTables(object):
 
                 # bga table has no sumable data cols and is reported annually
                 if self.freq is not None and freq_ag_cols[table] is not None:
-
                     df = self.agg_cols(id_cols=freq_ag_cols[table]['id_cols'],
                                        ag_cols=freq_ag_cols[table]['ag_cols'],
                                        wtavg_cols=None,
@@ -103,7 +102,7 @@ class CompileTables(object):
             except KeyError:
                 # getattr turns the string of the table into an attribute
                 # of the object, so this runs the output function
-                print(f'   grabbing {table} from the output object')
+                print(f'grabbing {table} from the output object')
                 df = getattr(self.pudl_out, table)()
             self._dfs[table] = pudl.helpers.convert_cols_dtypes(df,
                                                                 'eia',
@@ -137,7 +136,7 @@ class CompileTables(object):
         """
         table_df = self.grab_the_table(table)
         if denorm_table:
-            logger.info(f'   denormalizing {table}')
+            logger.info(f'denormalizing {table}')
             table_df = self.denoramlize_table(
                 table_df, denorm_table, denorm_cols)
         return table_df
@@ -161,19 +160,20 @@ class CompileTables(object):
     def grab_ownership(self):
         """Grab the ownership table and create total rows."""
         # grab the ownership table and do some munging
-        own860 = self.grab_the_table('ownership_eia860')[['plant_id_eia',
-                                                          'generator_id',
-                                                          'report_date',
-                                                          'fraction_owned',
-                                                          'utility_id_eia']]
+        own860 = (self.grab_the_table('ownership_eia860')
+                  [['plant_id_eia', 'generator_id', 'report_date',
+                    'utility_id_eia', 'fraction_owned',
+                    'owner_utility_id_eia']])
         # make new records for generators to replicate the total generator
         own860_fake_totals = own860[own860['fraction_owned'] != 1][[
-            'plant_id_eia', 'generator_id', 'report_date']].drop_duplicates()
+            'plant_id_eia', 'generator_id', 'report_date', 'utility_id_eia',
+            'owner_utility_id_eia']].drop_duplicates()
         # asign 1 to all of the fraction_owned column
         # we'll be able to tell later if it is a total by the fraction owned
         own860_fake_totals['fraction_owned'] = 1
         # squish that back into the ownership table
         own860 = own860.append(own860_fake_totals, sort=True)
+
         return own860
 
     def aggregate_plant_part(self, plant_part):
@@ -204,8 +204,7 @@ class CompileTables(object):
         """Generate proportional data by ownership %s."""
         own860 = self.grab_ownership()
         plant_gen_df = plant_gen_df.merge(
-            own860[['plant_id_eia', 'generator_id', 'report_date',
-                    'fraction_owned', 'utility_id_eia']],
+            own860,
             how='outer',
             on=['plant_id_eia', 'generator_id',
                 'report_date', 'utility_id_eia'],
@@ -220,18 +219,31 @@ class CompileTables(object):
             # something wrong.
             raise AssertionError(
                 'merge error: ownership and gens produced with null records')
+
         # assign 100% ownership for records not in the ownership table
         plant_gen_df['fraction_owned'] = plant_gen_df['fraction_owned'].fillna(
             value=1)
-        plant_gen_df = plant_gen_df.drop(columns=['_merge'])
+        # assign the operator id as the owner if null
+        plant_gen_df['owner_utility_id_eia'] = \
+            plant_gen_df['owner_utility_id_eia'].fillna(
+            plant_gen_df['utility_id_eia'])
+
+        plant_gen_df = (
+            plant_gen_df.drop(columns=['_merge', 'utility_id_eia']).
+            rename(columns={'owner_utility_id_eia': 'utility_id_eia'}).
+            drop_duplicates())
 
         cols_to_cast = ['net_generation_mwh', 'capacity_mw', 'total_fuel_cost']
         plant_gen_df[cols_to_cast] = (plant_gen_df[cols_to_cast].
                                       multiply(plant_gen_df['fraction_owned'],
                                                axis='index'))
-        logger.info(
-            f"droping {str(len(plant_gen_df[plant_gen_df['capacity_mw'].isnull()]))} records without capacity")
-        plant_gen_df = plant_gen_df.dropna(subset=['capacity_mw'])
+        plant_gen_df.drop_duplicates()
+        if (len(plant_gen_df[plant_gen_df['fraction_owned'] == 1].
+                drop_duplicates()) !=
+            len(plant_gen_df.drop_duplicates(
+                subset=['plant_id_eia', 'generator_id',
+                        'report_date', 'utility_id_eia']))):
+            raise AssertionError('something')
         return plant_gen_df
 
     def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
@@ -245,9 +257,9 @@ class CompileTables(object):
                 df_in = df_in.set_index(pd.DatetimeIndex(df_in.report_date))
             else:
                 cols_to_grab = cols_to_grab + ['report_date']
-        logger.info('   aggregate the parts')
-        logger.info(f'     grouping by on {cols_to_grab}')
-        logger.info(f'     agg-ing on by on {ag_cols}')
+        logger.info('aggregate the parts')
+        logger.debug(f'     grouping by on {cols_to_grab}')
+        logger.debug(f'     agg-ing on by on {ag_cols}')
         logger.debug(f'     cols in df are {df_in.columns}')
         df_in = df_in.astype({'report_date': 'datetime64[ns]'})
         df_out = (df_in.groupby(by=cols_to_grab).
@@ -295,7 +307,7 @@ class CompileTables(object):
             wtavg_cols = plant_part['wtavg_cols']
 
             if plant_part['denorm_table']:
-                logger.info('   denormiiee')
+                logger.info(f'denormalize {part_name}')
                 compiled_dfs[part_name] = self.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
@@ -317,16 +329,19 @@ class CompileTables(object):
 freq_ag_cols = {
     'generation_eia923': {
         'id_cols': ['plant_id_eia', 'generator_id'],
-        'ag_cols': {'net_generation_mwh': 'sum', }
+        'ag_cols': {'net_generation_mwh': 'sum', },
+        'wtavg_cols': None
     },
     'generation_fuel_eia923': ['plant_id_eia', 'nuclear_unit_id',
                                'fuel_type', 'fuel_type_code_pudl',
                                'fuel_type_code_aer', 'prime_mover_code'],
-    'fuel_receipts_costs_eia923': ['plant_id_eia', 'contract_type_code',
-                                   'contract_expiration_date',
-                                   'energy_source_code', 'fuel_type_code_pudl',
-                                   'fuel_group_code', 'fuel_group_code_simple',
-                                   'supplier_name'],
+    'fuel_receipts_costs_eia923': {
+        'id_cols': ['plant_id_eia', 'energy_source_code',
+                    'fuel_type_code_pudl', 'fuel_group_code',
+                    'fuel_group_code_simple', 'contract_type_code'],
+        'ag_cols': None,
+        'wtavg_cols': ['fuel_cost_per_mmbtu']
+    },
     'generators_eia860': None,
     'boiler_generator_assn_eia860': None,
     'ownership_eia860': None,
