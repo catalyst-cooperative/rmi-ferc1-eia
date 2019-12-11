@@ -174,6 +174,19 @@ class CompileTables(object):
         # squish that back into the ownership table
         own860 = own860.append(own860_fake_totals, sort=True)
 
+        # generate records in which we assume the owner is the operator
+        # fake_operator_own860 = own860[['plant_id_eia',
+        #                               'report_date',
+        #                               'utility_id_eia',
+        #                               'generator_id']].drop_duplicates()
+        # fake_operator_own860['fraction_owned'] = 1.0
+        # fake_operator_own860['owner_utility_id_eia'] = \
+        #    fake_operator_own860['utility_id_eia']
+        # squish that back into the ownership table
+        # and drop dupes bc we may have added some dupes in this round
+        # own860 = own860.append(fake_operator_own860,
+        #                       sort=True).drop_duplicates()
+
         return own860
 
     def aggregate_plant_part(self, plant_part):
@@ -294,10 +307,10 @@ class CompileTables(object):
         """
         # 1) aggregate the data points by generator
         plant_gen_df = (self.aggregate_plant_part(plant_parts['plant_gen']).
-                        astype({'utility_id_eia': 'Int32'}))
+                        astype({'utility_id_eia': 'Int64'}))
         # 2) generating proportional data by ownership %s
         plant_gen_df = (self.slice_by_ownership(plant_gen_df).
-                        astype({'utility_id_eia': 'Int32'}))
+                        astype({'utility_id_eia': 'Int64'}))
         # 3) aggreate everything by each plant part
         compiled_dfs = {}
         for part_name, plant_part in plant_parts.items():
