@@ -3,7 +3,7 @@
 
 import logging
 
-# import numpy as np
+import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 
@@ -60,6 +60,8 @@ class CompileTables(object):
             'generation_eia923': None,
             'ownership_eia860': None,
             'generators_entity_eia': None,
+            'utilities_eia': None,
+            'plants_eia': None,
 
             'fuel_cost': None,
             'mcoe': None,
@@ -75,10 +77,11 @@ class CompileTables(object):
             # if pt[table] is not None:
             try:
                 tbl = self.pt[table]
-                print(f'grabbing {table} from the sqlite db')
+                logger.info(f'grabbing {table} from the sqlite db')
                 select = sa.sql.select([tbl, ])
-
-                if table == 'generators_entity_eia':
+                # for the non-date tables...
+                if 'report_date' not in tbl.columns:
+                    logger.debug('grabbing a non-date table')
                     df = pd.read_sql(select, self.pudl_engine)
                 else:
                     if self.start_date is not None:
@@ -102,7 +105,7 @@ class CompileTables(object):
             except KeyError:
                 # getattr turns the string of the table into an attribute
                 # of the object, so this runs the output function
-                print(f'grabbing {table} from the output object')
+                logger.info(f'grabbing {table} from the output object')
                 df = getattr(self.pudl_out, table)()
             self._dfs[table] = pudl.helpers.convert_cols_dtypes(df,
                                                                 'eia',
@@ -292,6 +295,120 @@ class CompileTables(object):
                 ).merge(df_out, how='outer', on=cols_to_grab)
         return df_out
 
+    def add_additonal_cols(self, plant_parts_df):
+        """
+        Add additonal data and id columns.
+
+        capacity_factor +
+        utility_id_pudl +
+        plant_id_pudl +
+
+        """
+        plant_parts_df = (
+            calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq).
+            merge(self.grab_the_table('utilities_eia'), how='left').
+            merge(self.grab_the_table('plants_eia'), how='left')
+        )
+        return plant_parts_df
+
+    def add_install_year(self, part_df, id_cols, install_table):
+        """Add the install year from the entities table to your plant part."""
+        logger.debug(f'pre count of part DataFrame: {len(part_df)}')
+        gen_ent = self.grab_the_table('generators_entity_eia')
+        install = (gen_ent.
+                   assign(installation_year=gen_ent['operating_date'].dt.year).
+                   astype({'installation_year': 'Int64', }).
+                   # we want to sort to have the most recent on top
+                   sort_values('installation_year', ascending=False))
+        if not install_table:
+            # then the install table has everything we need
+            part_install = (install[id_cols + ['installation_year']].
+                            drop_duplicates(subset=id_cols, keep='first'))
+        else:
+            part_install = (install[['plant_id_eia', 'generator_id',
+                                     'installation_year']].
+                            merge(self.grab_the_table(install_table))
+                            [id_cols + ['installation_year']].
+                            drop_duplicates(subset=id_cols, keep='first'))
+        part_df = part_df.merge(part_install, how='left')
+        logger.debug(f'count of install years for part: {len(part_install)}')
+        logger.debug(f'post count of part DataFrame: {len(part_df)}')
+        return part_df
+
+    def grab_consistent_qualifiers(self,
+                                   part_df,
+                                   record_name,
+                                   id_cols,
+                                   denorm_table,
+                                   denorm_cols
+                                   ):
+        """
+        Grab fully consistent qualifier records.
+
+        For an individual compiled dataframe for each of the plant parts, we
+        need to
+
+        When qualitative data is consistent for every record in a plant part,
+        we assign these catagoricals. If the records are not consistent, then
+        nothing is added.
+
+        Args:
+            part_df (pandas.DataFrame)
+            record_name (string) : name of qualitative record
+            id_cols (list) : list of identifying columns.
+            denorm_table (string) : name of table needed to denormalize
+            denorm_cols (list)
+
+        """
+        if record_name in part_df.columns:
+            logger.debug(f'{record_name} already here.. ')
+            return part_df
+
+        record_df = self.grab_the_table(qual_record_tables[record_name])
+
+        if denorm_table and denorm_table != qual_record_tables[record_name]:
+            if 'report_date' not in record_df.columns:
+                record_df = (
+                    record_df.merge(self.grab_the_table('generators_eia860')
+                                    [list(set(denorm_cols + ['report_date']))],
+                                    how='left'))
+
+            record_df = self.denoramlize_table(
+                record_df,
+                id_cols,
+                denorm_table,
+                denorm_cols,
+            )
+
+        if 'report_date' in record_df.columns:
+            base_cols = id_cols + ['report_date']
+        else:
+            base_cols = id_cols
+        entity_count_df = (pudl.helpers.count_records(record_df,
+                                                      base_cols,
+                                                      'entity_occurences').
+                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
+        record_count_df = (pudl.helpers.count_records(record_df,
+                                                      base_cols +
+                                                      [record_name],
+                                                      'record_occurences').
+                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
+
+        something = (
+            record_df[base_cols + [record_name]].
+            merge(entity_count_df, how='left', on=base_cols).
+            merge(record_count_df, how='left', on=base_cols + [record_name])
+        )
+        # find all of the matching records..
+        consistent_records = (
+            something[something['entity_occurences'] ==
+                      something['record_occurences']].
+            drop(columns=['entity_occurences', 'record_occurences']).
+            drop_duplicates())
+
+        logger.debug(f'merging in consistent {record_name}')
+        return part_df.merge(consistent_records, how='left')
+
     def generate_master_unit_list(self, plant_parts):
         """
         Aggreate and slice data points by each plant part.
@@ -313,6 +430,7 @@ class CompileTables(object):
                         astype({'utility_id_eia': 'Int64'}))
         # 3) aggreate everything by each plant part
         compiled_dfs = {}
+        plant_parts_df = pd.DataFrame()
         for part_name, plant_part in plant_parts.items():
             logger.info(part_name)
             id_cols = plant_part['id_cols']
@@ -321,7 +439,7 @@ class CompileTables(object):
 
             if plant_part['denorm_table']:
                 logger.info(f'denormalize {part_name}')
-                compiled_dfs[part_name] = self.agg_cols(
+                thing = self.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
                     wtavg_cols=wtavg_cols,
@@ -331,12 +449,40 @@ class CompileTables(object):
                                                  plant_part['denorm_cols'],
                                                  ))
             else:
-                compiled_dfs[part_name] = self.agg_cols(
+                thing = self.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
                     wtavg_cols=wtavg_cols,
                     df_in=plant_gen_df)
-        return compiled_dfs
+            thing = (self.add_install_year(thing, id_cols,
+                                           plant_part['install_table']).
+                     assign(plant_part=part_name))
+            for qual_record in qual_record_tables:
+                logger.debug(f'grab consistent {qual_record} for {part_name}')
+                thing = self.grab_consistent_qualifiers(
+                    thing,
+                    qual_record,
+                    id_cols,
+                    plant_part['denorm_table'],
+                    plant_part['denorm_cols'])
+            compiled_dfs[part_name] = thing
+            plant_parts_df = plant_parts_df.append(thing, sort=True)
+
+        plant_parts_df = (self.add_additonal_cols(plant_parts_df).
+                          pipe(pudl.helpers.organize_cols,
+                               ['plant_id_eia',
+                                'report_date',
+                                'plant_part',
+                                'generator_id',
+                                'unit_id_pudl',
+                                'prime_mover_code',
+                                'energy_source_code_1',
+                                'technology_description',
+                                'utility_id_eia',
+                                'fraction_owned'
+                                ]))
+
+        return compiled_dfs, plant_parts_df
 
 
 freq_ag_cols = {
@@ -345,9 +491,13 @@ freq_ag_cols = {
         'ag_cols': {'net_generation_mwh': 'sum', },
         'wtavg_cols': None
     },
-    'generation_fuel_eia923': ['plant_id_eia', 'nuclear_unit_id',
-                               'fuel_type', 'fuel_type_code_pudl',
-                               'fuel_type_code_aer', 'prime_mover_code'],
+    'generation_fuel_eia923': {
+        'id_cols': ['plant_id_eia', 'nuclear_unit_id',
+                    'fuel_type', 'fuel_type_code_pudl',
+                    'fuel_type_code_aer', 'prime_mover_code'],
+        'ag_cols': {'net_generation_mwh': 'sum', },
+        'wtavg_cols': ['fuel_consumed_mmbtu']
+    },
     'fuel_receipts_costs_eia923': {
         'id_cols': ['plant_id_eia', 'energy_source_code',
                     'fuel_type_code_pudl', 'fuel_group_code',
@@ -359,7 +509,46 @@ freq_ag_cols = {
     'boiler_generator_assn_eia860': None,
     'ownership_eia860': None,
     'generators_entity_eia': None,
+    'utilities_eia': None,
+    'plants_eia': None,
 }
+
+qual_record_tables = {
+    'energy_source_code_1': 'generators_eia860',
+    'prime_mover_code': 'generators_entity_eia',
+    'fuel_type_code_pudl': 'generators_eia860',
+}
+
+
+def calc_capacity_factor(df, min_cap_fact, max_cap_fact, freq):
+    """
+    Calculate capacity factor.
+
+    TODO: Move this into pudl.helpers and incorporate into mcoe.capacity_factor
+    """
+    # get a unique set of dates to generate the number of hours
+    dates = df['report_date'].drop_duplicates()
+
+    # merge in the hours for the calculation
+    df = df.merge(pd.DataFrame(
+        data={'report_date': dates,
+              'hours': dates.apply(
+                  lambda d: (
+                      pd.date_range(d, periods=2, freq=freq)[1] -
+                      pd.date_range(d, periods=2, freq=freq)[0]) /
+                  pd.Timedelta(hours=1))}), on=['report_date'])
+
+    # actually calculate capacity factor wooo!
+    df['capacity_factor'] = df['net_generation_mwh'] / \
+        (df['capacity_mw'] * df['hours'])
+
+    # Replace unrealistic capacity factors with NaN
+    df.loc[df['capacity_factor'] < min_cap_fact, 'capacity_factor'] = np.nan
+    df.loc[df['capacity_factor'] >= max_cap_fact, 'capacity_factor'] = np.nan
+
+    # drop the hours column, cause we don't need it anymore
+    df.drop(['hours'], axis=1, inplace=True)
+    return df
 
 
 def weighted_average(df, data_col, weight_col, by_col):
