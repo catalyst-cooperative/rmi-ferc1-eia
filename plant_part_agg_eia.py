@@ -2,6 +2,7 @@
 
 
 import logging
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -62,6 +63,7 @@ class CompileTables(object):
             'generators_entity_eia': None,
             'utilities_eia': None,
             'plants_eia': None,
+            'energy_source_eia923': None,
 
             'fuel_cost': None,
             'mcoe': None,
@@ -93,7 +95,7 @@ class CompileTables(object):
                     df = pd.read_sql(select, self.pudl_engine, parse_dates=[
                                      'report_date'], index_col=['id'])
 
-                # bga table has no sumable data cols and is reported annually
+                # if we have a freq and a table is reported annually..aggregate
                 if self.freq is not None and freq_ag_cols[table] is not None:
                     df = self.agg_cols(id_cols=freq_ag_cols[table]['id_cols'],
                                        ag_cols=freq_ag_cols[table]['ag_cols'],
@@ -176,20 +178,6 @@ class CompileTables(object):
         own860_fake_totals['fraction_owned'] = 1
         # squish that back into the ownership table
         own860 = own860.append(own860_fake_totals, sort=True)
-
-        # generate records in which we assume the owner is the operator
-        # fake_operator_own860 = own860[['plant_id_eia',
-        #                               'report_date',
-        #                               'utility_id_eia',
-        #                               'generator_id']].drop_duplicates()
-        # fake_operator_own860['fraction_owned'] = 1.0
-        # fake_operator_own860['owner_utility_id_eia'] = \
-        #    fake_operator_own860['utility_id_eia']
-        # squish that back into the ownership table
-        # and drop dupes bc we may have added some dupes in this round
-        # own860 = own860.append(fake_operator_own860,
-        #                       sort=True).drop_duplicates()
-
         return own860
 
     def aggregate_plant_part(self, plant_part):
@@ -247,13 +235,14 @@ class CompileTables(object):
         plant_gen_df = (
             plant_gen_df.drop(columns=['_merge', 'utility_id_eia']).
             rename(columns={'owner_utility_id_eia': 'utility_id_eia'}).
-            drop_duplicates())
+            drop_duplicates().
+            assign(ownership=plant_gen_df['fraction_owned'].
+                   apply(lambda x: 'total' if x == 1 else 'owned')))
 
         cols_to_cast = ['net_generation_mwh', 'capacity_mw', 'total_fuel_cost']
         plant_gen_df[cols_to_cast] = (plant_gen_df[cols_to_cast].
                                       multiply(plant_gen_df['fraction_owned'],
                                                axis='index'))
-        plant_gen_df.drop_duplicates()
         if (len(plant_gen_df[plant_gen_df['fraction_owned'] == 1].
                 drop_duplicates()) !=
             len(plant_gen_df.drop_duplicates(
@@ -264,7 +253,8 @@ class CompileTables(object):
 
     def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
         """Aggregate dataframe."""
-        cols_to_grab = id_cols + ['utility_id_eia', 'fraction_owned']
+        cols_to_grab = id_cols + \
+            ['utility_id_eia', 'fraction_owned', 'ownership']
         cols_to_grab = list(set(
             [x for x in cols_to_grab if x in list(df_in.columns)]))
         if 'report_date' in list(df_in.columns):
@@ -310,6 +300,22 @@ class CompileTables(object):
             merge(self.grab_the_table('plants_eia'), how='left')
         )
         return plant_parts_df
+
+    def add_record_id(self, part_df, id_cols):
+        """Add a record id to a compiled part df."""
+        ids = deepcopy(id_cols)
+        # we want the plant id first... mostly just bc it'll be easier to read
+        part_df = part_df.assign(record_id=part_df.plant_id_eia.map(str))
+        ids.remove('plant_id_eia')
+        for col in ids:
+            part_df = part_df.assign(
+                record_id=part_df.record_id + "_" + part_df[col].astype(str))
+        part_df = part_df.assign(record_id_eia=part_df.record_id + "_" +
+                                 part_df.report_date.dt.year.astype(str) + "_" +
+                                 part_df.plant_part + "_" +
+                                 part_df.ownership + "_" +
+                                 part_df.utility_id_eia.astype('Int64').astype(str))
+        return part_df
 
     def add_install_year(self, part_df, id_cols, install_table):
         """Add the install year from the entities table to your plant part."""
@@ -456,7 +462,9 @@ class CompileTables(object):
                     df_in=plant_gen_df)
             thing = (self.add_install_year(thing, id_cols,
                                            plant_part['install_table']).
-                     assign(plant_part=part_name))
+                     assign(plant_part=part_name).
+                     pipe(self.add_record_id, id_cols))
+            # thing = self.add_record_id(thing, id_cols)
             for qual_record in qual_record_tables:
                 logger.debug(f'grab consistent {qual_record} for {part_name}')
                 thing = self.grab_consistent_qualifiers(
@@ -511,6 +519,7 @@ freq_ag_cols = {
     'generators_entity_eia': None,
     'utilities_eia': None,
     'plants_eia': None,
+    'energy_source_eia923': None,
 }
 
 qual_record_tables = {
