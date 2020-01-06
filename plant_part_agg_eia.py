@@ -114,6 +114,49 @@ class CompileTables(object):
                                                                 name=table)
         return self._dfs[table]
 
+    def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
+        """Aggregate dataframe."""
+        cols_to_grab = id_cols + \
+            ['utility_id_eia', 'fraction_owned', 'ownership']
+        cols_to_grab = list(set(
+            [x for x in cols_to_grab if x in list(df_in.columns)]))
+        if 'report_date' in list(df_in.columns):
+            if len(df_in[df_in['report_date'].dt.month > 2]) > 0:
+                cols_to_grab = cols_to_grab + [pd.Grouper(freq=self.freq)]
+                df_in = df_in.set_index(pd.DatetimeIndex(df_in.report_date))
+            else:
+                cols_to_grab = cols_to_grab + ['report_date']
+        logger.info('aggregate the parts')
+        logger.debug(f'     grouping by on {cols_to_grab}')
+        logger.debug(f'     agg-ing on by on {ag_cols}')
+        logger.debug(f'     cols in df are {df_in.columns}')
+        df_in = df_in.astype({'report_date': 'datetime64[ns]'})
+        df_out = (df_in.groupby(by=cols_to_grab).
+                  # use the groupby object to aggregate on the ag_cols
+                  # this runs whatever function we've defined in the
+                  # ag_cols dictionary
+                  agg(ag_cols).
+                  # reset the index because the output of the agg
+                  reset_index())
+        if wtavg_cols:
+            for data_col, weight_col in wtavg_cols.items():
+                df_out = weighted_average(
+                    df_in,
+                    data_col=data_col,
+                    weight_col=weight_col,
+                    by_col=cols_to_grab
+                ).merge(df_out, how='outer', on=cols_to_grab)
+        return df_out
+
+
+class CompilePlantParts(object):
+    """Compile plant parts."""
+
+    def __init__(self, table_compiler):
+        """idk."""
+        self.table_compiler = table_compiler
+        self.freq = table_compiler.freq
+
     def grab_denormalize_table(self,
                                table,
                                denorm_table=None,
@@ -139,7 +182,7 @@ class CompileTables(object):
             pandas.Dataframe
 
         """
-        table_df = self.grab_the_table(table)
+        table_df = self.table_compiler.grab_the_table(table)
         if denorm_table:
             logger.info(f'denormalizing {table}')
             table_df = self.denoramlize_table(
@@ -154,18 +197,18 @@ class CompileTables(object):
                           indicator=False):
         """Merge data table with additional table to grab additional colums."""
         # denormalize the plant granularity
-        table_df = table_df.merge(self.grab_the_table(denorm_table)
-                                  [list(set(id_cols + denorm_cols))]
-                                  .drop_duplicates(),
-                                  on=denorm_cols,
-                                  how='outer',
-                                  indicator=indicator)
+        table_df = table_df.merge(
+            self.table_compiler.grab_the_table(denorm_table)
+            [list(set(id_cols + denorm_cols))].drop_duplicates(),
+            on=denorm_cols,
+            how='outer',
+            indicator=indicator)
         return(table_df)
 
     def grab_ownership(self):
         """Grab the ownership table and create total rows."""
         # grab the ownership table and do some munging
-        own860 = (self.grab_the_table('ownership_eia860')
+        own860 = (self.table_compiler.grab_the_table('ownership_eia860')
                   [['plant_id_eia', 'generator_id', 'report_date',
                     'utility_id_eia', 'fraction_owned',
                     'owner_utility_id_eia']])
@@ -196,7 +239,7 @@ class CompileTables(object):
                 id_cols=plant_part['id_cols'],
             )
 
-            plant_part_df = self.agg_cols(
+            plant_part_df = self.table_compiler.agg_cols(
                 id_cols=plant_part['id_cols'],
                 ag_cols=table_details['ag_cols'],
                 wtavg_cols=table_details['wtavg_cols'],
@@ -251,40 +294,6 @@ class CompileTables(object):
             raise AssertionError('something')
         return plant_gen_df
 
-    def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
-        """Aggregate dataframe."""
-        cols_to_grab = id_cols + \
-            ['utility_id_eia', 'fraction_owned', 'ownership']
-        cols_to_grab = list(set(
-            [x for x in cols_to_grab if x in list(df_in.columns)]))
-        if 'report_date' in list(df_in.columns):
-            if len(df_in[df_in['report_date'].dt.month > 2]) > 0:
-                cols_to_grab = cols_to_grab + [pd.Grouper(freq=self.freq)]
-                df_in = df_in.set_index(pd.DatetimeIndex(df_in.report_date))
-            else:
-                cols_to_grab = cols_to_grab + ['report_date']
-        logger.info('aggregate the parts')
-        logger.debug(f'     grouping by on {cols_to_grab}')
-        logger.debug(f'     agg-ing on by on {ag_cols}')
-        logger.debug(f'     cols in df are {df_in.columns}')
-        df_in = df_in.astype({'report_date': 'datetime64[ns]'})
-        df_out = (df_in.groupby(by=cols_to_grab).
-                  # use the groupby object to aggregate on the ag_cols
-                  # this runs whatever function we've defined in the
-                  # ag_cols dictionary
-                  agg(ag_cols).
-                  # reset the index because the output of the agg
-                  reset_index())
-        if wtavg_cols:
-            for data_col, weight_col in wtavg_cols.items():
-                df_out = weighted_average(
-                    df_in,
-                    data_col=data_col,
-                    weight_col=weight_col,
-                    by_col=cols_to_grab
-                ).merge(df_out, how='outer', on=cols_to_grab)
-        return df_out
-
     def add_additonal_cols(self, plant_parts_df):
         """
         Add additonal data and id columns.
@@ -296,8 +305,8 @@ class CompileTables(object):
         """
         plant_parts_df = (
             calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq).
-            merge(self.grab_the_table('utilities_eia'), how='left').
-            merge(self.grab_the_table('plants_eia'), how='left')
+            merge(self.table_compiler.grab_the_table('utilities_eia'), how='left').
+            merge(self.table_compiler.grab_the_table('plants_eia'), how='left')
         )
         return plant_parts_df
 
@@ -320,7 +329,7 @@ class CompileTables(object):
     def add_install_year(self, part_df, id_cols, install_table):
         """Add the install year from the entities table to your plant part."""
         logger.debug(f'pre count of part DataFrame: {len(part_df)}')
-        gen_ent = self.grab_the_table('generators_entity_eia')
+        gen_ent = self.table_compiler.grab_the_table('generators_entity_eia')
         install = (gen_ent.
                    assign(installation_year=gen_ent['operating_date'].dt.year).
                    astype({'installation_year': 'Int64', }).
@@ -333,7 +342,8 @@ class CompileTables(object):
         else:
             part_install = (install[['plant_id_eia', 'generator_id',
                                      'installation_year']].
-                            merge(self.grab_the_table(install_table))
+                            merge(self.table_compiler.grab_the_table(
+                                install_table))
                             [id_cols + ['installation_year']].
                             drop_duplicates(subset=id_cols, keep='first'))
         part_df = part_df.merge(part_install, how='left')
@@ -370,12 +380,13 @@ class CompileTables(object):
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = self.grab_the_table(qual_record_tables[record_name])
+        record_df = self.table_compiler.grab_the_table(
+            qual_record_tables[record_name])
 
         if denorm_table and denorm_table != qual_record_tables[record_name]:
             if 'report_date' not in record_df.columns:
                 record_df = (
-                    record_df.merge(self.grab_the_table('generators_eia860')
+                    record_df.merge(self.table_compiler.grab_the_table('generators_eia860')
                                     [list(set(denorm_cols + ['report_date']))],
                                     how='left'))
 
@@ -445,7 +456,7 @@ class CompileTables(object):
 
             if plant_part['denorm_table']:
                 logger.info(f'denormalize {part_name}')
-                thing = self.agg_cols(
+                thing = self.table_compiler.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
                     wtavg_cols=wtavg_cols,
@@ -455,7 +466,7 @@ class CompileTables(object):
                                                  plant_part['denorm_cols'],
                                                  ))
             else:
-                thing = self.agg_cols(
+                thing = self.table_compiler.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
                     wtavg_cols=wtavg_cols,
