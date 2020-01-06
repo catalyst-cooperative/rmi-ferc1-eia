@@ -294,6 +294,29 @@ class CompilePlantParts(object):
             raise AssertionError('something')
         return plant_gen_df
 
+    def remove_false_granularity(self, part_df, id_cols, part_name):
+        """
+        Remove the plant parts that are false granularities.
+
+        We are removing all instances of records where there is only one
+        type of a record for each plant. We could later determine that we want
+        to remove these granularities based on each part's true parent (unit is
+        the parent of a generator), but for now this generalization is
+        sufficent in removing false granularities.
+        """
+        # the plant part has no parent part so don't de-dupe it.
+        if part_name == 'plant':
+            return part_df
+        part_df = part_df.merge(
+            # count the plant_ids from the unique set of ids
+            pudl.helpers.count_records(part_df.drop_duplicates(subset=id_cols),
+                                       ['plant_id_eia'], 'count'),
+            how='left')
+        # for logging, count the records we're going to drop
+        dropping = len(part_df[part_df['count'] == 1])
+        logger.info(f'dropping {dropping} records out of {len(part_df)}')
+        return part_df[part_df['count'] != 1].drop(columns=['count'])
+
     def add_additonal_cols(self, plant_parts_df):
         """
         Add additonal data and id columns.
@@ -305,7 +328,8 @@ class CompilePlantParts(object):
         """
         plant_parts_df = (
             calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq).
-            merge(self.table_compiler.grab_the_table('utilities_eia'), how='left').
+            merge(self.table_compiler.grab_the_table('utilities_eia'),
+                  how='left').
             merge(self.table_compiler.grab_the_table('plants_eia'), how='left')
         )
         return plant_parts_df
@@ -314,16 +338,18 @@ class CompilePlantParts(object):
         """Add a record id to a compiled part df."""
         ids = deepcopy(id_cols)
         # we want the plant id first... mostly just bc it'll be easier to read
-        part_df = part_df.assign(record_id=part_df.plant_id_eia.map(str))
+        part_df = part_df.assign(record_id_eia=part_df.plant_id_eia.map(str))
         ids.remove('plant_id_eia')
         for col in ids:
             part_df = part_df.assign(
-                record_id=part_df.record_id + "_" + part_df[col].astype(str))
-        part_df = part_df.assign(record_id_eia=part_df.record_id + "_" +
-                                 part_df.report_date.dt.year.astype(str) + "_" +
-                                 part_df.plant_part + "_" +
-                                 part_df.ownership + "_" +
-                                 part_df.utility_id_eia.astype('Int64').astype(str))
+                record_id_eia=part_df.record_id_eia + "_" +
+                part_df[col].astype(str))
+        part_df = part_df.assign(
+            record_id_eia=part_df.record_id_eia + "_" +
+            part_df.report_date.dt.year.astype(str) + "_" +
+            part_df.plant_part + "_" +
+            part_df.ownership + "_" +
+            part_df.utility_id_eia.astype('Int64').astype(str))
         return part_df
 
     def add_install_year(self, part_df, id_cols, install_table):
@@ -386,9 +412,10 @@ class CompilePlantParts(object):
         if denorm_table and denorm_table != qual_record_tables[record_name]:
             if 'report_date' not in record_df.columns:
                 record_df = (
-                    record_df.merge(self.table_compiler.grab_the_table('generators_eia860')
-                                    [list(set(denorm_cols + ['report_date']))],
-                                    how='left'))
+                    record_df.merge(
+                        self.table_compiler.grab_the_table('generators_eia860')
+                        [list(set(denorm_cols + ['report_date']))],
+                        how='left'))
 
             record_df = self.denoramlize_table(
                 record_df,
@@ -474,6 +501,7 @@ class CompilePlantParts(object):
             thing = (self.add_install_year(thing, id_cols,
                                            plant_part['install_table']).
                      assign(plant_part=part_name).
+                     pipe(self.remove_false_granularity, id_cols, part_name).
                      pipe(self.add_record_id, id_cols))
             # thing = self.add_record_id(thing, id_cols)
             for qual_record in qual_record_tables:
