@@ -8,6 +8,7 @@ plant_parts = {
         'denorm_table': None,
         'denorm_cols': None,
         'install_table': None,
+        'false_grans': None,
         'ag_cols': {
             'total_fuel_cost': 'sum',
             'net_generation_mwh': 'sum',
@@ -26,6 +27,7 @@ plant_parts = {
         'denorm_table': None,
         'denorm_cols': None,
         'install_table': None,
+        'false_grans': ['plant', 'plant_unit'],
         'ag_cols': {
             'capacity_mw': pudl.helpers.sum_na,
             'net_generation_mwh': 'sum',
@@ -77,6 +79,7 @@ plant_parts = {
         'denorm_table': 'boiler_generator_assn_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'install_table': 'boiler_generator_assn_eia860',
+        'false_grans': ['plant'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
@@ -90,13 +93,11 @@ plant_parts = {
         },
     },
     'plant_technology': {
-        # Note: I took out the 'generator_id' in the id_cols because
-        # when the generator_id was in there, the aggreagations were
-        # essentially at the generator level.
         'id_cols': ['plant_id_eia', 'technology_description'],
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'install_table': 'generators_eia860',
+        'false_grans': ['plant', 'plant_unit', 'plant_gen', 'plant_prime_mover'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
@@ -114,6 +115,7 @@ plant_parts = {
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'install_table': 'generators_eia860',
+        'false_grans': ['plant', 'plant_unit', 'plant_gen', 'plant_prime_mover', 'plant_technology'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
@@ -131,6 +133,7 @@ plant_parts = {
         'denorm_table': 'generators_entity_eia',
         'denorm_cols': ['plant_id_eia', 'generator_id'],
         'install_table': None,
+        'false_grans': ['plant', 'plant_unit', 'plant_gen'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
