@@ -298,7 +298,70 @@ class CompilePlantParts(object):
             raise AssertionError('something')
         return plant_gen_df
 
-    def remove_false_granularity(self, part_df, id_cols, part_name):
+    def _find_false_grans(self, part_df, part_peer_df,
+                          id_cols, id_cols_peer, peer_part):
+        # logger.debug(f'part_df cols: {list(part_df.columns)}')
+        # logger.debug(f'part_peer_df cols: {list(part_peer_df.columns)}')
+        logger.debug(
+            f'id cols:{id_cols} & peer id cols {id_cols_peer}')
+        if 'count' in part_df.columns:
+            part_df = part_df.drop(columns=['count'])
+
+        return (
+            part_peer_df.drop_duplicates(
+                subset=set(id_cols_peer + id_cols)).
+            pipe(pudl.helpers.count_records, id_cols, 'count').
+            merge(part_df, how='right').
+            # here we are assigning True
+            assign(false_gran=lambda x: x.apply(
+                lambda x: True if x['count'] == 1
+                else x['false_gran'], axis=1),
+                peer_part=lambda x: x.apply(
+                    lambda x: peer_part if x['count'] == 1 else x['peer_part'],
+                    axis=1)).
+            drop(columns=['count'])
+        )
+
+    def prep_peer_part(self, part_df, plant_parts, peer_part, part_name,
+                       id_cols, id_cols_peer):
+        """
+        Prepare a dataframe with info on the peer plant part.
+
+        Args:
+            part_df (pandas.DataFrame): dataframe containing the compiled/
+                aggregated information for this plant part.
+            plant_parts (dict): a dictionary of information required to
+                aggregate each plant part.
+            peer_part (string): name of the peer plant part
+            part_name (string): name of the plant part
+            id_cols (list): list of id columns (from plant_parts) for plant
+                part
+            id_cols_peer (list): list of id columns (from plant_parts) for peer
+                plant part
+        Returns:
+            pandas.DataFrame
+
+        """
+        # prepare a df for counting
+        if plant_parts[peer_part]['denorm_table']:
+            logger.debug('grabbing denorm_table')
+            part_peer_df = self.table_compiler.grab_the_table(
+                plant_parts[peer_part]['denorm_table'])
+        else:
+            part_peer_df = part_df
+        if (not set(id_cols_peer).issubset(list(part_peer_df.columns))
+                and peer_part == 'plant_gen'):
+            logger.debug('using the plant_gen_df for the part_peer_df')
+            part_peer_df = self.plant_gen_df
+        if not set(id_cols).issubset(list(part_peer_df.columns)):
+            logger.debug('merging the id_cols into the peer table')
+            part_peer_df = part_peer_df.merge(
+                self.table_compiler.grab_the_table(
+                    plant_parts[part_name]['denorm_table'])
+                [id_cols + ['generator_id']].drop_duplicates())
+        return part_peer_df
+
+    def remove_false_gran(self, part_df, id_cols, plant_parts, part_name):
         """
         Remove the plant parts that are false granularities.
 
@@ -308,88 +371,21 @@ class CompilePlantParts(object):
         the parent of a generator), but for now this generalization is
         sufficent in removing false granularities.
         """
-        # the plant part has no parent part so don't de-dupe it.
-        if part_name == 'plant':
-            return part_df
-        part_df = (part_df.merge(
-            # count the plant_ids from the unique set of ids
-            pudl.helpers.count_records(part_df.drop_duplicates(subset=id_cols),
-                                       ['plant_id_eia'], 'count'),
-            how='left').
-            assign(false_gran=lambda x: x.apply(
-                lambda x: True if x['count'] == 1 else False, axis=1)).
-            drop(columns=['count']))
-        # for logging, count the records we're going to drop
-        # dropping = len(part_df[part_df['count'] == 1])
-        # logger.info(f'dropping {dropping} records out of {len(part_df)}')
-        return part_df
-
-    def _find_false_grans(self, part_df, part_peer_df, id_cols, id_cols_peer,
-                          peer_part, part_name):
-        #logger.debug(f'part_df cols: {list(part_df.columns)}')
-        #logger.debug(f'part_peer_df cols: {list(part_peer_df.columns)}')
-        logger.debug(
-            f'for {peer_part} id cols:{id_cols} & peer id cols {id_cols_peer}')
-
-        false_gran_name = "false_gran_" + peer_part + "_" + part_name
-        # if false_gran_name not in part_df.columns:
-        #    part_df[false_gran_name] = np.nan
-
-        def false_gran_truth(x):
-            return (x.apply(
-                lambda x: True if x['count'] == 1
-                else x['false_gran'], axis=1))
-
-        part_df = (
-            part_df.merge(
-                # count the plant_ids from the unique set of ids
-                part_peer_df.merge(
-                    pudl.helpers.count_records(
-                        part_peer_df.drop_duplicates(
-                            subset=set(id_cols_peer + id_cols)),
-                        id_cols_peer, 'count'), how='left')
-                [id_cols + ['count']].drop_duplicates(),
-                how='left').
-            assign(false_gran_temp=lambda x: x.apply(
-                lambda x: True if x['count'] == 1
-                else x['false_gran'], axis=1),
-                false_gran=lambda x: x.apply(
-                    lambda x: True if x['count'] == 1
-                    else x['false_gran'], axis=1)
-            ).
-            rename(columns={'false_gran_temp': false_gran_name})
-        )
-
-        return (part_df)
-
-    def remove_false_gran(self, part_df, id_cols, plant_parts, part_name):
-        """hello."""
         false_gran = plant_parts[part_name]['false_grans']
         if false_gran:
             if 'false_gran' not in part_df.columns:
                 part_df['false_gran'] = np.nan
+            if 'peer_part' in part_df.columns:
+                part_df['peer_part'] = np.nan
             for peer_part in false_gran:
-                id_cols_peer = plant_parts[peer_part]['id_cols']
                 logger.debug(f'labeling false granularities from {peer_part}')
-                # prepare a df for counting
-                if plant_parts[peer_part]['denorm_table']:
-                    logger.debug('grabbing denorm_table')
-                    part_peer_df = self.table_compiler.grab_the_table(
-                        plant_parts[peer_part]['denorm_table'])
-                else:
-                    part_peer_df = part_df
-                if (not set(id_cols_peer).issubset(list(part_peer_df.columns))
-                        and peer_part == 'plant_gen'):
-                    logger.debug('using the plant_gen_df for the part_peer_df')
-                    part_peer_df = self.plant_gen_df
-                if not set(id_cols).issubset(list(part_peer_df.columns)):
-                    logger.debug('merging the id_cols into the peer table')
-                    part_peer_df = part_peer_df.merge(
-                        self.table_compiler.grab_the_table(
-                            plant_parts[part_name]['denorm_table'])
-                        [id_cols + ['generator_id']].drop_duplicates())
+                id_cols_peer = plant_parts[peer_part]['id_cols']
+                part_peer_df = self.prep_peer_part(
+                    part_df, plant_parts, peer_part, part_name,
+                    id_cols, id_cols_peer)
+
                 part_df = self._find_false_grans(
-                    part_df, part_peer_df, id_cols, id_cols_peer, peer_part, part_name)
+                    part_df, part_peer_df, id_cols, id_cols_peer, peer_part)
         return part_df
 
     def add_additonal_cols(self, plant_parts_df):
@@ -565,7 +561,11 @@ class CompilePlantParts(object):
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
-        for part_name, plant_part in plant_parts.items():
+        plant_parts_ordered = ['plant_prime_fuel', 'plant_technology',
+                               'plant_prime_mover', 'plant_gen', 'plant_unit',
+                               'plant']
+        for part_name in plant_parts_ordered:
+            plant_part = plant_parts[part_name]
             logger.info(f'begin aggregation for: {part_name}')
             id_cols = plant_part['id_cols']
             ag_cols = plant_part['ag_cols']

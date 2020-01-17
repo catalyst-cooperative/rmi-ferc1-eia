@@ -97,7 +97,8 @@ plant_parts = {
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'install_table': 'generators_eia860',
-        'false_grans': ['plant', 'plant_unit', 'plant_gen', 'plant_prime_mover'],
+        'false_grans': ['plant', 'plant_unit', 'plant_gen',
+                        'plant_prime_mover'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
@@ -115,7 +116,8 @@ plant_parts = {
         'denorm_table': 'generators_eia860',
         'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
         'install_table': 'generators_eia860',
-        'false_grans': ['plant', 'plant_unit', 'plant_gen', 'plant_prime_mover', 'plant_technology'],
+        'false_grans': ['plant', 'plant_unit', 'plant_gen',
+                        'plant_prime_mover', 'plant_technology'],
         'ag_cols': {
             'capacity_mw': 'sum',
             'net_generation_mwh': 'sum',
