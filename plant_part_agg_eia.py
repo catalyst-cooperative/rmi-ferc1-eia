@@ -302,25 +302,39 @@ class CompilePlantParts(object):
                           id_cols, id_cols_peer, peer_part):
         # logger.debug(f'part_df cols: {list(part_df.columns)}')
         # logger.debug(f'part_peer_df cols: {list(part_peer_df.columns)}')
+        part_df = deepcopy(part_df)
+        logger.debug("false gran-ing for " + peer_part)
         logger.debug(
             f'id cols:{id_cols} & peer id cols {id_cols_peer}')
         if 'count' in part_df.columns:
             part_df = part_df.drop(columns=['count'])
+        if 'plant' == peer_part:
+            count_cols = ['plant_id_eia']
+        else:
+            count_cols = id_cols
 
-        return (
-            part_peer_df.drop_duplicates(
-                subset=set(id_cols_peer + id_cols)).
-            pipe(pudl.helpers.count_records, id_cols, 'count').
-            merge(part_df, how='right').
-            # here we are assigning True
-            assign(false_gran=lambda x: x.apply(
-                lambda x: True if x['count'] == 1
-                else x['false_gran'], axis=1),
-                peer_part=lambda x: x.apply(
-                    lambda x: peer_part if x['count'] == 1 else x['peer_part'],
-                    axis=1)).
-            drop(columns=['count'])
-        )
+        df1 = part_peer_df.drop_duplicates(
+            subset=set(id_cols_peer + id_cols))
+        # this line fnuctionally counts the number of unique id_peer_cols
+        # count_records adds a 'count' column, and then groups on the
+        # count_cols, which in effect counts the remanining cols from the peer
+        df2 = df1.pipe(pudl.helpers.count_records, count_cols, 'count')
+        df3 = df2.merge(part_df, how='right')
+        logger.debug("pre assing Trues:  " + str(
+            len(df3[df3['false_gran'] == True])))
+        df4 = df3.assign(
+            false_gran=lambda x: x.apply(lambda x: True if x['count'] == 1
+                                         else x['false_gran'], axis=1))
+        logger.debug("One counts:        " + str(len(df4[df4['count'] == 1])))
+        logger.debug("post assign trues: " +
+                     str(len(df4[df4['false_gran'] == True])))
+        logger.debug(f'total:             {len(df4)}')
+        df5 = df4.assign(
+            peer_part=lambda x: x.apply(
+                lambda x: peer_part if x['count'] == 1 else x['peer_part'],
+                axis=1))
+
+        return df5
 
     def prep_peer_part(self, part_df, plant_parts, peer_part, part_name,
                        id_cols, id_cols_peer):
@@ -375,7 +389,7 @@ class CompilePlantParts(object):
         if false_gran:
             if 'false_gran' not in part_df.columns:
                 part_df['false_gran'] = np.nan
-            if 'peer_part' in part_df.columns:
+            if 'peer_part' not in part_df.columns:
                 part_df['peer_part'] = np.nan
             for peer_part in false_gran:
                 logger.debug(f'labeling false granularities from {peer_part}')
@@ -383,7 +397,6 @@ class CompilePlantParts(object):
                 part_peer_df = self.prep_peer_part(
                     part_df, plant_parts, peer_part, part_name,
                     id_cols, id_cols_peer)
-
                 part_df = self._find_false_grans(
                     part_df, part_peer_df, id_cols, id_cols_peer, peer_part)
         return part_df
@@ -572,7 +585,7 @@ class CompilePlantParts(object):
             wtavg_cols = plant_part['wtavg_cols']
 
             if plant_part['denorm_table']:
-                logger.info(f'denormalize {part_name}')
+                logger.debug(f'denormalize {part_name}')
                 df_in = self.denoramlize_table(self.plant_gen_df,
                                                id_cols,
                                                plant_part['denorm_table'],
@@ -593,14 +606,14 @@ class CompilePlantParts(object):
                      plant_parts=plant_parts, part_name=part_name).
                 pipe(self.add_record_id, id_cols))
 
-            for qual_record in qual_record_tables:
-                logger.debug(f'grab consistent {qual_record} for {part_name}')
-                thing = self.grab_consistent_qualifiers(
-                    thing,
-                    qual_record,
-                    id_cols,
-                    plant_part['denorm_table'],
-                    plant_part['denorm_cols'])
+            # for qual_record in qual_record_tables:
+            #    logger.debug(f'grab consistent {qual_record} for {part_name}')
+            #    thing = self.grab_consistent_qualifiers(
+            #        thing,
+            #        qual_record,
+            #        id_cols,
+            #        plant_part['denorm_table'],
+            #        plant_part['denorm_cols'])
             plant_parts_df = plant_parts_df.append(thing, sort=True)
 
         plant_parts_df = (self.add_additonal_cols(plant_parts_df).
