@@ -153,13 +153,48 @@ class CompileTables(object):
 class CompilePlantParts(object):
     """Compile plant parts."""
 
-    def __init__(self, table_compiler, clobber=False):
-        """idk."""
+    def __init__(self, table_compiler, plant_parts, clobber=False):
+        """
+        idk.
+
+        Args:
+            plant_parts (dict): a dictionary of information required to
+                aggregate each plant part.
+
+        """
         self.table_compiler = table_compiler
         self.freq = table_compiler.freq
+        self.plant_parts = plant_parts
         self.plant_gen_df = None
         self.plant_parts_df = None
         self.clobber = clobber
+        self.plant_parts_ordered = ['plant', 'plant_unit',
+                                    'plant_prime_mover', 'plant_technology',
+                                    'plant_prime_fuel', 'plant_gen']
+        # make a dictionary with the main id column (key) corresponding to the
+        # plant part (values)
+        self.ids_to_parts = {}
+        for part, part_dict in self.plant_parts.items():
+            self.ids_to_parts[self.plant_parts[part]['id_cols'][-1]] = part
+
+        self.id_cols_dict = self.make_id_cols_dict()
+
+    def make_id_cols_dict(self):
+        """Make a dict of part to corresponding peer part id columns."""
+        id_cols_dict = {}
+        for part, i in zip(self.plant_parts_ordered,
+                           range(1, len(self.plant_parts_ordered) + 1)):
+            logger.debug(part)
+            ids = set({'report_date'})
+            for peer in self.plant_parts_ordered[i:]:
+                for id_col in self.plant_parts[peer]['id_cols']:
+                    logger.debug(f'   {id_col}')
+                    ids.add(id_col)
+            for part_id_col in self.plant_parts[part]['id_cols']:
+                logger.debug(f'   {part_id_col}')
+                ids.add(part_id_col)
+            id_cols_dict[part] = list(ids)
+        return id_cols_dict
 
     def grab_denormalize_table(self,
                                table,
@@ -300,11 +335,28 @@ class CompilePlantParts(object):
 
     def _find_false_grans(self, part_df, part_peer_df,
                           id_cols, id_cols_peer, peer_part):
+        """
+        Find and label false granulrities.
+
+        Args:
+            part_df (pandas.DataFrame): dataframe containing the compiled/
+                aggregated information for this plant part.
+            part_peer_df (pandas.DataFrame):
+            id_cols (list): list of id columns (from plant_parts) for plant
+                part
+            id_cols_peer (list): list of id columns (from plant_parts) for peer
+                plant part
+            peer_part (string): name of the peer plant part
+        Returns:
+            pandas.DataFrame
+
+        """
         # logger.debug(f'part_df cols: {list(part_df.columns)}')
         # logger.debug(f'part_peer_df cols: {list(part_peer_df.columns)}')
         part_df = deepcopy(part_df)
+        part_peer_df = deepcopy(part_peer_df)
         logger.debug("false gran-ing for " + peer_part)
-        logger.debug(
+        logger.info(
             f'id cols:{id_cols} & peer id cols {id_cols_peer}')
         if 'count' in part_df.columns:
             part_df = part_df.drop(columns=['count'])
@@ -319,65 +371,59 @@ class CompilePlantParts(object):
         # count_records adds a 'count' column, and then groups on the
         # count_cols, which in effect counts the remanining cols from the peer
         df2 = df1.pipe(pudl.helpers.count_records, count_cols, 'count')
-        df3 = df2.merge(part_df, how='right')
-        logger.debug("pre assing Trues:  " + str(
+        df3 = part_df.merge(df2, how='left')
+        logger.info("pre assing Trues:  " + str(
             len(df3[df3['false_gran'] == True])))
         df4 = df3.assign(
             false_gran=lambda x: x.apply(lambda x: True if x['count'] == 1
                                          else x['false_gran'], axis=1))
-        logger.debug("One counts:        " + str(len(df4[df4['count'] == 1])))
-        logger.debug("post assign trues: " +
-                     str(len(df4[df4['false_gran'] == True])))
-        logger.debug(f'total:             {len(df4)}')
-        df5 = df4.assign(
-            peer_part=lambda x: x.apply(
-                lambda x: peer_part if x['count'] == 1 else x['peer_part'],
-                axis=1))
+        logger.info("One counts:        " + str(len(df4[df4['count'] == 1])))
+        logger.info("post assign trues: " +
+                    str(len(df4[df4['false_gran'] == True])))
+        logger.info(f'total:             {len(df4)}')
+        # label the records with the peer part
+        df5 = df4.assign(peer_part=lambda x: x.apply(
+            lambda x: peer_part if x['count'] == 1 else x['peer_part'],
+            axis=1))
 
         return df5
 
-    def prep_peer_part(self, part_df, plant_parts, peer_part, part_name,
-                       id_cols, id_cols_peer):
-        """
-        Prepare a dataframe with info on the peer plant part.
+    def denorm_plant_gen(self):
+        """Denromalize the plant_gen_df."""
+        og_len = len(self.plant_gen_df)
+        # compile all of the denorm table info in one place
+        denorm_tables = {}
+        for part in self.plant_parts:
+            denorm_table = self.plant_parts[part]['denorm_table']
+            if denorm_table:
+                if denorm_table in denorm_tables.keys():
+                    denorm_tables[denorm_table]['id_cols'] = list(set(
+                        denorm_tables[denorm_table]['id_cols'] +
+                        self.plant_parts[part]['id_cols']))
+                    denorm_tables[denorm_table]['denorm_cols'] = list(set(
+                        denorm_tables[denorm_table]['denorm_cols'] +
+                        self.plant_parts[part]['denorm_cols']))
+                else:
+                    denorm_tables[denorm_table] = {
+                        'id_cols': self.plant_parts[part]['id_cols'],
+                        'denorm_cols': self.plant_parts[part]['denorm_cols']
+                    }
+        # grab the demorn tables and squish the id cols in with the gens
+        for k, v in denorm_tables.items():
+            if not set(v['id_cols']).issubset(set(self.plant_gen_df.columns)):
+                logger.debug(f'no id cols from {k}')
+                denorm_df = self.table_compiler.grab_the_table(
+                    k)[list(set(v['id_cols'] + v['denorm_cols']))].drop_duplicates()
+                self.plant_gen_df = self.plant_gen_df.merge(
+                    denorm_df, how='left')
+                if og_len != len(self.plant_gen_df):
+                    raise AssertionError(
+                        'ahh merge error! when adding denorm colunms to `plant_gen_df` we should have the same number of records')
+        return self.plant_gen_df
 
-        Args:
-            part_df (pandas.DataFrame): dataframe containing the compiled/
-                aggregated information for this plant part.
-            plant_parts (dict): a dictionary of information required to
-                aggregate each plant part.
-            peer_part (string): name of the peer plant part
-            part_name (string): name of the plant part
-            id_cols (list): list of id columns (from plant_parts) for plant
-                part
-            id_cols_peer (list): list of id columns (from plant_parts) for peer
-                plant part
-        Returns:
-            pandas.DataFrame
-
+    def label_false_gran(self, part_df, id_cols, part_name):
         """
-        # prepare a df for counting
-        if plant_parts[peer_part]['denorm_table']:
-            logger.debug('grabbing denorm_table')
-            part_peer_df = self.table_compiler.grab_the_table(
-                plant_parts[peer_part]['denorm_table'])
-        else:
-            part_peer_df = part_df
-        if (not set(id_cols_peer).issubset(list(part_peer_df.columns))
-                and peer_part == 'plant_gen'):
-            logger.debug('using the plant_gen_df for the part_peer_df')
-            part_peer_df = self.plant_gen_df
-        if not set(id_cols).issubset(list(part_peer_df.columns)):
-            logger.debug('merging the id_cols into the peer table')
-            part_peer_df = part_peer_df.merge(
-                self.table_compiler.grab_the_table(
-                    plant_parts[part_name]['denorm_table'])
-                [id_cols + ['generator_id']].drop_duplicates())
-        return part_peer_df
-
-    def remove_false_gran(self, part_df, id_cols, plant_parts, part_name):
-        """
-        Remove the plant parts that are false granularities.
+        Label the plant parts that are false granularities.
 
         We are removing all instances of records where there is only one
         type of a record for each plant. We could later determine that we want
@@ -385,7 +431,8 @@ class CompilePlantParts(object):
         the parent of a generator), but for now this generalization is
         sufficent in removing false granularities.
         """
-        false_gran = plant_parts[part_name]['false_grans']
+        false_gran = self.plant_parts[part_name]['false_grans']
+        part_peer_df = self.denorm_plant_gen()
         if false_gran:
             if 'false_gran' not in part_df.columns:
                 part_df['false_gran'] = np.nan
@@ -393,10 +440,7 @@ class CompilePlantParts(object):
                 part_df['peer_part'] = np.nan
             for peer_part in false_gran:
                 logger.debug(f'labeling false granularities from {peer_part}')
-                id_cols_peer = plant_parts[peer_part]['id_cols']
-                part_peer_df = self.prep_peer_part(
-                    part_df, plant_parts, peer_part, part_name,
-                    id_cols, id_cols_peer)
+                id_cols_peer = self.plant_parts[peer_part]['id_cols']
                 part_df = self._find_false_grans(
                     part_df, part_peer_df, id_cols, id_cols_peer, peer_part)
         return part_df
@@ -418,7 +462,7 @@ class CompilePlantParts(object):
         )
         return plant_parts_df
 
-    def add_record_id(self, part_df, id_cols):
+    def add_record_id(self, part_df, id_cols, plant_part_col='plant_part'):
         """Add a record id to a compiled part df."""
         ids = deepcopy(id_cols)
         # we want the plant id first... mostly just bc it'll be easier to read
@@ -431,7 +475,7 @@ class CompilePlantParts(object):
         part_df = part_df.assign(
             record_id_eia=part_df.record_id_eia + "_" +
             part_df.report_date.dt.year.astype(str) + "_" +
-            part_df.plant_part + "_" +
+            part_df[plant_part_col] + "_" +
             part_df.ownership + "_" +
             part_df.utility_id_eia.astype('Int64').astype(str))
         return part_df
@@ -483,7 +527,7 @@ class CompilePlantParts(object):
             record_name (string) : name of qualitative record
             id_cols (list) : list of identifying columns.
             denorm_table (string) : name of table needed to denormalize
-            denorm_cols (list)
+            denorm_cols (list): list of columns to denormalize on
 
         """
         if record_name in part_df.columns:
@@ -537,6 +581,106 @@ class CompilePlantParts(object):
         logger.debug(f'merging in consistent {record_name}')
         return part_df.merge(consistent_records, how='left')
 
+    def count_peer_parts(self, part):
+        df = self.plant_gen_df[self.id_cols_dict[part]].drop_duplicates()
+        part_cols = self.plant_parts[part]['id_cols'] + ['report_date']
+        # create the count
+        df_count = (df.dropna(subset=part_cols).
+                    groupby(by=part_cols).nunique().
+                    drop(columns=[self.plant_parts[part]['id_cols'][-1],
+                                  'plant_id_eia',
+                                  'report_date']).
+                    rename(columns=self.ids_to_parts).
+                    add_suffix(f'_count_{part}'))
+        # merge back into the og df
+        df_w_count = df.merge(
+            df_count,
+            how='left',
+            right_index=True,
+            left_on=part_cols,
+        )
+        return df_w_count
+
+    def make_all_the_counts(self):
+        """All of them."""
+        all_the_counts = deepcopy(self.plant_gen_df)
+        for part in self.plant_parts_ordered:
+            all_the_counts = all_the_counts.merge(
+                self.count_peer_parts(part), how='left')
+        return all_the_counts
+
+    def make_all_the_bools(self):
+        """Count consistency of records and convert that to bools."""
+        all_the_counts = self.make_all_the_counts()
+        # remove the data columns... just for ease (maybe remove this later)
+        counts = all_the_counts.drop(
+            columns=['fuel_cost_per_mmbtu', 'heat_rate_mmbtu_mwh',
+                     'fuel_cost_per_mwh', 'total_fuel_cost',
+                     'total_mmbtu', 'net_generation_mwh', 'capacity_mw', ])
+
+        # convert the count columns to bool columns
+        for col in counts.filter(like='_count_').columns:
+            counts[col] = counts[col] > 1
+        # assign a bool for the true gran only if all of the subparts are true
+        for part in self.plant_parts.keys():
+            counts[f'true_gran_{part}'] = (
+                counts.filter(like=part + '_count_').
+                all(axis='columns'))
+        return counts
+
+    def assign_record_id_eia(self, test_df, plant_part_col='plant_part'):
+        """Assign record ids to a df with a mix of plant parts"""
+        test_df_ids = pd.DataFrame()
+        for part in self.plant_parts.keys():
+            test_df_ids = pd.concat(
+                [test_df_ids,
+                 self.add_record_id(test_df[test_df[plant_part_col] == part],
+                                    self.plant_parts[part]['id_cols'],
+                                    plant_part_col=plant_part_col
+                                    )])
+        return test_df_ids
+
+    def label_true_id_by_part(self, part_name, bools):
+        """Label the false granularities with their true parts."""
+        # another way to do this would be to construct the list of colums based
+        # on self.plant_parts_ordered
+        cols = list(bools.filter(like=part_name + '_count_').columns)
+        # reserve the columns because we want the biggest part to be the last
+        # assigned
+        assign_col = "appro_part_label_" + part_name
+        bools[assign_col] = part_name
+        cols.reverse()
+        for col in cols:
+            bools.loc[~bools[col], assign_col] = col.split(sep="_count_")[1]
+        bools = (self.assign_record_id_eia(bools, assign_col).
+                 rename(columns={'record_id_eia': f'record_id_eia_{part_name}'}))
+        return bools
+
+    def assign_true_gran(self, part_df, part):
+        """Merge the true granularity labels into the plant part df."""
+        bool_df = deepcopy(self.part_bools)
+        bool_df = (bool_df[self.plant_parts[part]['id_cols'] +
+                           ['report_date', f'true_gran_{part}',
+                            f'appro_part_label_{part}',
+                            f'record_id_eia_{part}']].
+                   drop_duplicates())
+
+        prop_true_len1 = len(
+            bool_df[bool_df[f'true_gran_{part}']]) / len(bool_df)
+        logger.debug(f'proportion of trues: {prop_true_len1:.02}')
+
+        part_df = (part_df.
+                   merge(bool_df, how='left').
+                   rename(columns={
+                       f'true_gran_{part}': 'true_gran',
+                       f'appro_part_label_{part}': 'appro_part_label',
+                       f'record_id_eia_{part}': 'appro_record_id_eia'
+                   }))
+
+        prop_true_len2 = len(part_df[part_df.true_gran]) / len(part_df)
+        logger.debug(f'proportion of trues: {prop_true_len2:.02}')
+        return part_df
+
     def _clean_plant_parts(self, plant_parts_df):
         return (
             plant_parts_df.
@@ -548,7 +692,7 @@ class CompilePlantParts(object):
             drop_duplicates(subset=['record_id_eia']).
             set_index('record_id_eia'))
 
-    def generate_master_unit_list(self, plant_parts):
+    def generate_master_unit_list(self, false_gran=False):
         """
         Aggreate and slice data points by each plant part.
 
@@ -566,11 +710,17 @@ class CompilePlantParts(object):
         if self.plant_gen_df is None:
             # 1) aggregate the data points by generator
             self.plant_gen_df = (
-                self.aggregate_plant_part(plant_parts['plant_gen']).
+                self.aggregate_plant_part(self.plant_parts['plant_gen']).
                 astype({'utility_id_eia': 'Int64'}).
                 # 2) generating proportional data by ownership %s
                 pipe(self.slice_by_ownership).
                 astype({'utility_id_eia': 'Int64'}))
+            self.plant_gen_df = self.denorm_plant_gen()
+
+        self.part_bools = self.make_all_the_bools()
+        for part_name1 in self.plant_parts.keys():
+            self.part_bools = self.label_true_id_by_part(part_name1,
+                                                         self.part_bools)
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
@@ -578,58 +728,48 @@ class CompilePlantParts(object):
                                'plant_prime_mover', 'plant_gen', 'plant_unit',
                                'plant']
         for part_name in plant_parts_ordered:
-            plant_part = plant_parts[part_name]
+            plant_part = self.plant_parts[part_name]
             logger.info(f'begin aggregation for: {part_name}')
             id_cols = plant_part['id_cols']
             ag_cols = plant_part['ag_cols']
             wtavg_cols = plant_part['wtavg_cols']
 
-            if plant_part['denorm_table']:
-                logger.debug(f'denormalize {part_name}')
-                df_in = self.denoramlize_table(self.plant_gen_df,
-                                               id_cols,
-                                               plant_part['denorm_table'],
-                                               plant_part['denorm_cols'],
-                                               )
-            else:
-                df_in = self.plant_gen_df
             thing = (
                 self.table_compiler.agg_cols(
                     id_cols=id_cols,
                     ag_cols=ag_cols,
                     wtavg_cols=wtavg_cols,
-                    df_in=df_in).
+                    df_in=self.plant_gen_df).
                 pipe(self.add_install_year, id_cols,
                      plant_part['install_table']).
                 assign(plant_part=part_name).
-                pipe(self.remove_false_gran, id_cols=id_cols,
-                     plant_parts=plant_parts, part_name=part_name).
-                pipe(self.add_record_id, id_cols))
+                pipe(self.assign_true_gran, part_name).
+                # pipe(self.label_false_gran, id_cols=id_cols,
+                #      part_name=part_name).
+                pipe(self.add_record_id, id_cols, plant_part_col='plant_part'))
+            if false_gran:
+                thing = self.label_false_gran(thing, id_cols=id_cols,
+                                              part_name=part_name)
 
-            # for qual_record in qual_record_tables:
-            #    logger.debug(f'grab consistent {qual_record} for {part_name}')
-            #    thing = self.grab_consistent_qualifiers(
-            #        thing,
-            #        qual_record,
-            #        id_cols,
-            #        plant_part['denorm_table'],
-            #        plant_part['denorm_cols'])
+            for qual_record in qual_record_tables:
+                logger.debug(f'grab consistent {qual_record} for {part_name}')
+                thing = self.grab_consistent_qualifiers(
+                    thing,
+                    qual_record,
+                    id_cols,
+                    plant_part['denorm_table'],
+                    plant_part['denorm_cols'])
             plant_parts_df = plant_parts_df.append(thing, sort=True)
 
-        plant_parts_df = (self.add_additonal_cols(plant_parts_df).
-                          pipe(pudl.helpers.organize_cols,
-                               ['plant_id_eia',
-                                'report_date',
-                                'plant_part',
-                                'generator_id',
-                                'unit_id_pudl',
-                                'prime_mover_code',
-                                'energy_source_code_1',
-                                'technology_description',
-                                'utility_id_eia',
-                                'fraction_owned'
-                                ]).
-                          pipe(self._clean_plant_parts))
+        plant_parts_df = (
+            self.add_additonal_cols(plant_parts_df).
+            pipe(pudl.helpers.organize_cols,
+                 ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
+                  'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+                  'technology_description', 'utility_id_eia', 'fraction_owned',
+                  'true_gran', 'appro_part_label'
+                  ]).
+            pipe(self._clean_plant_parts))
         self.plant_parts_df = plant_parts_df
         return plant_parts_df
 
@@ -664,6 +804,7 @@ freq_ag_cols = {
 }
 
 qual_record_tables = {
+    'unit_id_pudl': 'boiler_generator_assn_eia860',
     'energy_source_code_1': 'generators_eia860',
     'prime_mover_code': 'generators_entity_eia',
     'fuel_type_code_pudl': 'generators_eia860',

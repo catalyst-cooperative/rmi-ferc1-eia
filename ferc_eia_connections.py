@@ -44,17 +44,7 @@ class TrainXlxsCompiler():
         return self.train_df
 
 
-def _assing_record_id_eia(compiler_mul, test_df):
-    test_df_ids = pd.DataFrame()
-    for part in plant_parts:
-        test_df_ids = pd.concat(
-            [test_df_ids,
-             compiler_mul.add_record_id(test_df[test_df['plant_part'] == part],
-                                        plant_parts[part]['id_cols'])])
-    return test_df_ids
-
-
-def _prep_train_connections(compiler_mul, compiler_train):
+def prep_train_connections(compiler_mul, compiler_train):
     """TODO: Clean and condense."""
     # grab the excel file
     test_df = compiler_train._grab_test_xlxs()
@@ -95,16 +85,17 @@ def _prep_train_connections(compiler_mul, compiler_train):
                        'utility_id_eia': pd.Int64Dtype()}).
                replace(plant_part_rename))
 
-    train_df_ids = _assing_record_id_eia(compiler_mul, test_df)
+    train_df_ids = compiler_mul.assign_record_id_eia(test_df)
+    train_df_ids['plant_part_og'] = train_df_ids['plant_part']
     train_df_ids = (
         train_df_ids.set_index(['record_id_eia']).
-        merge(compiler_mul.plant_parts_df[['false_gran']],
+        merge(compiler_mul.plant_parts_df[['true_gran', 'appro_part_label',
+                                           'appro_record_id_eia']],
               how='left', right_index=True, left_index=True).
-        assign(plant_part=lambda x: x.apply(
-            lambda x: 'plant' if x['false_gran'] == True
-            else x['plant_part'], axis=1)).
+        assign(plant_part=lambda x: x['appro_part_label'],
+               record_id_eia=lambda x: x['appro_record_id_eia']).
         reset_index(drop=True))
-    train_df_ids = _assing_record_id_eia(compiler_mul, train_df_ids)
+    # train_df_ids = compiler_mul.assign_record_id_eia(train_df_ids)
 
     train_df_ids['record_id_ferc'] = (
         train_df_ids.Source + '_' +
@@ -120,7 +111,8 @@ def _prep_train_connections(compiler_mul, compiler_train):
     return train_df_ids.set_index(['record_id_ferc', 'record_id_eia'])
 
 
-def _prep_ferc_data(pudl_out):
+def prep_ferc_data(pudl_out):
+    """TODO: clean and condense."""
     cols_to_use = ['report_year',
                    'utility_id_ferc1',
                    'plant_name_ferc1',
@@ -446,6 +438,12 @@ def calc_wins(df, ferc1_options):
     the only match or it is different enough from the #2 ranked match, we
     consider it a winner. Also log win stats.
 
+    The matches are all of the results from the model prediction. the wins are
+    all of the matches that are distinct enough from it’s closest match. The
+    murky_wins are the matches that are not “distinct enough” from its closes
+    match. Distinct enough means that the top match isn’t one iqr away from the
+    second top match.
+
     Args:
         df (pandas.DataFrame): dataframe with all of the model generate
             matches. This df needs to have been run through `calc_match_stats`.
@@ -459,12 +457,13 @@ def calc_wins(df, ferc1_options):
     """
     unique_ferc = df.reset_index().drop_duplicates(subset=['record_id_ferc'])
     ties = df[df['rank'] == 1.5]
+    distinction = (df['iqr_all'] * .25)
     # for the winners, grab the top ranked,
-    winners = (df[((df['rank'] == 1) & (df['diffs'] > (df['iqr_all']))) |
+    winners = (df[((df['rank'] == 1) & (df['diffs'] > distinction)) |
                   ((df['rank'] == 1) & (df['diffs'].isnull()))])
 
     murky_wins = (df[(df['rank'] == 1) &
-                     (df['diffs'] < (df['iqr_all']))])
+                     (df['diffs'] < distinction)])
 
     logger.info(
         f'matches vs total ferc:  {len(unique_ferc)/len(ferc1_options):.02}')
@@ -473,9 +472,9 @@ def calc_wins(df, ferc1_options):
     logger.info(
         f'wins vs matches:        {len(winners)/len(unique_ferc):.02}')
     logger.info(
-        f'murk vs matches:        {len(murky_wins)/len(unique_ferc):.01}')
+        f'murk vs matches:        {len(murky_wins)/len(unique_ferc):.02}')
     logger.info(
-        f'ties vs matches:        {len(ties)/2/len(unique_ferc):.01}')
+        f'ties vs matches:        {len(ties)/2/len(unique_ferc):.02}')
     return winners
 
 
