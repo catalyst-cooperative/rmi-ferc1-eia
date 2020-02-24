@@ -629,7 +629,14 @@ class CompilePlantParts(object):
         return counts
 
     def assign_record_id_eia(self, test_df, plant_part_col='plant_part'):
-        """Assign record ids to a df with a mix of plant parts"""
+        """
+        Assign record ids to a df with a mix of plant parts.
+
+        Args:
+            test_df (pandas.DataFrame)
+            plant_part_col (string)
+
+        """
         test_df_ids = pd.DataFrame()
         for part in self.plant_parts.keys():
             test_df_ids = pd.concat(
@@ -641,7 +648,14 @@ class CompilePlantParts(object):
         return test_df_ids
 
     def label_true_id_by_part(self, part_name, bools):
-        """Label the false granularities with their true parts."""
+        """
+        Label the false granularities with their true parts.
+
+        Args:
+            part_name (string)
+            bools (pandas.DataFrame)
+
+        """
         # another way to do this would be to construct the list of colums based
         # on self.plant_parts_ordered
         cols = list(bools.filter(like=part_name + '_count_').columns)
@@ -656,25 +670,32 @@ class CompilePlantParts(object):
                  rename(columns={'record_id_eia': f'record_id_eia_{part_name}'}))
         return bools
 
-    def assign_true_gran(self, part_df, part):
-        """Merge the true granularity labels into the plant part df."""
+    def assign_true_gran(self, part_df, part_name):
+        """
+        Merge the true granularity labels into the plant part df.
+
+        Args:
+            part_df (pandas.DataFrame)
+            part_name (string)
+
+        """
         bool_df = deepcopy(self.part_bools)
-        bool_df = (bool_df[self.plant_parts[part]['id_cols'] +
-                           ['report_date', f'true_gran_{part}',
-                            f'appro_part_label_{part}',
-                            f'record_id_eia_{part}']].
+        bool_df = (bool_df[self.plant_parts[part_name]['id_cols'] +
+                           ['report_date', f'true_gran_{part_name}',
+                            f'appro_part_label_{part_name}',
+                            f'record_id_eia_{part_name}']].
                    drop_duplicates())
 
         prop_true_len1 = len(
-            bool_df[bool_df[f'true_gran_{part}']]) / len(bool_df)
+            bool_df[bool_df[f'true_gran_{part_name}']]) / len(bool_df)
         logger.debug(f'proportion of trues: {prop_true_len1:.02}')
 
         part_df = (part_df.
                    merge(bool_df, how='left').
                    rename(columns={
-                       f'true_gran_{part}': 'true_gran',
-                       f'appro_part_label_{part}': 'appro_part_label',
-                       f'record_id_eia_{part}': 'appro_record_id_eia'
+                       f'true_gran_{part_name}': 'true_gran',
+                       f'appro_part_label_{part_name}': 'appro_part_label',
+                       f'record_id_eia_{part_name}': 'appro_record_id_eia'
                    }))
 
         prop_true_len2 = len(part_df[part_df.true_gran]) / len(part_df)
@@ -760,7 +781,7 @@ class CompilePlantParts(object):
                     plant_part['denorm_table'],
                     plant_part['denorm_cols'])
             plant_parts_df = plant_parts_df.append(thing, sort=True)
-
+        # clean up, add additional columns
         plant_parts_df = (
             self.add_additonal_cols(plant_parts_df).
             pipe(pudl.helpers.organize_cols,
@@ -804,9 +825,9 @@ freq_ag_cols = {
 }
 
 qual_record_tables = {
-    'unit_id_pudl': 'boiler_generator_assn_eia860',
-    'energy_source_code_1': 'generators_eia860',
-    'prime_mover_code': 'generators_entity_eia',
+    # 'unit_id_pudl': 'boiler_generator_assn_eia860',
+    # 'energy_source_code_1': 'generators_eia860',
+    # 'prime_mover_code': 'generators_entity_eia',
     'fuel_type_code_pudl': 'generators_eia860',
 }
 

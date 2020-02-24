@@ -12,7 +12,6 @@ from recordlinkage.compare import Exact, Numeric  # , Date, String
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
-from plant_parts import plant_parts
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +428,15 @@ def calc_match_stats(df):
     return(df)
 
 
-def calc_wins(df, ferc1_options):
+def calc_murk(df, iqr_perc_diff):
+    """Calculate the murky wins."""
+    distinction = (df['iqr_all'] * iqr_perc_diff)
+    murky_wins = (df[(df['rank'] == 1) &
+                     (df['diffs'] < distinction)])
+    return murky_wins
+
+
+def calc_wins(df, ferc1_options, iqr_perc_diff):
     """
     Find the winners and report on winning ratios.
 
@@ -457,13 +464,12 @@ def calc_wins(df, ferc1_options):
     """
     unique_ferc = df.reset_index().drop_duplicates(subset=['record_id_ferc'])
     ties = df[df['rank'] == 1.5]
-    distinction = (df['iqr_all'] * .25)
+    distinction = (df['iqr_all'] * iqr_perc_diff)
     # for the winners, grab the top ranked,
     winners = (df[((df['rank'] == 1) & (df['diffs'] > distinction)) |
                   ((df['rank'] == 1) & (df['diffs'].isnull()))])
 
-    murky_wins = (df[(df['rank'] == 1) &
-                     (df['diffs'] < distinction)])
+    murky_wins = calc_murk(df, iqr_perc_diff)
 
     logger.info(
         f'matches vs total ferc:  {len(unique_ferc)/len(ferc1_options):.02}')
