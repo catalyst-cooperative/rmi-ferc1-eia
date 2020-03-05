@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 class TrainXlxsCompiler():
     """Grab the training data excel file."""
 
-    def __init__(self):
+    def __init__(self, file_path):
         """Initialize a compiler of training data."""
         self.train_df = None
+        self.file_path = file_path
 
     def _grab_test_xlxs(self):
         """TODO: Add file path."""
@@ -30,7 +31,7 @@ class TrainXlxsCompiler():
         else:
             logger.info('grabbing xlxs file.')
             self.train_df = pd.read_excel(
-                'pudl_machine_learning.xlsx',
+                self.file_path,
                 skiprows=1,
                 dtype={'EIA Plant Code': pd.Int64Dtype(),
                        'Generator': pd.Int64Dtype(),
@@ -403,17 +404,14 @@ def calc_match_stats(df):
     df = df.reset_index()
     gb = df.groupby('record_id_ferc')[['record_id_ferc', 'score']]
     df = (
-        df.sort_values(['record_id_ferc', 'score']).
+        df.sort_values(['record_id_ferc', 'score'])
+        # rank the scores
+        .assign(rank=gb.rank(ascending=0, method='average'))
         # calculate differences between scores
-        assign(diffs=lambda x: x['score'].diff()).
+        .assign(diffs=lambda x: x['score'].diff()).
         # count grouped records
         merge(pudl.helpers.count_records(df, ['record_id_ferc'], 'count'),
               how='left',).
-        # rank the scores
-        merge((gb.rank(ascending=0).
-               rename(columns={'score': 'rank'})),
-              left_index=True,
-              right_index=True).
         # calculate the iqr for each
         merge((gb.agg({'score': scipy.stats.iqr}).
                droplevel(0, axis=1).

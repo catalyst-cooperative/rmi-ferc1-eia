@@ -624,8 +624,8 @@ class CompilePlantParts(object):
 
         prop_true_len1 = len(
             bool_df[bool_df[f'true_gran_{part_name}']]) / len(bool_df)
-        logger.info(f'proportion of trues: {prop_true_len1:.02}')
-        logger.info(f'number of records pre-merge:  {len(part_df)}')
+        logger.debug(f'proportion of trues: {prop_true_len1:.02}')
+        logger.debug(f'number of records pre-merge:  {len(part_df)}')
 
         part_df = (part_df.
                    merge(bool_df, how='left').
@@ -636,8 +636,8 @@ class CompilePlantParts(object):
                    }))
 
         prop_true_len2 = len(part_df[part_df.true_gran]) / len(part_df)
-        logger.info(f'proportion of trues: {prop_true_len2:.02}')
-        logger.info(f'number of records post-merge: {len(part_df)}')
+        logger.debug(f'proportion of trues: {prop_true_len2:.02}')
+        logger.debug(f'number of records post-merge: {len(part_df)}')
         return part_df
 
     def _clean_plant_parts(self, plant_parts_df):
