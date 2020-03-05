@@ -40,14 +40,6 @@ plant_parts = {
             'fuel_cost_per_mmbtu': 'capacity_mw',
         },
         'ag_tables': {
-            'generators_eia860': {
-                'denorm_table': None,
-                'denorm_cols': None,
-                'ag_cols': {
-                    'capacity_mw': 'sum',
-                },
-                'wtavg_cols': None,
-            },
             'generation_eia923': {
                 'denorm_table': None,
                 'denorm_cols': None,
@@ -56,7 +48,14 @@ plant_parts = {
                 },
                 'wtavg_cols': None,
             },
-
+            'generators_eia860': {
+                'denorm_table': None,
+                'denorm_cols': None,
+                'ag_cols': {
+                    'capacity_mw': 'sum',
+                },
+                'wtavg_cols': None,
+            },
             'mcoe': {
                 'denorm_table': None,
                 'denorm_cols': None,
