@@ -651,6 +651,19 @@ class CompilePlantParts(object):
             drop_duplicates(subset=['record_id_eia']).
             set_index('record_id_eia'))
 
+    def add_new_plant_name(self):
+        """Add plants names into the compiled plant part df."""
+        df = self.plant_parts_df
+        id_cols_all = ['generator_id', 'unit_id_pudl', 'prime_mover_code',
+                       'energy_source_code_1', 'technology_description']
+        df['plant_name_new'] = df['plant_name_eia']
+        col = 'generator_id'
+        for col in id_cols_all:
+            df.loc[df[col].notnull(), 'plant_name_new'] = (
+                df['plant_name_new'] + " " + df[col].astype(str))
+        self.plant_parts_df = df
+        return self.plant_parts_df
+
     def generate_master_unit_list(self, false_gran=False):
         """
         Aggreate and slice data points by each plant part.
@@ -724,8 +737,10 @@ class CompilePlantParts(object):
                   'true_gran', 'appro_part_label'
                   ]).
             pipe(self._clean_plant_parts))
+
         self.plant_parts_df = plant_parts_df
-        return plant_parts_df
+        self.plant_parts_df = self.add_new_plant_name()
+        return self.plant_parts_df
 
 
 freq_ag_cols = {

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import recordlinkage as rl
 import scipy
-from recordlinkage.compare import Exact, Numeric  # , Date, String
+from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
@@ -189,6 +189,8 @@ def make_candidate_links(dfa, dfb, block_col=None):
 def make_features(dfa, dfb, block_col=None):
     """Generate comparison features based on defined features."""
     compare_cl = rl.Compare(features=[
+        String('plant_name_ferc1', 'plant_name_new',
+               label='plant_name', method='jarowinkler'),
         Numeric('net_generation_mwh', 'net_generation_mwh',
                 label='net_generation_mwh', method='exp', scale=1000),
         Numeric('capacity_mw', 'capacity_mw',
