@@ -98,7 +98,8 @@ class CompileTables(object):
 
                 # if we have a freq and a table is reported annually..aggregate
                 if self.freq is not None and freq_ag_cols[table] is not None:
-                    df = self.agg_cols(id_cols=freq_ag_cols[table]['id_cols'],
+                    df = self.agg_cols(id_cols=freq_ag_cols[table]['id_cols'] +
+                                       ['utility_id_eia', 'fraction_owned'],
                                        ag_cols=freq_ag_cols[table]['ag_cols'],
                                        wtavg_cols=None,
                                        df_in=df)
@@ -117,8 +118,7 @@ class CompileTables(object):
 
     def agg_cols(self, id_cols, ag_cols, wtavg_cols, df_in):
         """Aggregate dataframe."""
-        cols_to_grab = id_cols + \
-            ['utility_id_eia', 'fraction_owned', 'ownership']
+        cols_to_grab = id_cols
         cols_to_grab = list(set(
             [x for x in cols_to_grab if x in list(df_in.columns)]))
         if 'report_date' in list(df_in.columns):
@@ -266,23 +266,25 @@ class CompilePlantParts(object):
         """Generate dataframe of aggregated plant part."""
         cols_to_grab = plant_part_details['id_cols'] + ['report_date']
         plant_part_df = pd.DataFrame(columns=cols_to_grab)
-        for table_name, table_details in plant_part_details['ag_tables'].items():
+        for table_name, table_deets in plant_part_details['ag_tables'].items():
             logger.info(f'beginning the aggregation for {table_name}')
             # grab the table
             table = self.grab_denormalize_table(
                 table_name,
-                denorm_table=table_details['denorm_table'],
-                denorm_cols=table_details['denorm_cols'],
+                denorm_table=table_deets['denorm_table'],
+                denorm_cols=table_deets['denorm_cols'],
                 id_cols=plant_part_details['id_cols'],
             )
 
             plant_part_df = (self.table_compiler.agg_cols(
-                id_cols=plant_part_details['id_cols'],
-                ag_cols=table_details['ag_cols'],
-                wtavg_cols=table_details['wtavg_cols'],
+                id_cols=plant_part_details['id_cols'] +
+                ['utility_id_eia', 'fraction_owned', 'ownership'],
+                ag_cols=table_deets['ag_cols'],
+                wtavg_cols=table_deets['wtavg_cols'],
                 df_in=table)
                 .merge(plant_part_df, how='outer')
             )
+        # if 'utility_id_eia' in plant_part_df.columns:
         plant_part_df = plant_part_df.dropna(subset=['utility_id_eia'])
         return plant_part_df
 
@@ -305,7 +307,7 @@ class CompilePlantParts(object):
             # something wrong.
             raise AssertionError(
                 'merge error: ownership and gens produced with null records')
-
+        # clean the remaining nulls
         # assign 100% ownership for records not in the ownership table
         plant_gen_df['fraction_owned'] = plant_gen_df['fraction_owned'].fillna(
             value=1)
@@ -364,8 +366,62 @@ class CompilePlantParts(object):
                     denorm_df, how='left')
                 if og_len != len(self.plant_gen_df):
                     raise AssertionError(
-                        'ahh merge error! when adding denorm colunms to `plant_gen_df` we should have the same number of records')
+                        'ahh merge error! when adding denorm colunms to'
+                        'plant_gen_df we must get the same number of records')
         return self.plant_gen_df
+
+    def ag_part_by_own_slice(self, part_name):
+        """
+        Aggregate the plant part by seperating ownership types.
+
+        There are total records and owned records in this master unit list.
+        Those records need to be aggregated differently to scale. The total
+        owned slice is now grouped and aggregated as a single version of the
+        full plant and then the utilities are merged back. The owned slice is
+        grouped and aggregated with the utility_id_eia, so the portions of
+        generators created by slice_by_ownership will be appropriately
+        aggregated to each plant part level.
+
+        Args:
+            part_name (str): the name of the part to aggregate to. Names can be
+                only those in `self.plant_parts`
+
+        Returns:
+            pandas.DataFrame : dataframe aggregated to the level of the
+                part_name
+        """
+        plant_part = self.plant_parts[part_name]
+        logger.info(f'begin aggregation for: {part_name}')
+        id_cols = plant_part['id_cols']
+        ag_cols = plant_part['ag_cols']
+        wtavg_cols = plant_part['wtavg_cols']
+        part_own = self.plant_gen_df[self.plant_gen_df['ownership'] == 'owned']
+        part_tot = self.plant_gen_df[self.plant_gen_df['ownership'] == 'total']
+        if len(self.plant_gen_df) != len(part_own) + len(part_tot):
+            raise AssertionError(
+                "Error occured in breaking apart ownership types."
+                "The total and owned slices should equal the total records."
+            )
+        part_own = self.table_compiler.agg_cols(
+            id_cols=id_cols +
+            ['utility_id_eia',
+             'ownership'],
+            ag_cols=ag_cols,
+            wtavg_cols=wtavg_cols,
+            df_in=part_own)
+        # still need to re-calc the fraction owned for the part
+        part_tot = (self.table_compiler.agg_cols(
+            id_cols=id_cols,
+            ag_cols=ag_cols,
+            wtavg_cols=wtavg_cols,
+            df_in=part_tot).
+            merge(self.plant_gen_df[id_cols +
+                                    ['report_date', 'utility_id_eia']].
+                  dropna().
+                  drop_duplicates()).
+            assign(ownership='total')
+        )
+        return part_own.append(part_tot, sort=False)
 
     def add_additonal_cols(self, plant_parts_df):
         """
@@ -594,8 +650,8 @@ class CompilePlantParts(object):
         for col in cols:
             # TODO: go back to ~bools[col] when we convert over to pandas 1.0
             # bools.loc[~bools[col], assign_col] = col.split(sep="_count_")[1]
-            bools.loc[bools[col] == False, assign_col] = col.split(sep="_count_")[
-                1]
+            bools.loc[bools[col] == False, assign_col] = \
+                col.split(sep="_count_")[1]
         bools = (
             self.assign_record_id_eia(bools, assign_col).
             rename(columns={'record_id_eia': f'record_id_eia_{part_name}'}))
@@ -616,7 +672,7 @@ class CompilePlantParts(object):
                            ['report_date', f'true_gran_{part_name}',
                             f'appro_part_label_{part_name}',
                             f'record_id_eia_{part_name}',
-                            'fraction_owned',
+                            # 'fraction_owned',
                             'utility_id_eia',
                             'ownership'
                             ]].
@@ -701,17 +757,10 @@ class CompilePlantParts(object):
                                'plant']
         for part_name in plant_parts_ordered:
             plant_part = self.plant_parts[part_name]
-            logger.info(f'begin aggregation for: {part_name}')
             id_cols = plant_part['id_cols']
-            ag_cols = plant_part['ag_cols']
-            wtavg_cols = plant_part['wtavg_cols']
 
             thing = (
-                self.table_compiler.agg_cols(
-                    id_cols=id_cols,
-                    ag_cols=ag_cols,
-                    wtavg_cols=wtavg_cols,
-                    df_in=self.plant_gen_df).
+                self.ag_part_by_own_slice(part_name).
                 pipe(self.add_install_year, id_cols,
                      plant_part['install_table']).
                 assign(plant_part=part_name).
@@ -733,9 +782,8 @@ class CompilePlantParts(object):
             pipe(pudl.helpers.organize_cols,
                  ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
                   'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
-                  'technology_description', 'utility_id_eia', 'fraction_owned',
-                  'true_gran', 'appro_part_label'
-                  ]).
+                  'technology_description', 'utility_id_eia', 'true_gran',
+                  'appro_part_label']).
             pipe(self._clean_plant_parts))
 
         self.plant_parts_df = plant_parts_df
