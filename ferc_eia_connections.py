@@ -62,13 +62,13 @@ def prep_train_connections(compiler_mul, compiler_train):
     string_cols = ['FERC Line Type', 'EIA Technology',
                    'EIA Prime Mover', 'EIA Energy Source Code',
                    'Owned or Total']
-    plant_part_rename = {
+    plant_part_rename = {'plant_part': {
         'plant': 'plant',
         'generator': 'plant_gen',
         'unit': 'plant_unit',
         'technology': 'plant_technology',
         'plant_prime_fuel': 'plant_prime_fuel',
-        'plant_prime': 'plant_prime_mover'}
+        'plant_prime': 'plant_prime_mover'}, }
 
     for col in string_cols:
         if col in test_df.columns:
