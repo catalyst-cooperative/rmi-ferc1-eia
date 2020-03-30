@@ -110,7 +110,17 @@ class CompileTables(object):
                 # getattr turns the string of the table into an attribute
                 # of the object, so this runs the output function
                 logger.info(f'grabbing {table} from the output object')
-                df = getattr(self.pudl_out, table)()
+                # the pudl_out.mcoe function has defaults set for data purity.
+                # these defaults were removing ~20% of the fuel cost records.
+                # mcoe is the only pudl_out function that is used in the MUL -
+                # this if/else enables grabbing other pudl_out tables w/o args
+                if table == 'mcoe':
+                    df = self.pudl_out.mcoe(min_heat_rate=None,
+                                            min_fuel_cost_per_mwh=None,
+                                            min_cap_fact=None,
+                                            max_cap_fact=None)
+                else:
+                    df = getattr(self.pudl_out, table,)()
             self._dfs[table] = pudl.helpers.convert_cols_dtypes(df,
                                                                 'eia',
                                                                 name=table)
