@@ -412,6 +412,10 @@ class CompilePlantParts(object):
                 "Error occured in breaking apart ownership types."
                 "The total and owned slices should equal the total records."
             )
+        dedup_cols = list(part_tot.columns)
+        dedup_cols.remove('utility_id_eia')
+        dedup_cols.remove('unit_id_pudl')
+        part_tot = part_tot.drop_duplicates(subset=dedup_cols)
         part_own = self.table_compiler.agg_cols(
             id_cols=id_cols +
             ['utility_id_eia',
