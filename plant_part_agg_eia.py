@@ -497,15 +497,71 @@ class CompilePlantParts(object):
         logger.debug(f'post count of part DataFrame: {len(part_df)}')
         return part_df
 
-    def grab_consistent_qualifiers(self,
-                                   part_df,
-                                   record_name,
-                                   id_cols,
-                                   denorm_table,
-                                   denorm_cols
-                                   ):
+    def grab_consistent_qualifiers(self, record_df, base_cols, record_name):
         """
         Grab fully consistent qualifier records.
+
+        When qualitative data is consistent for every record in a plant part,
+        we grab these catagoricals. If the records are not consistent, then
+        nothing is compiled.
+
+        Args:
+            record_df (pandas.DataFrame): the dataframe with the record
+            base_cols (list) : list of identifying columns.
+            record_name (string) : name of qualitative record
+        """
+        entity_count_df = (pudl.helpers.count_records(record_df,
+                                                      base_cols,
+                                                      'entity_occurences').
+                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
+        record_count_df = (pudl.helpers.count_records(record_df,
+                                                      base_cols +
+                                                      [record_name],
+                                                      'record_occurences').
+                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
+
+        something = (
+            record_df[base_cols + [record_name]].
+            merge(entity_count_df, how='left', on=base_cols).
+            merge(record_count_df, how='left', on=base_cols + [record_name])
+        )
+        # find all of the matching records..
+        consistent_records = (
+            something[something['entity_occurences'] ==
+                      something['record_occurences']].
+            drop(columns=['entity_occurences', 'record_occurences']).
+            drop_duplicates())
+        return consistent_records
+
+    def grab_max_op_status(self, record_df, base_cols, record_name, sorter):
+        """
+        Grab the max operating status.
+
+        We want to find the most relevant record  as defined by the sorter. In
+        the example case of the operating status means that if any related
+        generator is operable, than we'll label the whole plant as operable.
+
+        Args:
+            record_df (pandas.DataFrame): the dataframe with the record
+            base_cols (list) : list of identifying columns.
+            record_name (string) : name of qualitative record
+            sorter (list): sorted list of category options
+        """
+        record_df[record_name] = record_df[record_name].astype("category")
+        record_df[record_name].cat.set_categories(sorter, inplace=True)
+        record_df = record_df.sort_values(record_name)
+        return (record_df[base_cols + [record_name]]
+                .drop_duplicates(keep='first'))
+
+    def grab_qualifiers(self,
+                        part_df,
+                        record_name,
+                        id_cols,
+                        denorm_table,
+                        denorm_cols
+                        ):
+        """
+        Grab qualifier records.
 
         For an individual compiled dataframe for each of the plant parts, we
         want to add back in some non-data columns (qualifier columns). When
@@ -547,28 +603,16 @@ class CompilePlantParts(object):
             base_cols = id_cols + ['report_date']
         else:
             base_cols = id_cols
-        entity_count_df = (pudl.helpers.count_records(record_df,
-                                                      base_cols,
-                                                      'entity_occurences').
-                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
-        record_count_df = (pudl.helpers.count_records(record_df,
-                                                      base_cols +
-                                                      [record_name],
-                                                      'record_occurences').
-                           pipe(pudl.helpers.convert_cols_dtypes, 'eia'))
 
-        something = (
-            record_df[base_cols + [record_name]].
-            merge(entity_count_df, how='left', on=base_cols).
-            merge(record_count_df, how='left', on=base_cols + [record_name])
-        )
-        # find all of the matching records..
-        consistent_records = (
-            something[something['entity_occurences'] ==
-                      something['record_occurences']].
-            drop(columns=['entity_occurences', 'record_occurences']).
-            drop_duplicates())
-
+        if record_name != 'operational_status':
+            logger.debug(f'grabbing consistent {record_name}s')
+            consistent_records = self.grab_consistent_qualifiers(
+                record_df, base_cols, record_name)
+        else:
+            logger.debug(f'grabbing max {record_name}')
+            sorter = ['existing', 'proposed', 'retired']
+            consistent_records = self.grab_max_op_status(
+                record_df, base_cols, record_name, sorter)
         logger.debug(f'merging in consistent {record_name}')
         return part_df.merge(consistent_records, how='left')
 
@@ -779,10 +823,10 @@ class CompilePlantParts(object):
                 assign(plant_part=part_name).
                 pipe(self.assign_true_gran, part_name).
                 pipe(self.add_record_id, id_cols, plant_part_col='plant_part'))
-            # add in the consistent qualifying records
+            # add in the qualifier records
             for qual_record in qual_record_tables:
                 logger.debug(f'grab consistent {qual_record} for {part_name}')
-                thing = self.grab_consistent_qualifiers(
+                thing = self.grab_qualifiers(
                     thing,
                     qual_record,
                     id_cols,
