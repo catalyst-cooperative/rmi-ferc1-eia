@@ -508,10 +508,9 @@ class CompilePlantParts(object):
         Grab fully consistent qualifier records.
 
         For an individual compiled dataframe for each of the plant parts, we
-        need to
-
-        When qualitative data is consistent for every record in a plant part,
-        we assign these catagoricals. If the records are not consistent, then
+        want to add back in some non-data columns (qualifier columns). When
+        qualitative data is consistent for every record in a plant part, we
+        assign these catagoricals. If the records are not consistent, then
         nothing is added.
 
         Args:
@@ -780,7 +779,7 @@ class CompilePlantParts(object):
                 assign(plant_part=part_name).
                 pipe(self.assign_true_gran, part_name).
                 pipe(self.add_record_id, id_cols, plant_part_col='plant_part'))
-
+            # add in the consistent qualifying records
             for qual_record in qual_record_tables:
                 logger.debug(f'grab consistent {qual_record} for {part_name}')
                 thing = self.grab_consistent_qualifiers(
@@ -835,11 +834,13 @@ freq_ag_cols = {
 }
 
 qual_record_tables = {
-    # 'unit_id_pudl': 'boiler_generator_assn_eia860',
-    # 'energy_source_code_1': 'generators_eia860',
-    # 'prime_mover_code': 'generators_entity_eia',
     'fuel_type_code_pudl': 'generators_eia860',
+    'operational_status': 'generators_eia860',
+    'planned_retirement_date': 'generators_eia860',
 }
+"""
+dict: a dictionary of qualifier column name (key) and original table (value).
+"""
 
 
 def calc_capacity_factor(df, min_cap_fact, max_cap_fact, freq):
