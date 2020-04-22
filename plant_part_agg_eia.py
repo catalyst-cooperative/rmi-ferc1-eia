@@ -140,7 +140,7 @@ class CompileTables(object):
         logger.debug('aggregate the parts')
         logger.debug(f'     grouping by on {cols_to_grab}')
         logger.debug(f'     agg-ing on by on {ag_cols}')
-        logger.debug(f'     cols in df are {df_in.columns}')
+        # logger.debug(f'     cols in df are {df_in.columns}')
         df_in = df_in.astype({'report_date': 'datetime64[ns]'})
         df_out = (df_in.groupby(by=cols_to_grab).
                   # use the groupby object to aggregate on the ag_cols
@@ -170,6 +170,9 @@ class CompilePlantParts(object):
         Args:
             plant_parts (dict): a dictionary of information required to
                 aggregate each plant part.
+            table_compiler (object)
+            clobber (bool) : if True, you will clobber plant_parts_df (the
+                master unit list)
 
         """
         self.table_compiler = table_compiler
@@ -181,6 +184,8 @@ class CompilePlantParts(object):
         self.plant_parts_ordered = ['plant', 'plant_unit',
                                     'plant_prime_mover', 'plant_technology',
                                     'plant_prime_fuel', 'plant_gen']
+        self.gen_util_ids = ['plant_id_eia', 'generator_id',
+                             'report_date', 'utility_id_eia']
         # make a dictionary with the main id column (key) corresponding to the
         # plant part (values)
         self.ids_to_parts = {}
@@ -262,14 +267,14 @@ class CompilePlantParts(object):
                     'utility_id_eia', 'fraction_owned',
                     'owner_utility_id_eia']])
         # make new records for generators to replicate the total generator
-        own860_fake_totals = own860[own860['fraction_owned'] != 1][[
-            'plant_id_eia', 'generator_id', 'report_date', 'utility_id_eia',
-            'owner_utility_id_eia']].drop_duplicates()
+        # own860_fake_totals = own860[own860['fraction_owned'] != 1][[
+        #    'plant_id_eia', 'generator_id', 'report_date', 'utility_id_eia',
+        #    'owner_utility_id_eia']].drop_duplicates()
         # asign 1 to all of the fraction_owned column
         # we'll be able to tell later if it is a total by the fraction owned
-        own860_fake_totals['fraction_owned'] = 1
+        #own860_fake_totals['fraction_owned'] = 1
         # squish that back into the ownership table
-        own860 = own860.append(own860_fake_totals, sort=True)
+        #own860 = own860.append(own860_fake_totals, sort=True)
         return own860
 
     def aggregate_plant_part(self, plant_part_details):
@@ -293,19 +298,60 @@ class CompilePlantParts(object):
                 wtavg_cols=table_deets['wtavg_cols'],
                 df_in=table)
                 .merge(plant_part_df, how='outer')
+                .dropna(subset=plant_part_details['id_cols'])
             )
         # if 'utility_id_eia' in plant_part_df.columns:
         plant_part_df = plant_part_df.dropna(subset=['utility_id_eia'])
         return plant_part_df
 
-    def slice_by_ownership(self, plant_gen_df):
+    def _relabel_sole_owner_gens(self, df, record_ids_cols):
+        """
+        Relabel the sole owner generators to be owned, not toal.
+
+        This methods' assertions will fail if this is run after one round of
+        re-labeling has been preformed. This is meant to be run at the end of
+        self.slice_by_ownership and nowhere else.
+
+        Args:
+            plant_gen_df (pandas.DataFrame)
+            record_ids_cols (list): list of id columns for generator/utility
+                records.
+        """
+        owned_og = len(df[df.ownership == 'owned'])
+        plant_gen_count = pd.DataFrame(df.groupby(record_ids_cols).size(),
+                                       columns=['count']).reset_index()
+        df = pd.merge(df, plant_gen_count, on=record_ids_cols)
+
+        # do some checks
+        if len(df[(df['count'] == 1) & (df['ownership'] != 'total')]) != 0:
+            raise AssertionError(
+                'All 1-record generator should be labeled total at this stage.'
+                'Check calc in `plant_gen_count`'
+                'OR whether re-labeling has already happened.'
+            )
+        if len(df[(df['ownership'] == 'total')]) < len(df[(df['count'] == 1)]):
+            raise AssertionError(
+                'There should be more total generators than 1-count generators'
+                'Check calc in `plant_gen_count`.'
+            )
+
+        df.loc[(df['count'] == 1), 'ownership'] = 'owned'
+        df = df.drop(columns=['count'])
+        owned_post = len(df[df.ownership == 'owned'])
+        logger.info(f'OG: {owned_og} / Post: {owned_post}')
+        if not owned_post >= owned_og:
+            raise AssertionError(
+                'Owned-labeld plants should increase during relabeling.'
+            )
+        return df
+
+    def slice_by_ownership(self, plant_gen_df, relabel):
         """Generate proportional data by ownership %s."""
         own860 = self.grab_ownership()
         plant_gen_df = plant_gen_df.merge(
             own860,
             how='outer',
-            on=['plant_id_eia', 'generator_id',
-                'report_date', 'utility_id_eia'],
+            on=self.gen_util_ids,
             indicator=True
         )
         # if there are records that don't show up in the ownership table (and
@@ -339,10 +385,18 @@ class CompilePlantParts(object):
                                                axis='index'))
         if (len(plant_gen_df[plant_gen_df['fraction_owned'] == 1].
                 drop_duplicates()) !=
-            len(plant_gen_df.drop_duplicates(
-                subset=['plant_id_eia', 'generator_id',
-                        'report_date', 'utility_id_eia']))):
+                len(plant_gen_df.drop_duplicates(subset=self.gen_util_ids))):
             raise AssertionError('something')
+        if relabel:
+            owned_og = len(plant_gen_df[plant_gen_df.ownership == 'owned'])
+            dtypes_og = plant_gen_df.dtypes
+            plant_gen_df = self._relabel_sole_owner_gens(
+                plant_gen_df, self.gen_util_ids)
+            owned_post = len(plant_gen_df[plant_gen_df.ownership == 'owned'])
+            dtypes_post = plant_gen_df.dtypes
+            logger.info(f'OG: {owned_og} / Post: {owned_post}')
+            logger.info(f'OG:   {dtypes_og}'
+                        f'Post: {dtypes_post}')
         return plant_gen_df
 
     def denorm_plant_gen(self):
@@ -405,12 +459,15 @@ class CompilePlantParts(object):
         id_cols = plant_part['id_cols']
         ag_cols = plant_part['ag_cols']
         wtavg_cols = plant_part['wtavg_cols']
-        part_own = self.plant_gen_df[self.plant_gen_df['ownership'] == 'owned']
-        part_tot = self.plant_gen_df[self.plant_gen_df['ownership'] == 'total']
+        # part_own = self.plant_gen_df[self.plant_gen_df.ownership == 'owned']
+        # part_tot = self.plant_gen_df[self.plant_gen_df.ownership == 'total']
+        part_own = self.plant_gen_df[self.plant_gen_df['fraction_owned'] < 1]
+        part_tot = self.plant_gen_df[self.plant_gen_df['fraction_owned'] == 1]
         if len(self.plant_gen_df) != len(part_own) + len(part_tot):
             raise AssertionError(
                 "Error occured in breaking apart ownership types."
                 "The total and owned slices should equal the total records."
+                "Check for nulls in the ownership column."
             )
         dedup_cols = list(part_tot.columns)
         dedup_cols.remove('utility_id_eia')
@@ -657,6 +714,7 @@ class CompilePlantParts(object):
         # convert the count columns to bool columns
         for col in counts.filter(like='_count_').columns:
             counts.loc[counts[col].notnull(), col] = counts[col] > 1
+            # counts = counts.astype({col: 'bool'})
 
         # TODO: turn on this astype when we convert over to pandas 1.0
         # counts = counts.filter(like='_count_').astype(pd.BooleanDtype())
@@ -665,6 +723,7 @@ class CompilePlantParts(object):
             counts[f'true_gran_{part}'] = (
                 counts.filter(like=part + '_count_').
                 all(axis='columns'))
+            # counts = counts.astype({f'true_gran_{part}': pd.BooleanDtype()})
 
         return counts
 
@@ -777,7 +836,27 @@ class CompilePlantParts(object):
         self.plant_parts_df = df
         return self.plant_parts_df
 
-    def generate_master_unit_list(self, false_gran=False):
+    def prep_plant_gen_df(self, relabel):
+        """Prepare plant gen dataframe."""
+        # 1) aggregate the data points by generator
+        self.plant_gen_df = (
+            self.aggregate_plant_part(self.plant_parts['plant_gen']).
+            astype({'utility_id_eia': 'Int64'}).
+            # 2) generating proportional data by ownership %s
+            pipe(self.slice_by_ownership, relabel).
+            astype({'utility_id_eia': 'Int64'}))
+        self.plant_gen_df = self.denorm_plant_gen()
+        return self.plant_gen_df
+
+    def prep_part_bools(self):
+        """Prep the part_bools df that denotes true_gran for all generators."""
+        self.part_bools = self.make_all_the_bools()
+        for part_name1 in self.plant_parts.keys():
+            self.part_bools = self.label_true_id_by_part(part_name1,
+                                                         self.part_bools)
+        return self.part_bools
+
+    def generate_master_unit_list(self, relabel=True):
         """
         Aggreate and slice data points by each plant part.
 
@@ -788,24 +867,15 @@ class CompilePlantParts(object):
         Args:
             plant_parts (dict): a dictionary of information required to
                 aggregate each plant part.
+            relabel (bool): if True, the one owner plants will be labeled as
+                "owned" in the ownership column.
 
         """
         if self.plant_parts_df is not None and self.clobber is False:
             return self.plant_parts_df
         if self.plant_gen_df is None:
-            # 1) aggregate the data points by generator
-            self.plant_gen_df = (
-                self.aggregate_plant_part(self.plant_parts['plant_gen']).
-                astype({'utility_id_eia': 'Int64'}).
-                # 2) generating proportional data by ownership %s
-                pipe(self.slice_by_ownership).
-                astype({'utility_id_eia': 'Int64'}))
-            self.plant_gen_df = self.denorm_plant_gen()
-
-        self.part_bools = self.make_all_the_bools()
-        for part_name1 in self.plant_parts.keys():
-            self.part_bools = self.label_true_id_by_part(part_name1,
-                                                         self.part_bools)
+            self.plant_gen_df = self.prep_plant_gen_df(relabel)
+        self.part_bools = self.prep_part_bools()
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
@@ -822,7 +892,10 @@ class CompilePlantParts(object):
                      plant_part['install_table']).
                 assign(plant_part=part_name).
                 pipe(self.assign_true_gran, part_name).
-                pipe(self.add_record_id, id_cols, plant_part_col='plant_part'))
+                # pipe(self._relabel_sole_owner_gens,
+                #     id_cols + ['report_date', 'utility_id_eia']).
+                pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+            )
             # add in the qualifier records
             for qual_record in qual_record_tables:
                 logger.debug(f'grab consistent {qual_record} for {part_name}')
