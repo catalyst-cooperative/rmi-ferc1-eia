@@ -58,7 +58,8 @@ def prep_train_connections(compiler_mul, compiler_train):
         'Generator': 'generator_id',
         'EIA Prime Mover': 'prime_mover_code',
         'EIA Energy Source Code': 'energy_source_code_1',
-        'eia_ownership': 'ownership', }
+        # use the RMI labels, not our eia_ownership relabel
+        'Owned or Total': 'ownership', }
     string_cols = ['FERC Line Type', 'EIA Technology',
                    'EIA Prime Mover', 'EIA Energy Source Code',
                    'Owned or Total']
