@@ -266,15 +266,6 @@ class CompilePlantParts(object):
                   [['plant_id_eia', 'generator_id', 'report_date',
                     'utility_id_eia', 'fraction_owned',
                     'owner_utility_id_eia']])
-        # make new records for generators to replicate the total generator
-        # own860_fake_totals = own860[own860['fraction_owned'] != 1][[
-        #    'plant_id_eia', 'generator_id', 'report_date', 'utility_id_eia',
-        #    'owner_utility_id_eia']].drop_duplicates()
-        # asign 1 to all of the fraction_owned column
-        # we'll be able to tell later if it is a total by the fraction owned
-        # own860_fake_totals['fraction_owned'] = 1
-        # squish that back into the ownership table
-        # own860 = own860.append(own860_fake_totals, sort=True)
         return own860
 
     def aggregate_plant_part(self, plant_part_details):
@@ -650,11 +641,12 @@ class CompilePlantParts(object):
             logger.debug(f'grabbing consistent {record_name}s')
             consistent_records = self.grab_consistent_qualifiers(
                 record_df, base_cols, record_name)
-        else:
+        if record_name == 'operational_status':
             logger.debug(f'grabbing max {record_name}')
             sorter = ['existing', 'proposed', 'retired']
-            consistent_records = self.grab_max_op_status(
-                record_df, base_cols, record_name, sorter)
+            consistent_records = self.dedup_on_category(
+                record_df, base_cols, record_name, sorter
+            )
         logger.debug(f'merging in consistent {record_name}')
         return part_df.merge(consistent_records, how='left')
 
@@ -910,24 +902,29 @@ class CompilePlantParts(object):
         self.plant_parts_df = self.add_new_plant_name()
         return self.plant_parts_df
 
-    def _test_prep_merge(self, part_name, test_df):
+    def _test_prep_merge(self, part_name):
         """Run the test groupby and merge with the aggregations."""
         id_cols = self.plant_parts[part_name]['id_cols']
-        plant_cap = (self.plant_gen_df.groupby(by=id_cols +
-                                               ['report_date',
-                                                'utility_id_eia',
-                                                'ownership'
-                                                ])
-                     .agg(self.plant_parts[part_name]['ag_cols'])
-                     .reset_index())
-        test_merge = pd.merge(test_df, plant_cap,
-                              on=id_cols + ['report_date',
-                                            'utility_id_eia',
-                                            'ownership'
-                                            ],
-                              how='outer',
-                              indicator=True,
-                              suffixes=('', '_test'))
+        plant_cap = (self.plant_gen_df.groupby(
+            by=id_cols + ['report_date', 'utility_id_eia', 'ownership'])
+            .agg(self.plant_parts[part_name]['ag_cols'])
+            .reset_index()
+        )
+        plant_cap = self.dedup_on_category(
+            plant_cap,
+            category_name='ownership',
+            base_cols=[x for x in plant_cap.columns if x not in [
+                'record_id_eia', 'ownership', 'appro_record_id_eia', ]],
+            sorter=['owned', 'total']
+        )
+
+        test_merge = pd.merge(
+            self.plant_parts_df[self.plant_parts_df.plant_part == part_name],
+            plant_cap,
+            on=id_cols + ['report_date', 'utility_id_eia', 'ownership'],
+            how='outer',
+            indicator=True,
+            suffixes=('', '_test'))
         return test_merge
 
     def _test_col_bool(self, test_merge, test_col):
@@ -943,15 +940,14 @@ class CompilePlantParts(object):
         logger.info(f'  Results for {test_col}: {result}')
         return test_merge
 
-    def test_ag_cols(self, part_name, test_df):
+    def test_ag_cols(self, part_name):
         """
         For a compiled plant-part df, re-run groubys and check similarity.
 
         Args:
             part_name (string)
-            test_df (pandas.DataFrame)
         """
-        test_merge = self._test_prep_merge(part_name, test_df)
+        test_merge = self._test_prep_merge(part_name)
         for test_col in self.plant_parts[part_name]['ag_cols'].keys():
             test_merge = self._test_col_bool(test_merge, test_col)
         return test_merge
@@ -966,10 +962,7 @@ class CompilePlantParts(object):
         """
         for part_name in self.plant_parts_ordered:
             logger.info(f'Begining tests for {part_name}:')
-            self.test_ag_cols(
-                part_name,
-                self.plant_parts_df[
-                    self.plant_parts_df.plant_part == part_name])
+            self.test_ag_cols(part_name)
 
 
 freq_ag_cols = {
@@ -999,6 +992,8 @@ freq_ag_cols = {
     'utilities_eia': None,
     'plants_eia': None,
     'energy_source_eia923': None,
+
+
 }
 
 qual_record_tables = {
