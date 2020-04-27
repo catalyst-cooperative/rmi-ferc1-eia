@@ -19,6 +19,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_gen': {
@@ -38,6 +39,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
         'ag_tables': {
             'generation_eia923': {
@@ -89,6 +91,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_technology': {
@@ -108,6 +111,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_fuel': {
@@ -127,6 +131,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_mover': {
@@ -145,6 +150,7 @@ plant_parts = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
         },
     }
 }
