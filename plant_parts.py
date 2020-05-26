@@ -152,5 +152,24 @@ plant_parts = {
             'fuel_cost_per_mmbtu': 'capacity_mw',
             'fraction_owned': 'capacity_mw',
         },
-    }
+    },
+    'plant_ferc_acct': {
+        'id_cols': ['plant_id_eia', 'ferc_acct_name'],
+        'denorm_table': None,
+        'denorm_cols': None,
+        'install_table': 'ferc_acct_rmi',
+        'false_grans': None,
+        'ag_cols': {
+            'total_fuel_cost': 'sum',
+            'net_generation_mwh': 'sum',
+            'capacity_mw': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
 }
