@@ -11,9 +11,274 @@ import sqlalchemy as sa
 
 import pudl
 import pudl.constants as pc
-from plant_parts import plant_parts
 
 logger = logging.getLogger(__name__)
+
+PLANT_PARTS = {
+    'plant': {
+        'id_cols': ['plant_id_eia'],
+        'denorm_table': None,
+        'denorm_cols': None,
+        'install_table': None,
+        'false_grans': None,
+        'ag_cols': {
+            'total_fuel_cost': 'sum',
+            'net_generation_mwh': 'sum',
+            'capacity_mw': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+    'plant_gen': {
+        'id_cols': ['plant_id_eia', 'generator_id'],
+        # unit_id_pudl are associated with plant_ids & plant_ids/generator_ids
+        'denorm_table': None,
+        'denorm_cols': None,
+        'install_table': None,
+        'false_grans': ['plant', 'plant_unit'],
+        'ag_cols': {
+            'capacity_mw': pudl.helpers.sum_na,
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+        'ag_tables': {
+            'generation_eia923': {
+                'denorm_table': None,
+                'denorm_cols': None,
+                'ag_cols': {
+                    'net_generation_mwh': 'sum',
+                },
+                'wtavg_cols': None,
+            },
+            'generators_eia860': {
+                'denorm_table': None,
+                'denorm_cols': None,
+                'ag_cols': {
+                    'capacity_mw': 'sum',
+                },
+                'wtavg_cols': None,
+            },
+            'mcoe': {
+                'denorm_table': None,
+                'denorm_cols': None,
+                'ag_cols': {
+                    'total_fuel_cost': 'sum',
+                    'total_mmbtu': 'sum'
+                },
+                'wtavg_cols': {
+                    'fuel_cost_per_mwh': 'capacity_mw',  # 'wtavg_mwh',
+                    'heat_rate_mmbtu_mwh': 'capacity_mw',  # 'wtavg_mwh',
+                    'fuel_cost_per_mmbtu': 'capacity_mw',  # 'wtavg_mwh',
+                },
+
+            }
+        },
+    },
+    'plant_unit': {
+        'id_cols': ['plant_id_eia', 'unit_id_pudl'],
+        # unit_id_pudl are associated with plant_ids & plant_ids/generator_ids
+        'denorm_table': 'boiler_generator_assn_eia860',
+        'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
+        'install_table': 'boiler_generator_assn_eia860',
+        'false_grans': ['plant'],
+        'ag_cols': {
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+    'plant_technology': {
+        'id_cols': ['plant_id_eia', 'technology_description'],
+        'denorm_table': 'generators_eia860',
+        'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
+        'install_table': 'generators_eia860',
+        'false_grans': ['plant_prime_mover', 'plant_gen', 'plant_unit', 'plant'
+                        ],
+        'ag_cols': {
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+    'plant_prime_fuel': {
+        'id_cols': ['plant_id_eia', 'energy_source_code_1'],
+        'denorm_table': 'generators_eia860',
+        'denorm_cols': ['plant_id_eia', 'generator_id', 'report_date'],
+        'install_table': 'generators_eia860',
+        'false_grans': ['plant_technology', 'plant_prime_mover', 'plant_gen',
+                        'plant_unit', 'plant'],
+        'ag_cols': {
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+    'plant_prime_mover': {
+        'id_cols': ['plant_id_eia', 'prime_mover_code'],
+        'denorm_table': 'generators_entity_eia',
+        'denorm_cols': ['plant_id_eia', 'generator_id'],
+        'install_table': None,
+        'false_grans': ['plant_ferc_acct', 'plant_gen', 'plant_unit', 'plant'],
+        'ag_cols': {
+            'capacity_mw': 'sum',
+            'net_generation_mwh': 'sum',
+            'total_fuel_cost': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+    'plant_ferc_acct': {
+        'id_cols': ['plant_id_eia', 'ferc_acct_name'],
+        'denorm_table': None,
+        'denorm_cols': None,
+        'install_table': 'ferc_acct_rmi',
+        'false_grans': ['plant_gen', 'plant_unit', 'plant'],
+        'ag_cols': {
+            'total_fuel_cost': 'sum',
+            'net_generation_mwh': 'sum',
+            'capacity_mw': 'sum',
+            'total_mmbtu': 'sum'
+        },
+        'wtavg_cols': {
+            'fuel_cost_per_mwh': 'capacity_mw',
+            'heat_rate_mmbtu_mwh': 'capacity_mw',
+            'fuel_cost_per_mmbtu': 'capacity_mw',
+            'fraction_owned': 'capacity_mw',
+        },
+    },
+}
+"""
+dict: this dictionary contains a key for each of the 'plant parts' that should
+end up in the mater unit list. The top-level value for each key is another
+dictionary, which contains seven keys:
+    * id_cols (the primary key type id columns for this plant part),
+    * denorm_table (the table needed to merge into the generator table to get
+    the associated id_cols, if not neccesary then None),
+    * denorm_cols (the columns needed to merge in the denorm table),
+    * install_table (the table needed to merge in the installation year),
+    * false_grans (the list of other plant parts to check against for whether
+    or not the records are in this plant part are false granularities),
+    * ag_cols (a dictionary of the columns to aggregate on with a groupby),
+    * wtavg_cols (a dictionary of columns to perform weighted averages on and
+    the weight column)
+The plant_gen part has an additional item called ag_tables. This is for use in
+generating plant_gen_df; it contains tables to merge together to compile all
+the neccessary components, how to denormalize, aggregate and perform weighted
+averages at the generator level.
+"""
+
+FREQ_AG_COLS = {
+    'generation_eia923': {
+        'id_cols': ['plant_id_eia', 'generator_id'],
+        'ag_cols': {'net_generation_mwh': 'sum', },
+        'wtavg_cols': None
+    },
+    'generation_fuel_eia923': {
+        'id_cols': ['plant_id_eia', 'nuclear_unit_id',
+                    'fuel_type', 'fuel_type_code_pudl',
+                    'fuel_type_code_aer', 'prime_mover_code'],
+        'ag_cols': {'net_generation_mwh': 'sum', },
+        'wtavg_cols': ['fuel_consumed_mmbtu']
+    },
+    'fuel_receipts_costs_eia923': {
+        'id_cols': ['plant_id_eia', 'energy_source_code',
+                    'fuel_type_code_pudl', 'fuel_group_code',
+                    'fuel_group_code_simple', 'contract_type_code'],
+        'ag_cols': None,
+        'wtavg_cols': ['fuel_cost_per_mmbtu']
+    },
+    'generators_eia860': None,
+    'boiler_generator_assn_eia860': None,
+    'ownership_eia860': None,
+    'generators_entity_eia': None,
+    'utilities_eia': None,
+    'plants_eia': None,
+    'energy_source_eia923': None,
+
+
+}
+
+
+QUAL_RECORD_TABLES = {
+    'fuel_type_code_pudl': 'generators_eia860',
+    'operational_status': 'generators_eia860',
+    'planned_retirement_date': 'generators_eia860',
+}
+"""
+dict: a dictionary of qualifier column name (key) and original table (value).
+"""
+
+DTYPES_MUL = {
+    "plant_id_eia": "int64",
+    "report_date": "datetime64[ns]",
+    "plant_part": "object",
+    "generator_id": "object",
+    "unit_id_pudl": "object",
+    "prime_mover_code": "object",
+    "energy_source_code_1": "object",
+    "technology_description": "object",
+    "ferc_acct_name": "object",
+    "utility_id_eia": "object",
+    "true_gran": "bool",
+    "appro_part_label": "object",
+    "appro_record_id_eia": "object",
+    "capacity_factor": "float64",
+    "capacity_mw": "float64",
+    "fraction_owned": "float64",
+    "fuel_cost_per_mmbtu": "float64",
+    "fuel_cost_per_mwh": "float64",
+    "heat_rate_mmbtu_mwh": "float64",
+    "installation_year": "Int64",
+    "net_generation_mwh": "float64",
+    "ownership": "category",
+    "plant_id_pudl": "Int64",
+    "plant_name_eia": "string",
+    "total_fuel_cost": "float64",
+    "total_mmbtu": "float64",
+    "utility_id_pudl": "Int64",
+    "utility_name_eia": "string",
+    "report_year": "int64",
+    "plant_id_report_year": "object",
+    "plant_name_new": "string"
+}
 
 
 class CompileTables(object):
@@ -56,6 +321,7 @@ class CompileTables(object):
             pudl_engine=pudl_engine, freq=self.freq, rolling=rolling)
 
         self._dfs = {
+            # pudl sqlite tables
             'generation_fuel_eia923': None,
             'fuel_receipts_costs_eia923': None,
             'generators_eia860': None,
@@ -66,7 +332,7 @@ class CompileTables(object):
             'utilities_eia': None,
             'plants_eia': None,
             'energy_source_eia923': None,
-
+            # pudl_out tables
             'fuel_cost': None,
             'mcoe': None,
             'plants_steam_ferc1': None,
@@ -165,9 +431,9 @@ class CompileTables(object):
 class CompilePlantParts(object):
     """Compile plant parts."""
 
-    def __init__(self, table_compiler, plant_parts, clobber=False):
+    def __init__(self, table_compiler, clobber=False):
         """
-        idk.
+        Compile the plant parts for the master unit list.
 
         Args:
             plant_parts (dict): a dictionary of information required to
@@ -179,13 +445,14 @@ class CompilePlantParts(object):
         """
         self.table_compiler = table_compiler
         self.freq = table_compiler.freq
-        self.plant_parts = plant_parts
+        self.plant_parts = PLANT_PARTS
         self.plant_gen_df = None
         self.plant_parts_df = None
         self.clobber = clobber
         self.plant_parts_ordered = ['plant', 'plant_unit',
                                     'plant_prime_mover', 'plant_technology',
-                                    'plant_prime_fuel', 'plant_gen']
+                                    'plant_prime_fuel', 'plant_gen',
+                                    'plant_ferc_acct']
         self.gen_util_ids = ['plant_id_eia', 'generator_id',
                              'report_date', 'utility_id_eia']
         # make a dictionary with the main id column (key) corresponding to the
@@ -872,6 +1139,7 @@ class CompilePlantParts(object):
         plant_parts_ordered = [
             'plant_ferc_acct', 'plant_prime_fuel', 'plant_technology',
             'plant_prime_mover', 'plant_gen', 'plant_unit', 'plant']
+        # could use reversed(self.plant_parts_ordered)?
         for part_name in plant_parts_ordered:
             plant_part = self.plant_parts[part_name]
             id_cols = plant_part['id_cols']
@@ -982,81 +1250,6 @@ class CompilePlantParts(object):
             self.test_ag_cols(part_name)
 
 
-FREQ_AG_COLS = {
-    'generation_eia923': {
-        'id_cols': ['plant_id_eia', 'generator_id'],
-        'ag_cols': {'net_generation_mwh': 'sum', },
-        'wtavg_cols': None
-    },
-    'generation_fuel_eia923': {
-        'id_cols': ['plant_id_eia', 'nuclear_unit_id',
-                    'fuel_type', 'fuel_type_code_pudl',
-                    'fuel_type_code_aer', 'prime_mover_code'],
-        'ag_cols': {'net_generation_mwh': 'sum', },
-        'wtavg_cols': ['fuel_consumed_mmbtu']
-    },
-    'fuel_receipts_costs_eia923': {
-        'id_cols': ['plant_id_eia', 'energy_source_code',
-                    'fuel_type_code_pudl', 'fuel_group_code',
-                    'fuel_group_code_simple', 'contract_type_code'],
-        'ag_cols': None,
-        'wtavg_cols': ['fuel_cost_per_mmbtu']
-    },
-    'generators_eia860': None,
-    'boiler_generator_assn_eia860': None,
-    'ownership_eia860': None,
-    'generators_entity_eia': None,
-    'utilities_eia': None,
-    'plants_eia': None,
-    'energy_source_eia923': None,
-
-
-}
-
-QUAL_RECORD_TABLES = {
-    'fuel_type_code_pudl': 'generators_eia860',
-    'operational_status': 'generators_eia860',
-    'planned_retirement_date': 'generators_eia860',
-}
-"""
-dict: a dictionary of qualifier column name (key) and original table (value).
-"""
-
-DTYPES_MUL = {
-    "plant_id_eia": "int64",
-    "report_date": "datetime64[ns]",
-    "plant_part": "object",
-    "generator_id": "object",
-    "unit_id_pudl": "object",
-    "prime_mover_code": "object",
-    "energy_source_code_1": "object",
-    "technology_description": "object",
-    "ferc_acct_name": "object",
-    "utility_id_eia": "object",
-    "true_gran": "bool",
-    "appro_part_label": "object",
-    "appro_record_id_eia": "object",
-    "capacity_factor": "float64",
-    "capacity_mw": "float64",
-    "fraction_owned": "float64",
-    "fuel_cost_per_mmbtu": "float64",
-    "fuel_cost_per_mwh": "float64",
-    "heat_rate_mmbtu_mwh": "float64",
-    "installation_year": "Int64",
-    "net_generation_mwh": "float64",
-    "ownership": "category",
-    "plant_id_pudl": "Int64",
-    "plant_name_eia": "string",
-    "total_fuel_cost": "float64",
-    "total_mmbtu": "float64",
-    "utility_id_pudl": "Int64",
-    "utility_name_eia": "string",
-    "report_year": "int64",
-    "plant_id_report_year": "object",
-    "plant_name_new": "string"
-}
-
-
 def calc_capacity_factor(df, min_cap_fact, max_cap_fact, freq):
     """
     Calculate capacity factor.
@@ -1098,28 +1291,27 @@ def weighted_average(df, data_col, weight_col, by_col):
     return result.to_frame(name=data_col).reset_index()
 
 
-def grab_eia_ferc_acct_map():
+def grab_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
     """
     Grab map of EIA technology_description/pm codes <> ferc accounts.
 
     We must refactor this with a better path dependency. Or just store this
     map as a dataframe or dictionary.
     """
-    file_name = 'depreciation_rmi.xlsx'
-    file_path = pathlib.Path(pathlib.Path.cwd().parent, file_name)
+    file_path = pathlib.Path.cwd().parent / file_name
     eia_ferc_acct_map = pd.read_excel(file_path, skiprows=0, sheet_name=3)[
         ['technology_description', 'prime_mover_code', 'ferc_acct_name']]
     return eia_ferc_acct_map
 
 
-def get_master_unit_list_eia(file_path_mul):
+def get_master_unit_list_eia(file_path_mul, clobber=False):
     """
     Get the master unit list; generate it or grab if from a file.
 
     Args:
         file_path_mul (path-like)
     """
-    if not file_path_mul.is_file():
+    if not file_path_mul.is_file() or clobber:
         logger.info(
             f"Master unit list not found {file_path_mul}"
             "Generating a new master unit list. This should take ~10 minutes."
@@ -1129,7 +1321,7 @@ def get_master_unit_list_eia(file_path_mul):
             pudl_engine=sa.create_engine(
                 pudl.workspace.setup.get_defaults()["pudl_db"]),
             freq='AS', rolling=True)
-        parts_compilers = CompilePlantParts(table_compiler, plant_parts)
+        parts_compilers = CompilePlantParts(table_compiler)
         plant_parts_df = parts_compilers.generate_master_unit_list()
         plant_parts_df.to_csv(file_path_mul, compression='gzip')
 
