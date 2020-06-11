@@ -110,7 +110,7 @@ def prep_master_parts_eia(plant_parts_df, key_mul):
 ###############################################################################
 
 
-def get_plant_year_list(plant_name, df1, df2, key2):
+def get_plant_year_util_list(plant_name, df1, df2, key2):
     """
     Get the possible key matches from df2 a plant_id_pudl and report_year.
 
@@ -151,7 +151,7 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
     # get the best match for each valye of the key1 column
     match_tuple_series = deprish_df[key_deprish].apply(
         lambda x: process.extractOne(
-            x, get_plant_year_list(x, deprish_df, mul_df, key_mul),
+            x, get_plant_year_util_list(x, deprish_df, mul_df, key_mul),
             scorer=fuzz.token_sort_ratio)
     )
     # process.extractOne returns a tuple with the matched name and the
@@ -300,9 +300,9 @@ def save_to_workbook(file_path, sheets_df_dict):
 
     Args:
         df (pandas.DataFrame): the table you want to export.
-        file_path (path-like): the location of the excel workbook.
-        sheet_name (string): the name of your new sheet. If this sheet exists
-            in your workbook, the new sheet will be sheet_name_1.
+        sheets_df_dict (dict): dictionary of the names of sheets (keys) of
+            where their corresponding dataframes (values) should end up in the
+            workbook.
     """
     logger.info(f"Saving dataframe to {file_path}")
     if not file_path.exists():
@@ -346,18 +346,19 @@ def parse_command_line(argv):
         '--file_path_mul',
         default=pathlib.Path('master_unit_list.csv.gz'),
         type=str,
-        help='path to the master unit list.')
+        help='path to the master unit list. Default: master_unit_list.csv.gz')
     parser.add_argument(
         '--sheet_name_deprish',
         default='Depreciation Studies Raw',
         type=str,
         help="""name of the excel tab which contains the plant names from the
-        depreciation data.""")
+        depreciation data. Default: Depreciation Studies Raw""")
     parser.add_argument(
         '--sheet_name_output',
         default='EIA to depreciation matches',
         type=str,
-        help="""name of the excel tab which the matches will be output.""")
+        help="""name of the excel tab which the matches will be output.
+        Default: EIA to depreciation matches""")
     arguments = parser.parse_args(argv[1:])
     return arguments
 
