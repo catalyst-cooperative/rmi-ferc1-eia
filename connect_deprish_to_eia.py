@@ -136,8 +136,7 @@ def get_plant_year_util_list(plant_name, df1, df2, key2):
                           plant_name, 'utility_id_pudl'].values
     names = df2.loc[(df2.plant_id_pudl.isin(plant_id_pudls))
                     & (df2.report_year.isin(report_years))
-                    & (df2.utility_id_pudl.isin(utility_ids))
-                    ][key2].to_list()
+                    & (df2.utility_id_pudl.isin(utility_ids))][key2].to_list()
     return names
 
 
