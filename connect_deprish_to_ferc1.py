@@ -118,15 +118,16 @@ class DeprishToFERC1Inputs():
         self._prep_plant_parts_ordered()
 
 
-def check_high_level_connections(options_all_deprish_ferc1,
-                                 steam_cleaned_ferc1):
-    """Check the connections between depreciation data and ferc1."""
-    # the left df was the depreciation data
-    connected_plant_ids = options_all_deprish_ferc1[
-        options_all_deprish_ferc1._merge == 'both'].plant_id_pudl.unique()
+def check_high_level_connections(
+        connects_all_deprish_ferc1,
+        steam_cleaned_ferc1):
+    """Check the connections between deprecation data and ferc1."""
+    # there was a merge iindicator here and left df was the depreciation data
+    connected_plant_ids = connects_all_deprish_ferc1[
+        connects_all_deprish_ferc1._merge == 'both'].plant_id_pudl.unique()
     # how many plant_id_pudl's didn't get a corresponding FERC1 record
-    not_in_ferc1_plant_ids = (options_all_deprish_ferc1[
-        options_all_deprish_ferc1._merge == 'left_only']
+    not_in_ferc1_plant_ids = (connects_all_deprish_ferc1[
+        connects_all_deprish_ferc1._merge == 'left_only']
         .plant_id_pudl.unique())
     # these are a subset of the not_in_ferc1_plant_ids that
     missing_plant_ids = (steam_cleaned_ferc1[
@@ -178,15 +179,18 @@ def prep_all_options(inputs):
             part_no_ferc1=lambda x:
                 x.plant_part_ferc1.replace(replace_dict),
             level_deprish=lambda x:
-                np.where(
-                    x.part_no_deprish == x.part_no_ferc1,
-                    'samezies',
-                    np.where(x.part_no_deprish < x.part_no_ferc1,
-                             'beeeg',
-                             np.where(x.part_no_ferc1.isnull(),
-                                      'who knows??', 'smol')
-                             )))
+                np.where(x.part_no_deprish == x.part_no_ferc1,
+                         'samezies', None),
+        .assign(
+            level_deprish=lambda x:
+                np.where(x.part_no_deprish < x.part_no_ferc1,
+                         'beeeg', x.level_deprish),)
+        .assign(
+            level_deprish=lambda x:
+                np.where(x.part_no_deprish > x.part_no_ferc1,
+                         'smol', x.level_deprish))
         .drop(columns=['part_no_deprish', 'part_no_ferc1'])
+
     )
     return options_all_deprish_ferc1
 
@@ -197,8 +201,8 @@ def get_matches_at_diff_ownership(options_df):
 
     Note: Is there a cleaner way to do this??
     """
-    ph = 'placeholder'
-    diff_own = (options_df[
+    ph='placeholder'
+    diff_own=(options_df[
         options_df.record_id_eia_deprish.str
         .replace('owned', ph, regex=True).replace('total', ph, regex=True) ==
         options_df.record_id_eia_ferc1.str
@@ -218,34 +222,34 @@ def connect(inputs):
     Returns:
         pandas.DataFrame
     """
-    options_all_deprish_ferc1 = prep_all_options(inputs)
+    options_all_deprish_ferc1=prep_all_options(inputs)
     # grab the connections
-    same_true = options_all_deprish_ferc1[
+    same_true=options_all_deprish_ferc1[
         options_all_deprish_ferc1.record_id_eia_deprish ==
         options_all_deprish_ferc1.record_id_eia_ferc1]
     # and remove them from the options
-    options_deprish_ferc1 = options_all_deprish_ferc1[
+    options_deprish_ferc1=options_all_deprish_ferc1[
         ~options_all_deprish_ferc1.record_id_eia_deprish.isin(
             same_true.record_id_eia_deprish.unique())]
 
-    same_diff_own = get_matches_at_diff_ownership(options_deprish_ferc1)
+    same_diff_own=get_matches_at_diff_ownership(options_deprish_ferc1)
     # remove from options
-    options_deprish_ferc1 = options_deprish_ferc1[
+    options_deprish_ferc1=options_deprish_ferc1[
         ~options_deprish_ferc1.record_id_eia_deprish.isin(
             same_diff_own.record_id_eia_deprish.unique())]
     # same = options_deprish_ferc1[
     #    options_deprish_ferc1.level_deprish == 'samezies']
 
-    smol = options_deprish_ferc1[
+    smol=options_deprish_ferc1[
         options_deprish_ferc1.level_deprish == 'smol']
-    beeeg = options_deprish_ferc1[
+    beeeg=options_deprish_ferc1[
         options_deprish_ferc1.level_deprish == 'beeeg']
 
-    nah = options_deprish_ferc1[
+    nah=options_deprish_ferc1[
         options_deprish_ferc1.level_deprish == 'who knows??']
 
-    connects = pd.concat([same_true, same_diff_own])
-    ids_to_match = options_all_deprish_ferc1.record_id_eia_deprish.unique()
+    connects=pd.concat([same_true, same_diff_own])
+    ids_to_match=options_all_deprish_ferc1.record_id_eia_deprish.unique()
     logger.info("Portion of unique depreciation records:")
     logger.info(f"    Connected:  {len(connects)/len(ids_to_match):.02%}")
     logger.info(f"    Same level: {len(same_true)/len(ids_to_match):.02%}")

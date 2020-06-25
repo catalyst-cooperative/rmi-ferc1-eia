@@ -222,14 +222,16 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
         overrides_df = (
             pd.read_excel(
                 file_path_deprish, skiprows=0, sheet_name=sheet_name_output,)
-            .drop(columns=['record_id_eia', 'record_id_eia_fuzzy'])
         )
+        overrides_df = (
+            overrides_df[overrides_df.filter(like='record_id_eia_override')
+                         .notnull().any(axis='columns')]
+            [DEPRISH_COLS +
+             list(overrides_df.filter(like='record_id_eia_override').columns)])
         logger.info(f"Adding overrides from {sheet_name_output}.")
         # concat, sort so the True overrides are at the top and drop dupes
         deprish_match_full = (
-            pd.concat([deprish_match, overrides_df])
-            .sort_values('record_id_eia_override')
-            .drop_duplicates(subset=DEPRISH_COLS, keep='first')
+            pd.merge(deprish_match, overrides_df, on=DEPRISH_COLS, how='left')
             .assign(record_id_eia=lambda x:
                     x.record_id_eia_override.fillna(x.record_id_eia_fuzzy))
         )
