@@ -130,7 +130,9 @@ def prep_ferc_data(pudl_out):
                    'installation_year',
                    'primary_fuel_by_mmbtu',
                    'plant_type',
-                   'record_id']
+                   'record_id',
+                   'opex_production_total',
+                   ]
     fpb_cols_to_use = ['report_year',
                        'utility_id_ferc1',
                        'plant_name_ferc1',
@@ -148,10 +150,10 @@ def prep_ferc_data(pudl_out):
                 'utility_id_pudl',
                 'plant_name_ferc1'
                 ],
-            how='left')[cols_to_use].
-        pipe(pudl.helpers.convert_cols_dtypes,
-             'ferc1', 'ferc1 plant records').
-        dropna().
+            how='left')[cols_to_use]
+        .pipe(pudl.helpers.convert_cols_dtypes,
+              'ferc1', 'ferc1 plant records').
+        # dropna().
         rename(columns={
             'fuel_cost': 'total_fuel_cost',
             'fuel_mmbtu': 'total_mmbtu',

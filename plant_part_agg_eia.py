@@ -2,6 +2,7 @@
 
 
 import logging
+import pathlib
 from copy import deepcopy
 
 import numpy as np
@@ -926,3 +927,44 @@ def weighted_average(df, data_col, weight_col, by_col):
     result = g['_data_times_weight'].sum() / g['_weight_where_notnull'].sum()
     del df['_data_times_weight'], df['_weight_where_notnull']
     return result.to_frame(name=data_col).reset_index()
+
+
+def grab_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
+    """
+    Grab map of EIA technology_description/pm codes <> ferc accounts.
+
+    We must refactor this with a better path dependency. Or just store this
+    map as a dataframe or dictionary.
+    """
+    file_path = pathlib.Path.cwd().parent / file_name
+    eia_ferc_acct_map = pd.read_excel(file_path, skiprows=0, sheet_name=3)[
+        ['technology_description', 'prime_mover_code', 'ferc_acct_name']]
+    return eia_ferc_acct_map
+
+
+def get_master_unit_list_eia(file_path_mul, clobber=False):
+    """
+    Get the master unit list; generate it or grab if from a file.
+
+    Args:
+        file_path_mul (pathlib.Path)
+    """
+    if not file_path_mul.is_file() or clobber:
+        logger.info(
+            f"Master unit list not found {file_path_mul}"
+            "Generating a new master unit list. This should take ~10 minutes."
+        )
+
+        table_compiler = CompileTables(
+            pudl_engine=sa.create_engine(
+                pudl.workspace.setup.get_defaults()["pudl_db"]),
+            freq='AS', rolling=True)
+        parts_compilers = CompilePlantParts(table_compiler)
+        plant_parts_df = parts_compilers.generate_master_unit_list(
+            qual_records=False)
+        plant_parts_df.to_csv(file_path_mul, compression='gzip')
+
+    elif file_path_mul.is_file():
+        logger.info(f"Reading the master unit list from {file_path_mul}")
+        plant_parts_df = pd.read_pickle(file_path_mul, compression='gzip')
+    return plant_parts_df
