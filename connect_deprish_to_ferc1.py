@@ -36,14 +36,6 @@ class DeprishToFERC1Inputs():
         self.file_path_ferc1_eia = file_path_ferc1_eia
         self.file_path_deprish_eia = file_path_deprish_eia
 
-    def _prep_raw_tables(self):
-        """
-        Prepare all of the needed raw outputs.
-
-        TODO: This is a bit of a placeholder riht now. I'd like to make
-        functions like the get_master_unit_list_eia for each of these
-        components. Right now, the pickled outputs are expected to be there.
-        """
         self.plant_parts_eia_raw = (
             make_plant_parts_eia.get_master_unit_list_eia(self.file_path_mul))
         self.steam_cleaned_ferc1_raw = pd.read_pickle(
@@ -117,16 +109,19 @@ def check_high_level_connections(
         connects_all_deprish_ferc1,
         steam_cleaned_ferc1):
     """Check the connections between deprecation data and ferc1."""
+    # there was a merge iindicator here and left df was the depreciation data
     connected_plant_ids = connects_all_deprish_ferc1[
         connects_all_deprish_ferc1._merge == 'both'].plant_id_pudl.unique()
-    no_ferc_plant_ids = (connects_all_deprish_ferc1[
+    # how many plant_id_pudl's didn't get a corresponding FERC1 record
+    not_in_ferc1_plant_ids = (connects_all_deprish_ferc1[
         connects_all_deprish_ferc1._merge == 'left_only']
         .plant_id_pudl.unique())
+    # these are a subset of the not_in_ferc1_plant_ids that
     missing_plant_ids = (steam_cleaned_ferc1[
-        steam_cleaned_ferc1.plant_id_pudl.isin(no_ferc_plant_ids)]
+        steam_cleaned_ferc1.plant_id_pudl.isin(not_in_ferc1_plant_ids)]
         .plant_id_pudl.unique())
     logger.info(f"Connected plants:    {len(connected_plant_ids)}")
-    logger.info(f"Not connected:       {len(no_ferc_plant_ids)}")
+    logger.info(f"Not connected:       {len(not_in_ferc1_plant_ids)}")
     logger.info(f"Missing connections: {len(missing_plant_ids)}")
     # Investigation of 3 missing connections [1204, 1147, 1223] determined that
     # these plants are missing from ferc because there was no reporting
@@ -181,34 +176,35 @@ def connect(inputs):
             part_no_ferc1=lambda x:
                 x.plant_part_ferc1.replace(replace_dict),
             level_deprish=lambda x:
-                np.where(
-                    x.part_no_deprish == x.part_no_ferc1,
-                    'samezies',
-                    np.where(x.part_no_deprish < x.part_no_ferc1,
-                             'beeeg',
-                             np.where(x.part_no_ferc1.isnull(),
-                                      'who knows??', 'smol')
-                             )))
+                np.where(x.part_no_deprish == x.part_no_ferc1,
+                         'samezies', None),)
+        .assign(
+            level_deprish=lambda x:
+                np.where(x.part_no_deprish < x.part_no_ferc1,
+                         'beeeg', x.level_deprish),)
+        .assign(
+            level_deprish=lambda x:
+                np.where(x.part_no_deprish > x.part_no_ferc1,
+                         'smol', x.level_deprish))
         .drop(columns=['part_no_deprish', 'part_no_ferc1'])
     )
 
     smol = connects_all_deprish_ferc1[
         connects_all_deprish_ferc1.level_deprish == 'smol']
-    beeeg = connects_all_deprish_ferc1[
-        connects_all_deprish_ferc1.level_deprish == 'beeeg']
-    same = connects_all_deprish_ferc1[
+    beeg = connects_all_deprish_ferc1[
+        connects_all_deprish_ferc1.level_deprish == 'beeg']
+    samezies = connects_all_deprish_ferc1[
         connects_all_deprish_ferc1.level_deprish == 'samezies']
-    nah = connects_all_deprish_ferc1[
-        connects_all_deprish_ferc1.level_deprish == 'who knows??']
+    nah = connects_all_deprish_ferc1[~connects_all_deprish_ferc1.level_deprish]
 
     logger.info("Portion of depreciation records compared to FERC Steam are:")
     logger.info(
-        f"    Smaller:    {len(smol)/len(connects_all_deprish_ferc1):.02%}")
+        f"    Smaller:   {len(smol)/len(connects_all_deprish_ferc1):.02%}")
     logger.info(
-        f"    Bigger:     {len(beeeg)/len(connects_all_deprish_ferc1):.02%}")
+        f"    Bigger:    {len(beeg)/len(connects_all_deprish_ferc1):.02%}")
     logger.info(
-        f"    Same level: {len(same)/len(connects_all_deprish_ferc1):.02%}")
+        f"    Same level:{len(samezies)/len(connects_all_deprish_ferc1):.02%}")
     logger.info(
-        f"    No link:    {len(nah)/len(connects_all_deprish_ferc1):.02%}")
+        f"    No link:   {len(nah)/len(connects_all_deprish_ferc1):.02%}")
 
     return  # dealt w/ squished together output
