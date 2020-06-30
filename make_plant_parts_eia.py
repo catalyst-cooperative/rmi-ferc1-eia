@@ -12,7 +12,16 @@ recipe to make the master unit list.
 
 All of the plant parts are compiled from generators. So we first generate a
 big dataframe of generators with any columns we'll need. Then we use that
-generator dataframe and information stored in `PLANT_PARTS` about how to
+generator dataframe and information stored in `PLANT_PARTS` to know how to
+aggregate each of the plant parts. Then we have plant part dataframes with the
+columns which identify the plant part and all of the data columns aggregated to
+the level of the plant part.
+
+With that compiled plant part dataframe we also add in qualifier columns with
+`get_qualifiers`. A qualifer column is a column which contain data that is not
+endemic to the plant part record (it is not one of the identifying columns or
+aggregated data columns) but the data is still useful data that is attributable
+to each of the plant part records.
 """
 
 
@@ -474,6 +483,7 @@ class CompilePlantParts(object):
         self.freq = table_compiler.freq
         self.plant_parts = PLANT_PARTS
         self.plant_gen_df = None
+        self.part_bools = None
         self.plant_parts_df = None
         self.clobber = clobber
         self.plant_parts_ordered = ['plant', 'plant_unit',
@@ -789,7 +799,14 @@ class CompilePlantParts(object):
         return plant_parts_df
 
     def add_record_id(self, part_df, id_cols, plant_part_col='plant_part'):
-        """Add a record id to a compiled part df."""
+        """
+        Add a record id to a compiled part df.
+
+        We need a standarized way to refer to these compiled records that
+        contains enough information in the id itself that in theory we could
+        deconstruct the id and determine which plant id and plant part id
+        columns are assocaited with this record.
+        """
         ids = deepcopy(id_cols)
         # we want the plant id first... mostly just bc it'll be easier to read
         part_df = part_df.assign(record_id_eia=part_df.plant_id_eia.map(str))
@@ -874,33 +891,16 @@ class CompilePlantParts(object):
             drop_duplicates())
         return consistent_records
 
-    def get_max_op_status(self, record_df, base_cols, record_name, sorter):
-        """
-        Get the max operating status.
-
-        We want to find the most relevant record  as defined by the sorter. In
-        the example case of the operating status means that if any related
-        generator is operable, than we'll label the whole plant as operable.
-
-        Args:
-            record_df (pandas.DataFrame): the dataframe with the record
-            base_cols (list) : list of identifying columns.
-            record_name (string) : name of qualitative record
-            sorter (list): sorted list of category options
-        """
-        record_df[record_name] = record_df[record_name].astype("category")
-        record_df[record_name].cat.set_categories(sorter, inplace=True)
-        record_df = record_df.sort_values(record_name)
-        return (record_df[base_cols + [record_name]]
-                .drop_duplicates(keep='first'))
-
     def dedup_on_category(self, dedup_df, base_cols, category_name, sorter):
         """
-        Drop duplicates based on category.
+        Deuplicate a df using a sorted category to retain prefered values.
+
+        Use a sorted category column to retain your prefered values when a
+        dataframe is deduplicated.
 
         Args:
             dedup_df (pandas.DataFrame): the dataframe with the record
-            base_cols (list) : list of identifying columns.
+            base_cols (list) : list of identifying columns
             category_name (string) : name of qualitative record
             sorter (list): sorted list of category options
         """
@@ -947,7 +947,7 @@ class CompilePlantParts(object):
 
         """
         if record_name in part_df.columns:
-            logger.info(f'{record_name} already here.. ')
+            logger.debug(f'{record_name} already here.. ')
             return part_df
 
         record_df = pd.merge(
@@ -977,7 +977,7 @@ class CompilePlantParts(object):
             )
         non_nulls = consistent_records[consistent_records[record_name].notnull(
         )]
-        logger.info(
+        logger.debug(
             f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
 
@@ -1058,6 +1058,9 @@ class CompilePlantParts(object):
         """
         Label the false granularities with their true parts.
 
+        This method is relying on the output from `make_all_the_bools` and
+        `make_all_the_counts`.
+
         Args:
             part_name (string)
             bools (pandas.DataFrame)
@@ -1132,7 +1135,13 @@ class CompilePlantParts(object):
             set_index('record_id_eia'))
 
     def add_new_plant_name(self, part_df, part_name):
-        """Add plants names into the compiled plant part df."""
+        """
+        Add plants names into the compiled plant part df.
+
+        Args:
+            part_df (pandas.DataFrame)
+            part_name (string)
+        """
         part_df = (pd.merge(
             part_df, self.table_compiler.get_the_table('plants_eia'))
             .assign(plant_name_new=lambda x: x.plant_name_eia))
@@ -1206,7 +1215,6 @@ class CompilePlantParts(object):
                 .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
                 .pipe(self.add_new_plant_name, part_name)
             )
-            logger.info('plant_name_eia' in thing.columns)
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
@@ -1218,7 +1226,6 @@ class CompilePlantParts(object):
                         id_cols,
                         plant_part['denorm_table'],
                         plant_part['denorm_cols'])
-            logger.info('plant_name_eia' in thing.columns)
             plant_parts_df = plant_parts_df.append(thing, sort=True)
         # clean up, add additional columns
         plant_parts_df = (
