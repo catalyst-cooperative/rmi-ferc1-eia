@@ -291,6 +291,12 @@ def generate_depreciation_matches(file_path_mul,
     """
     Generate the matched names and save to execl.
 
+    We want to generate a link between depreciation records and the master unit
+    list. We want to generate all of the options that could have been matched
+    from the master unit list; this will help with generating overrides. We
+    also want to save these outputs into the same spreadsheet that the
+    depreciation records were pulled from.
+
     Args:
          file_path_mul (pathlib.Path): path to the master unit list.
          file_path_deprish (os.PathLike): path to the excel workbook which
@@ -325,6 +331,11 @@ def generate_depreciation_matches(file_path_mul,
 def save_to_workbook(file_path, sheets_df_dict):
     """
     Save dataframes to sheets in an existing workbook.
+
+    We want to be able to save multiple dataframes into differnt tabs in the
+    same excel workbook. If those tabs already exist, the default process is to
+    make save a new tab with a suffix, so we want to remove the tab if it
+    exists before saving.
 
     Args:
         file_path (path-like): the location of the excel workbook.

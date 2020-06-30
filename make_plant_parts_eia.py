@@ -242,6 +242,13 @@ QUAL_RECORD_TABLES = {
     'fuel_type_code_pudl': 'generators_eia860',
     'operational_status': 'generators_eia860',
     'planned_retirement_date': 'generators_eia860',
+    'generator_id': 'generators_eia860',
+    'unit_id_pudl': 'generators_eia860',
+    'technology_description': 'generators_eia860',
+    'energy_source_code_1': 'generators_eia860',
+    'prime_mover_code': 'generators_eia860',
+    'ferc_acct_name': 'generators_eia860',
+
 }
 """
 dict: a dictionary of qualifier column name (key) and original table (value).
@@ -467,6 +474,9 @@ class CompilePlantParts(object):
             self.ids_to_parts[self.plant_parts[part]['id_cols'][-1]] = part
 
         self.id_cols_dict = self.make_id_cols_dict()
+        self.id_cols_list = self.get_id_cols_list()
+        self.parts_to_ids = {v: k for k, v
+                             in self.ids_to_parts.items()}
 
     def make_id_cols_dict(self):
         """Make a dict of part to corresponding peer part id columns."""
@@ -484,6 +494,21 @@ class CompilePlantParts(object):
                 ids.add(part_id_col)
             id_cols_dict[part] = list(ids)
         return id_cols_dict
+
+    def get_id_cols_list(self):
+        """
+        Get all the identifying columns for the plant parts.
+
+        We sometimes need the list of the identifying colums from all of the
+        plant parts in order to have quick access to all of the column names.
+
+        Returns:
+            list: list of identifying columns for all of the plant parts.
+        """
+        id_cols_list = []
+        for id_cols in self.ids_to_parts.keys():
+            id_cols_list = id_cols_list + [id_cols]
+        return id_cols_list
 
     def grab_denormalize_table(self,
                                table,
@@ -894,7 +919,7 @@ class CompilePlantParts(object):
 
         """
         if record_name in part_df.columns:
-            logger.debug(f'{record_name} already here.. ')
+            logger.info(f'{record_name} already here.. ')
             return part_df
 
         record_df = pd.merge(
@@ -902,10 +927,9 @@ class CompilePlantParts(object):
             self.table_compiler.grab_the_table(QUAL_RECORD_TABLES[record_name])
         )
 
+        base_cols = id_cols
         if 'report_date' in record_df.columns:
-            base_cols = id_cols + ['report_date']
-        else:
-            base_cols = id_cols
+            base_cols = base_cols + ['report_date']
 
         if record_name != 'operational_status':
             logger.debug(f'grabbing consistent {record_name}s')
@@ -914,10 +938,19 @@ class CompilePlantParts(object):
         if record_name == 'operational_status':
             logger.debug(f'grabbing max {record_name}')
             sorter = ['existing', 'proposed', 'retired']
+            # restric the number of columns in here to only include the ones we
+            # need, unlike grab_consistent_qualifiers, dedup_on_category
+            # preserves all of the columns from record_df
+            record_df = record_df[
+                [c for c in record_df.columns
+                 if c in base_cols + list(part_df.columns) + [record_name]]]
             consistent_records = self.dedup_on_category(
                 record_df, base_cols, record_name, sorter
             )
-        logger.debug(f'merging in consistent {record_name}')
+        non_nulls = consistent_records[consistent_records[record_name].notnull(
+        )]
+        logger.info(
+            f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
 
     def count_peer_parts(self, part_name):
@@ -1070,18 +1103,15 @@ class CompilePlantParts(object):
             drop_duplicates(subset=['record_id_eia']).
             set_index('record_id_eia'))
 
-    def add_new_plant_name(self, plant_parts_df):
+    def add_new_plant_name(self, part_df, part_name):
         """Add plants names into the compiled plant part df."""
-        df = plant_parts_df
-        id_cols_all = ['generator_id', 'unit_id_pudl', 'prime_mover_code',
-                       'energy_source_code_1', 'technology_description']
-        df['plant_name_new'] = df['plant_name_eia']
-        col = 'generator_id'
-        for col in id_cols_all:
-            df.loc[df[col].notnull(), 'plant_name_new'] = (
-                df['plant_name_new'] + " " + df[col].astype(str))
-        self.plant_parts_df = df
-        return self.plant_parts_df
+        part_df = (pd.merge(
+            part_df, self.table_compiler.grab_the_table('plants_eia'))
+            .assign(plant_name_new=lambda x: x.plant_name_eia))
+        col = self.parts_to_ids[part_name]
+        part_df.loc[part_df[col].notnull(), 'plant_name_new'] = (
+            part_df['plant_name_new'] + " " + part_df[col].astype(str))
+        return part_df
 
     def add_ferc_acct(self, plant_gen_df):
         """Merge the plant_gen_df with the ferc_acct map."""
@@ -1126,7 +1156,8 @@ class CompilePlantParts(object):
             return self.plant_parts_df
         if self.plant_gen_df is None:
             self.plant_gen_df = self.prep_plant_gen_df()
-        self.part_bools = self.prep_part_bools()
+        if self.part_bools is None:
+            self.part_bools = self.prep_part_bools()
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
@@ -1139,13 +1170,15 @@ class CompilePlantParts(object):
             id_cols = plant_part['id_cols']
 
             thing = (
-                self.ag_part_by_own_slice(part_name).
-                pipe(self.add_install_year, id_cols,
-                     plant_part['install_table']).
-                assign(plant_part=part_name).
-                pipe(self.assign_true_gran, part_name).
-                pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+                self.ag_part_by_own_slice(part_name)
+                .pipe(self.add_install_year, id_cols,
+                      plant_part['install_table'])
+                .assign(plant_part=part_name)
+                .pipe(self.assign_true_gran, part_name)
+                .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+                .pipe(self.add_new_plant_name, part_name)
             )
+            logger.info('plant_name_eia' in thing.columns)
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
@@ -1157,6 +1190,7 @@ class CompilePlantParts(object):
                         id_cols,
                         plant_part['denorm_table'],
                         plant_part['denorm_cols'])
+            logger.info('plant_name_eia' in thing.columns)
             plant_parts_df = plant_parts_df.append(thing, sort=True)
         # clean up, add additional columns
         plant_parts_df = (
@@ -1178,7 +1212,6 @@ class CompilePlantParts(object):
                 'record_id_eia', 'ownership', 'appro_record_id_eia', ]],
             sorter=['owned', 'total']
         )
-        self.plant_parts_df = self.add_new_plant_name(self.plant_parts_df)
         return self.plant_parts_df
 
     def _test_prep_merge(self, part_name):
