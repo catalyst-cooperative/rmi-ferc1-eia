@@ -94,7 +94,7 @@ class DeprishToFERC1Inputs():
         self.connects_ferc1_eia = (
             pd.merge(
                 self.connects_ferc1_eia_raw.reset_index()[
-                    ['record_id_ferc', 'record_id_eia']],
+                    ['record_id_ferc1', 'record_id_eia']],
                 # we only want the identifying columns from the MUL
                 self.plant_parts_eia[connect_deprish_to_eia.MUL_COLS
                                      + id_cols],
@@ -291,8 +291,8 @@ class ConnectorDeprishFERC1():
         options_all_deprish_ferc1 = pd.merge(
             options_all_deprish_ferc1,
             options_all_deprish_ferc1.groupby(['record_id_eia_deprish'])
-            .agg({'record_id_ferc': 'count'})
-            .rename(columns={'record_id_ferc': 'count_ferc1', })
+            .agg({'record_id_ferc1': 'count'})
+            .rename(columns={'record_id_ferc1': 'count_ferc1', })
             .reset_index(),
         )
         return options_all_deprish_ferc1
