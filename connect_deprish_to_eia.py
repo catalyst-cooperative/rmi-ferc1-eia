@@ -2,9 +2,10 @@
 Connect the master unit list with depreciation records from PUCs and FERC1.
 
 This module connects the records from the depreciation data to their
-appropirate ids in the EIA mater unit list. The PUC and FERC1 data that have
-been compiled into an excel spreadsheet. The master unit list is a compilation
-of various slices of EIA records.
+appropirate ids in the EIA mater unit list. The deprecation data is annual
+depreciation studies from PUC and FERC1 data that have been compiled into an
+excel spreadsheet. The master unit list is a compilation of various slices of
+EIA records.
 """
 
 import argparse
