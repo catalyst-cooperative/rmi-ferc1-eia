@@ -200,10 +200,10 @@ class ConnectorDeprishFERC1():
         This method explores the generation of matches between depreciation
         and ferc1 records. We want to know how many depreciation records aren't
         associated with any ferc1 record. We want to know if there are any
-        plant ids that show up in the depreciation data and aren't mapped to ferc
-        records but do show up in the ferc data somewhere. At a high level, we
-        want a gut check of whether or not connects_all_deprish_ferc1 was
-        connected properly.
+        plant ids that show up in the depreciation data and aren't mapped to
+        ferc records but do show up in the ferc data somewhere. At a high
+        level, we want a gut check of whether or not connects_all_deprish_ferc1
+        was connected properly.
         """
         # there was a merge iindicator here and left df was the depreciation
         # data

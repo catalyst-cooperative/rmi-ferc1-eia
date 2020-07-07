@@ -5,16 +5,17 @@ The EIA data about power plants (from EIA 923 and 860) is reported in tables
 with records that correspond to mostly generators and plants. Practically
 speaking, a plant is a collection of generator(s). There are many attributes
 of generators (i.e. prime mover, primary fuel source, technology type). We can
-use these generator-based attributes to create other records about other
-collections of plant parts. A "plant part" record which cooresponds to a
-particular collection of generator attributes (i.e. all of the generators with
-unit id "2").
+use these generator attributes to group generator records into larger aggregate
+records which we call "plant parts. A "plant part" is a record which
+corresponds to a particular collection of generators that all share an
+identical attribute. E.g. all of the generators with unit_id=2, or all of the
+generators with coal as their primary fuel source.
 
 Because generators are often owned by multiple utilities, another dimention of
 the master unit list involves generating two records for each owner: one of the
-portion of the plant they own and one for the plant as a whole. The portion
-records are labeled in the `ownership` column as "owned" and the total records
-are labeled as "total".
+portion of the plant part they own and one for the plant part as a whole. The
+portion records are labeled in the `ownership` column as "owned" and the total
+records are labeled as "total".
 
 This module refers to "true granularies". Many plant parts we cobble together
 here in the master unit list refer to the same collection of infrastructure as
@@ -47,10 +48,11 @@ identify the plant part and all of the data columns aggregated to the level of
 the plant part.
 
 With that compiled plant part dataframe we also add in qualifier columns with
-`get_qualifiers`. A qualifer column is a column which contain data that is not
-endemic to the plant part record (it is not one of the identifying columns or
-aggregated data columns) but the data is still useful data that is attributable
-to each of the plant part records.
+`get_qualifiers()`. A qualifer column is a column which contain data that is
+not endemic to the plant part record (it is not one of the identifying columns
+or aggregated data columns) but the data is still useful data that is
+attributable to each of the plant part records. For more detail on what a
+qualifier column is, see the `get_qualifiers()` method.
 """
 
 
@@ -949,13 +951,17 @@ class CompilePlantParts(object):
         """
         Get qualifier records.
 
-        For an individual dataframe of one plant part, we typically have
-        identifying columns and aggregated data columns. The identifying
-        columns are only the identifying columns associated with that plant
-        part (i.e. for plant_unit (plant part) we have ('plant_id_eia' and
-        'unit_id_pudl')). Every plant part is cobbled together from generator
-        records, so each record in each part_df can be thought of as a
-        collection of generators.
+        For an individual dataframe of one plant part (e.g. only
+        "plant_prime_mover" plant part records), we typically have identifying
+        columns and aggregated data columns. The identifying columns for a
+        given plant part are only those columns which are required to uniquely
+        specify a record of that type of plant part. For example, to uniquely
+        specify a plant_unit record, we need both plant_id_eia and the
+        unit_id_pudl, and nothing else. In other words, the identifying columns
+        for a given plant part would make up a natural composite primary key
+        for a table composed entirely of that type of plant part. Every plant
+        part is cobbled together from generator records, so each record in
+        each part_df can be thought of as a collection of generators.
 
         Identifier and qualifier columns are the same columns; whether a column
         is an identifier or a qualifier is a function of the plant part you're
@@ -971,7 +977,9 @@ class CompilePlantParts(object):
         consistency; instead we will grab the highest level of operational
         status that is associated with each records' component generators. The
         order of operational status is defined within the method as:
-        'existing', 'proposed', then 'retired'.
+        'existing', 'proposed', then 'retired'. For example if a plant_unit is
+        composed of two generators, and one of them is "existing" and another
+        is "retired" the entire plant_unit will be considered "existing".
 
         Args:
             part_df (pandas.DataFrame): dataframe containing records associated
