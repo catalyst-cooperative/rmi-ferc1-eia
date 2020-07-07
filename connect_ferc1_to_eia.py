@@ -105,10 +105,12 @@ class MakeCandidateFeatures(object):
         """
         Get and prepare the training connections.
 
-        We have stored connections between ferc1 steam and the eia master unit
-        list. These records should be compiled of connections between these
-        data sets that are known to be correct because we will use these
-        records to train a machine learning model.
+        We have stored training data, which consists of records with ids
+        columns for both FERC and EIA. Those id columns serve as a connection
+        between ferc1 steam and the eia master unit list. These connections
+        indicate that a ferc1 steam record is reported at the same granularity
+        as the connected master unit list record. These records to train a
+        machine learning model.
 
         This method relies on:
         * training_file_path (path-like): path to the CSV of training data. The
@@ -507,7 +509,11 @@ class Matches(TuneModel):
                 columns in features.
 
         """
-        assert len(coefs) == len(features.columns)
+        if len(coefs) != len(features.columns):
+            raise AssertionError(
+                """The number of coeficients (the weight of the importance of the
+            columns) should be the same as the number of the columns in the
+            candiate matches coefficients.""")
         for coef_n in np.array(range(len(coefs))):
             features[features.columns[coef_n]] = \
                 features[features.columns[coef_n]].multiply(coefs[coef_n])
@@ -645,7 +651,7 @@ class Matches(TuneModel):
                 record_id_ferc1, by a wide enough margin.
             train_df (pandas.DataFrame): training data/known matches
                 between ferc and the master unit list. Result of
-                `prep_train_connections`.
+                `prep_train_connections()`.
 
         Returns:
             pandas.DataFrame: overridden winning matches. Matches that show
