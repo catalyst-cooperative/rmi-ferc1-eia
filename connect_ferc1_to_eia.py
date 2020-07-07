@@ -9,24 +9,24 @@ in FERC1.
 EIA on the other hand is reported in a much cleaner way. The are generators
 with ids and plants with ids reported in *seperate* tables. What a joy. In
 `make_plant_parts_eia`, we've generated the "master unit list". The master unit
-list (often referred to as `plant_parts_df` in this module) generated records
-for various levels or granularies of plant parts.
+list (often referred to as `plant_parts_true_df` in this module) generated
+records for various levels or granularies of plant parts.
 
 For each of the FERC1 steam records we want to figure out if which master unit
 list record is the corresponding record. We do this with a record linkage/
 scikitlearn machine learning model. The recordlinkage package helps us create
-feature vectors (via `make_features`) for each candidate match between FERC
+feature vectors (via `make_features()`) for each candidate match between FERC
 and EIA. Feature vectors are a number between 0 and 1 that indicates the
 closeness for each value we want to compare.
 
 We use the feature vectors of our known-to-be-connected training data to cross
 validate and tune parameters to choose hyperparameters for scikitlearn models
-(via `test_model_parameters`). We choose the "best" model based on the cross
+(via `test_model_parameters()`). We choose the "best" model based on the cross
 validated results. This best scikitlearn model is then used to generate matches
-with the full dataset (`fit_predict_lrc`). The model can return multiple
+with the full dataset (`fit_predict_lrc()`). The model can return multiple
 options for each FERC1 record, so we rank them and choose the best/winning
-match (`calc_wins`). We then ensure those connections cointain our training
-data (`override_winners_with_training_df`). These "best" results are the
+match (`calc_wins()`). We then ensure those connections cointain our training
+data (`override_winners_with_training_df()`). These "best" results are the
 connections we keep as the matches between FERC1 steam records and the EIA
 master unit list.
 """
@@ -48,22 +48,58 @@ import pudl
 logger = logging.getLogger(__name__)
 
 
-class ConnectFERC1EIA(object):
-    """Connector."""
+class MakeCandidateFeatures(object):
+    """Class to generate candiate features between FERC1 and EIA."""
 
     def __init__(self, file_path_training, file_path_mul, pudl_out):
-        """Initialize connector, get and store our inputs."""
+        """
+        Initialize manager that makes candidate features between FERC and EIA.
+
+        Args:
+            file_path_training (path-like): path to the CSV of training data.
+                The training data needs to have at least two columns:
+                record_id_eia record_id_ferc1.
+            file_path_mul (pathlib.Path): path to EIA's the master unit list.
+            pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
+        """
+        logger.info("Preparing inputs for candidate features.")
         self.file_path_training = file_path_training
         self.pudl_out = pudl_out
 
-        plant_parts_df_full = make_plant_parts_eia.get_master_unit_list_eia(
-            self.file_path_mul)
-        # we want
-        self.plant_parts_df = plant_parts_df_full[
-            plant_parts_df_full['true_gran']]
-        self.train_df = self.prep_train_connections(
-            file_path_training, plant_parts_df_full)
-        self.steam_df = self.prep_ferc_data(pudl_out)
+        self.plant_parts_df = (
+            make_plant_parts_eia.get_master_unit_list_eia(file_path_mul))
+        # We want only the "true granularies" of the master unit list so the
+        # model doesn't get confused as to which option to pick if there are
+        # many records with duplicate data
+        self.plant_parts_true_df = self.plant_parts_df[
+            self.plant_parts_df['true_gran']]
+
+        self.steam_df = self.prep_ferc_data()
+
+        # we want both the df version and just the index; skl uses just the
+        # index and we use the df in merges and such
+        self.train_df = self.prep_train_connections()
+        self.train_index = self.train_df.index
+
+        # generate the list of the records in the EIA and FERC records that
+        # exist in the training data
+        self.eia_known = self.get_known_connections(
+            self.plant_parts_true_df,
+            dataset_id_col='record_id_eia')
+        self.ferc_known = self.get_known_connections(
+            self.steam_df,
+            dataset_id_col='record_id_ferc1')
+
+        logger.info("Generate candidate features.")
+        # generate feature matrixes for known/training data
+        self.features_train = self.make_features(
+            dfa=self.ferc_known,
+            dfb=self.eia_known,
+            block_col='plant_id_report_year')
+        self.features_all = self.make_features(
+            dfa=self.steam_df,
+            dfb=self.plant_parts_true_df,
+            block_col='plant_id_report_year')
 
     def prep_train_connections(self):
         """
@@ -74,13 +110,13 @@ class ConnectFERC1EIA(object):
         data sets that are known to be correct because we will use these
         records to train a machine learning model.
 
-        Args:
-            training_file_path (path-like): path to the CSV of training data.
-                The training data needs to have at least two columns:
-                record_id_eia and record_id_ferc1.
-            plant_parts_df (pandas.DataFrame): master unit list. generated from
-                `CompilePlantParts.generate_master_unit_list()` or
-                `get_master_unit_list_eia()`.
+        This method relies on:
+        * training_file_path (path-like): path to the CSV of training data. The
+          training data needs to have at least two columns: record_id_eia and
+          record_id_ferc1.
+        * plant_parts_df (pandas.DataFrame): master unit list. generated from
+          `CompilePlantParts.generate_master_unit_list()` or
+          `get_master_unit_list_eia()`.
 
         Returns:
             pandas.DataFrame: training connections. A dataframe with has a
@@ -112,29 +148,22 @@ class ConnectFERC1EIA(object):
         return self.train_df
 
     def prep_ferc_data(self):
-        """TODO: clean and condense."""
-        cols_to_use = ['report_year',
-                       'utility_id_ferc1',
-                       'plant_name_ferc1',
-                       'utility_id_pudl',
-                       'plant_id_pudl',
-                       'plant_id_ferc1',
-                       'capacity_factor',
-                       'capacity_mw',
-                       'net_generation_mwh',
-                       'opex_fuel',
-                       'opex_fuel_per_mwh',
-                       'fuel_cost',
-                       'fuel_mmbtu',
-                       'construction_year',
-                       'installation_year',
-                       'primary_fuel_by_mmbtu',
-                       'plant_type',
-                       'record_id',
-                       # we don't need this for the record linkage, but we do
-                       # want it when we connect depreciation to ferc.
-                       'opex_production_total',
-                       ]
+        """
+        Prepare FERC1 steam data for record linkage with EIA master unit list.
+
+        This method grabs two tables from `pudl_out` (`plants_steam_ferc1`
+        and `fuel_by_plant_ferc1`) and ensures that the columns the same as
+        their EIA counterparts, because the output of this method will be used
+        to link FERC and EIA.
+
+        This method relies on:
+        * pudl_out: an instance of `pudl.output.pudltabl.PudlTabl()`
+
+        Returns:
+            pandas.DataFrame: a cleaned table of FERC1 steam plant records with
+            fuel cost data.
+
+        """
         fpb_cols_to_use = ['report_year',
                            'utility_id_ferc1',
                            'plant_name_ferc1',
@@ -143,27 +172,28 @@ class ConnectFERC1EIA(object):
                            'fuel_mmbtu',
                            'primary_fuel_by_mmbtu']
 
+        logger.info("Preparing the FERC1 steam table.")
         self.steam_df = (
-            self.pudl_out.plants_steam_ferc1().
-            merge(
+            pd.merge(
+                self.pudl_out.plants_steam_ferc1(),
                 self.pudl_out.fbp_ferc1()[fpb_cols_to_use],
                 on=['report_year',
                     'utility_id_ferc1',
                     'utility_id_pudl',
-                    'plant_name_ferc1'
+                    'plant_name_ferc1',
                     ],
-                how='left')[cols_to_use]
+                how='left')
             .pipe(pudl.helpers.convert_cols_dtypes,
-                  'ferc1', 'ferc1 plant records').
-            # dropna().
-            rename(columns={
+                  'ferc1', 'ferc1 plant records')
+            # we want the column names to conform to EIA's column names
+            .rename(columns={
                 'fuel_cost': 'total_fuel_cost',
                 'fuel_mmbtu': 'total_mmbtu',
                 'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
                 'primary_fuel_by_mmbtu': 'fuel_type_code_pudl',
-                'record_id': 'record_id_ferc1', }).
-            set_index('record_id_ferc1').
-            assign(
+                'record_id': 'record_id_ferc1', })
+            .set_index('record_id_ferc1')
+            .assign(
                 fuel_cost_per_mmbtu=lambda x: (
                     x.total_fuel_cost / x.total_mmbtu),
                 heat_rate_mmbtu_mwh=lambda x: (
@@ -181,7 +211,38 @@ class ConnectFERC1EIA(object):
 
         return self.steam_df
 
-    def make_candidate_links(self, dfa, dfb, block_col=None):
+    def get_known_connections(self, dataset_df, dataset_id_col):
+        """
+        Generate a set of known connections from a dataset using training data.
+
+        This method grabs only the records from the the datasets (EIA or FERC)
+        that we have in our training data.
+
+        This method relies on:
+        * train_df (pandas.DataFrame): training data/known matches between ferc
+          and the master unit list. Result of `prep_train_connections()`.
+
+        Args:
+            dataset_df (pandas.DataFrame): either FERC1 steam table (result of
+                `prep_ferc_data()`) or EIA master unit list (result of
+                `get_master_unit_list_eia()`).
+            dataset_id_col (string): either `record_id_eia` for
+                plant_parts_true_df or `record_id_ferc1` for steam_df.
+
+        """
+        known_df = (pd.merge(dataset_df,
+                             self.train_df.reset_index()[[dataset_id_col]],
+                             left_index=True,
+                             right_on=[dataset_id_col]
+                             )
+                    .drop_duplicates(subset=[dataset_id_col])
+                    .set_index(dataset_id_col)
+                    .astype({'total_fuel_cost': float,
+                             'total_mmbtu': float}))
+        return known_df
+
+    @staticmethod
+    def make_candidate_links(dfa, dfb, block_col=None):
         """Generate canidate links for comparison features."""
         indexer = rl.Index()
         indexer.block(block_col)
@@ -219,36 +280,40 @@ class ConnectFERC1EIA(object):
             self.make_candidate_links(dfa, dfb, block_col), dfa, dfb)
         return features
 
-    def get_known_connections(self, dataset_df, dataset_id_col):
-        """
-        Generate a set of known connections from a dataset using training data.
 
-        In our training
+class TuneModel(MakeCandidateFeatures):
+    """A class for tuning scikitlearn model."""
+
+    def __init__(self, file_path_training, file_path_mul, pudl_out):
+        """
+        Initialize model tuner; test hyperparameters with cross validation.
+
+        Initializing this object runs `test_model_parameters()` which runs
+        through many options for model hyperparameters and collects scores
+        from those model runs.
 
         Args:
-            dataset_df (pandas.DataFrame)
-            dataset_id_col (string): either `record_id_eia` for plant_parts_df
-                or `record_id_ferc1` for steam_df.
+            file_path_training (path-like): path to the CSV of training data.
+                The training data needs to have at least two columns:
+                record_id_eia record_id_ferc1.
+            file_path_mul (pathlib.Path): path to EIA's the master unit list.
+            pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
 
         """
-        known_df = (pd.merge(dataset_df,
-                             self.train_df.reset_index()[[dataset_id_col]],
-                             left_index=True,
-                             right_on=[dataset_id_col]
-                             )
-                    .drop_duplicates(subset=[dataset_id_col])
-                    .set_index(dataset_id_col)
-                    .astype({'total_fuel_cost': float,
-                             'total_mmbtu': float}))
-        return known_df
+        MakeCandidateFeatures.__init__(
+            self, file_path_training, file_path_mul, pudl_out)
+        logger.info(
+            """We are about to test hyper parameters of the model while doing
+        k-fold cross validation. This takes a few minutes....""")
+        # it is testing an array of model hyper parameters and cross-vaildating
+        # with the training data. It returns a df with losts of result scores
+        # to be used to find the best resutls
+        self.results_options = self.test_model_parameters(n_splits=10)
 
-
-class MakeConnections(ConnectFERC1EIA):
-    """d."""
-
-    def kfold_cross_val(self, n_splits, features_known, known_index, lrc):
+    @staticmethod
+    def kfold_cross_val(n_splits, features_known, known_index, lrc):
         """
-        K-fold cross validation for model .
+        K-fold cross validation for model.
 
         Args:
             n_splits (int): the number of splits for the cross validation.
@@ -288,8 +353,7 @@ class MakeConnections(ConnectFERC1EIA):
         return result_lrc_complied, fscore, precision, accuracy
 
     def fit_predict_option(self, solver, c, cw, p, l1, n_splits,
-                           multi_class, features_known, training_index,
-                           results_options):
+                           multi_class, results_options):
         """
         Test and cross validate with a set of model parameters.
 
@@ -297,6 +361,13 @@ class MakeConnections(ConnectFERC1EIA):
         hyperparameters (which are selected within `test_model_parameters`)
         and then run k-fold cross vaidation with that model and our training
         data.
+
+        This method relies on:
+        * features_train
+        * train_index
+
+        Returns:
+            pandas.DataFrame
         """
         logger.debug(f'train: {solver}: c-{c}, cw-{cw}, p-{p}, l1-{l1}')
         lrc = rl.LogisticRegressionClassifier(solver=solver,
@@ -310,8 +381,8 @@ class MakeConnections(ConnectFERC1EIA):
         results, fscore, precision, accuracy = self.kfold_cross_val(
             lrc=lrc,
             n_splits=n_splits,
-            features_known=features_known,
-            known_index=training_index)
+            features_known=self.features_train,
+            known_index=self.train_index)
 
         # we're going to want to choose the best model so we need to save the
         # results of this model run...
@@ -336,25 +407,18 @@ class MakeConnections(ConnectFERC1EIA):
         ))
         return results_options
 
-    def test_model_parameters(self,
-                              features_known, training_index, n_splits):
+    @staticmethod
+    def get_hyperparameters_options():
         """
-        Test and corss validate model parameters.
+        Generate a dictionary with sets of options for model hyperparameters.
 
-        The method runs `fit_predict_option` on many options for model
-        hyperparameters and saves info about the result options so we can later
-        determine which set of hyperparameters works best on predicting our
-        training data.
+        Note: The looping over all of the hyperparameters options here feels..
+        messy. I investigated scikitlearn's documentaion for a cleaner way to
+        do this. I came up empty handed, but I'm still sure I just missed it.
 
-        Args:
-            features_known (pandas.DataFrame)
-            training_index (pandas.MultiIndex)
-            n_splits (int)
         Returns:
-            pandas.DataFrame: dataframe in which each record correspondings to
-            one model run and contains info like scores of the run (how well
-            it predicted our training data), info about the results
-            .
+            dictionary: dictionary with autogenerated integers (keys) for each
+            dictionary of model
 
         """
         # we are going to loop through the options for logistic regression
@@ -368,8 +432,8 @@ class MakeConnections(ConnectFERC1EIA):
               'sag': ['l2', 'none'],
               'saga': ['l1', 'l2', 'elasticnet', 'none'],
               }
+        hyper_options = []
         # we set l1_ratios and multi_classes inside this loop land bc
-        results_options = pd.DataFrame()
         for solver in solvers:
             for c in cs:
                 for cw in cws:
@@ -387,14 +451,48 @@ class MakeConnections(ConnectFERC1EIA):
                                 multi_classes = [
                                     'auto', 'ovr', 'multinomial']
                             for multi_class in multi_classes:
-                                results_options = self.fit_predict_option(
-                                    solver=solver, c=c, cw=cw, p=p, l1=l1,
-                                    n_splits=n_splits,
-                                    multi_class=multi_class,
-                                    features_known=features_known,
-                                    training_index=training_index,
-                                    results_options=results_options)
-        return results_options
+                                hyper_options.append({
+                                    'solver': solver,
+                                    'c': c,
+                                    'cw': cw,
+                                    'penalty': p,
+                                    'l1': l1,
+                                    'multi_class': multi_class,
+                                })
+        return hyper_options
+
+    def test_model_parameters(self, n_splits):
+        """
+        Test and corss validate model parameters.
+
+        The method runs `fit_predict_option()` on many options for model
+        hyperparameters and saves info about the results for each model run so
+        we can later determine which set of hyperparameters works best on
+        predicting our training data.
+
+        Args:
+            n_splits (int): the number of times we want to split the training
+                data during the k-fold cross validation.
+        Returns:
+            pandas.DataFrame: dataframe in which each record correspondings to
+            one model run and contains info like scores of the run (how well
+            it predicted our training data), info about the results.
+
+        """
+        hyper_options = self.get_hyperparameters_options()
+        # make an empty df to save the results into
+        self.results_options = pd.DataFrame()
+        for hyper in hyper_options:
+            self.results_options = self.fit_predict_option(
+                solver=hyper['solver'], c=hyper['c'], cw=hyper['cw'],
+                p=hyper['penalty'], l1=hyper['l1'],
+                multi_class=hyper['multi_class'],
+                n_splits=n_splits, results_options=self.results_options)
+        return self.results_options
+
+
+class Matches(TuneModel):
+    """Managers the results of TuneModel and chooses winning matches."""
 
     def _apply_weights(self, features, coefs):
         """
@@ -411,8 +509,8 @@ class MakeConnections(ConnectFERC1EIA):
         """
         assert len(coefs) == len(features.columns)
         for coef_n in np.array(range(len(coefs))):
-            features[features.columns[coef_n]
-                     ] = features[features.columns[coef_n]].multiply(coefs[coef_n])
+            features[features.columns[coef_n]] = \
+                features[features.columns[coef_n]].multiply(coefs[coef_n])
         return features
 
     def weight_features(self, features):
@@ -501,7 +599,7 @@ class MakeConnections(ConnectFERC1EIA):
         Args:
             df (pandas.DataFrame): dataframe with all of the model generate
                 matches. This df needs to have been run through
-                `calc_match_stats`.
+                `calc_match_stats()`.
             ferc1_options (pandas.DataFrame): dataframe with all of the
                 possible `record_id_ferc1`s.
 
@@ -510,7 +608,7 @@ class MakeConnections(ConnectFERC1EIA):
             highest rank in their record_id_ferc1, by a wide enough margin.
 
         """
-        unique_ferc = df.reset_index().drop_duplicates(
+        unique_f = df.reset_index().drop_duplicates(
             subset=['record_id_ferc1'])
         ties = df[df['rank'] == 1.5]
         distinction = (df['iqr_all'] * iqr_perc_diff)
@@ -518,19 +616,19 @@ class MakeConnections(ConnectFERC1EIA):
         winners = (df[((df['rank'] == 1) & (df['diffs'] > distinction)) |
                       ((df['rank'] == 1) & (df['diffs'].isnull()))])
 
-        murky_wins = self.calc_murk(df, iqr_perc_diff)
+        self.murk_df = self.calc_murk(df, iqr_perc_diff)
 
         logger.info('Winning match stats:')
         logger.info(
-            f'  matches vs total ferc:  {len(unique_ferc)/len(ferc1_options):.02}')
+            f' matches vs total ferc:  {len(unique_f)/len(ferc1_options):.02}')
         logger.info(
-            f'  wins vs total ferc:     {len(winners)/len(ferc1_options):.02}')
+            f' wins vs total ferc:     {len(winners)/len(ferc1_options):.02}')
         logger.info(
-            f'  wins vs matches:        {len(winners)/len(unique_ferc):.02}')
+            f' wins vs matches:        {len(winners)/len(unique_f):.02}')
         logger.info(
-            f'  murk vs matches:        {len(murky_wins)/len(unique_ferc):.02}')
+            f' murk vs matches:        {len(self.murk_df)/len(unique_f): .02}')
         logger.info(
-            f'  ties vs matches:        {len(ties)/2/len(unique_ferc):.02}')
+            f' ties vs matches:        {len(ties)/2/len(unique_f):.02}')
         return winners
 
     def override_winners_with_training_df(self, winners, train_df):
@@ -577,13 +675,18 @@ class MakeConnections(ConnectFERC1EIA):
             & (winners.record_id_eia_rl.notnull())
             & (winners.record_id_eia_trn != winners.record_id_eia_rl)
         ]
-        logger.info(f"Overridden records: {len(overridden)}")
+        logger.info(
+            f"Overridden records: {len(overridden)/len(train_df):.01%}")
         # we don't need these cols anymore...
         winners = winners.drop(
             columns=['record_id_eia_trn', 'record_id_eia_rl'])
         return winners
 
-    def fit_predict_lrc(self, best, features_known, features_all, train_df_ids):
+    @staticmethod
+    def fit_predict_lrc(best,
+                        features_known,
+                        features_all,
+                        train_df_ids):
         """Generate, fit and predict model. Wahoo."""
         # prep the model with the hyperparameters
         lrc = rl.LogisticRegressionClassifier(
@@ -597,48 +700,20 @@ class MakeConnections(ConnectFERC1EIA):
         # fit the model with all of the
         lrc.fit(features_known, train_df_ids.index)
 
-        # this step is getting preditions on all of the possible matches based on
-        # the last run model above
+        # this step is getting preditions on all of the possible matches based
+        # on the last run model above
         predict_all = lrc.predict(features_all)
-        return (pd.DataFrame(index=predict_all).
-                merge(features_all, left_index=True, right_index=True, how='left'))
+        predict_all_df = pd.merge(pd.DataFrame(index=predict_all),
+                                  features_all,
+                                  left_index=True,
+                                  right_index=True,
+                                  how='left')
+        return predict_all_df
 
-    def make_connections(self):
+    def get_matches(self):
         """Make."""
-        # generate the list of the records in the EIA and FERC records that
-        # exist in the training data
-        self.eia_known = self.get_known_connections(
-            self.plant_parts_df,
-            self.train_df,
-            dataset_id_col='record_id_eia')
-        self.ferc_known = self.get_known_connections(
-            self.steam_df,
-            self.train_df,
-            dataset_id_col='record_id_ferc1')
-
-        # generate feature matrixes for known/training data
-        self.features_train = self.make_features(
-            dfa=self.ferc_known,
-            dfb=self.eia_known,
-            block_col='plant_id_report_year')
-        self.features_all = self.make_features(
-            dfa=self.steam_df,
-            dfb=self.plant_parts_df,
-            block_col='plant_id_report_year')
-
-        logger.info(
-            """We are about to test hyper parameters of the model while doing
-    k-fold cross validation. This takes a few minutes....""")
-        # it is testing an array of model hyper parameters and cross-vaildating
-        # with the training data. It returns a df with losts of result scores
-        # to be used to find the best resutls
-        results_options = self.test_model_parameters(
-            features_known=self.features_train,
-            training_index=self.train_df.index,
-            n_splits=10)
-
         # grab the highest scoring
-        self.best = (results_options.sort_values(
+        self.best = (self.results_options.sort_values(
             ['f_score', 'precision', 'accuracy'], ascending=False).head(1))
         logger.info("Scores from the best model hyperparameters:")
         logger.info(f"  F-Score:   {self.best.loc[0,'f_score']:.02}")
@@ -646,7 +721,9 @@ class MakeConnections(ConnectFERC1EIA):
         logger.info(f"  Accuracy:  {self.best.loc[0,'accuracy']:.02}")
 
         # actually run a model using the "best" model!!
-        prediction_df = self.fit_predict_lrc(
+        logger.info(
+            "Fit and predict a model w/ the highest scoring hyperparameters.")
+        predict_all_df = self.fit_predict_lrc(
             self.best, self.features_train, self.features_all, self.train_df)
 
         self.coefs = self.best.loc[0, 'coef']
@@ -654,7 +731,7 @@ class MakeConnections(ConnectFERC1EIA):
         # generate results with weighted features
         # we want a metric of how merge in the IRQ of the full options
         self.results = pd.merge(
-            self.calc_match_stats(prediction_df),
+            self.calc_match_stats(predict_all_df),
             self.calc_match_stats(self.features_all)[['iqr']],
             left_index=True,
             right_index=True,
