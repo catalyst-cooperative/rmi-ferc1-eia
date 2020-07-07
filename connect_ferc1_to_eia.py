@@ -1,4 +1,35 @@
-"""Beginning of compilation of FERC/EIA granular connections."""
+"""
+Connect FERC1 Steam table to EIA's master unit list via record linkage.
+
+FERC plant records are reported... kind of messily. In the same table there are
+records that are reported as whole plants, generators, collections of prime
+movers. So we have this heterogeneously reported collection of parts of plants
+in FERC1.
+
+EIA on the other hand is reported in a much cleaner way. The are generators
+with ids and plants with ids reported in *seperate* tables. What a joy. In
+`make_plant_parts_eia`, we've generated the "master unit list". The master unit
+list (often referred to as `plant_parts_df` in this module) generated records
+for various levels or granularies of plant parts.
+
+For each of the FERC1 steam records we want to figure out if which master unit
+list record is the corresponding record. We do this with a record linkage/
+scikitlearn machine learning model. The recordlinkage package helps us create
+feature vectors (via `make_features`) for each candidate match between FERC
+and EIA. Feature vectors are a number between 0 and 1 that indicates the
+closeness for each value we want to compare.
+
+We use the feature vectors of our known-to-be-connected training data to cross
+validate and tune parameters to choose hyperparameters for scikitlearn models
+(via `test_model_parameters`). We choose the "best" model based on the cross
+validated results. This best scikitlearn model is then used to generate matches
+with the full dataset (`fit_predict_lrc`). The model can return multiple
+options for each FERC1 record, so we rank them and choose the best/winning
+match (`calc_wins`). We then ensure those connections cointain our training
+data (`override_winners_with_training_df`). These "best" results are the
+connections we keep as the matches between FERC1 steam records and the EIA
+master unit list.
+"""
 
 import logging
 import statistics
@@ -16,101 +47,50 @@ import pudl
 logger = logging.getLogger(__name__)
 
 
-class TrainXlxsCompiler():
-    """Grab the training data excel file."""
+def prep_train_connections(file_path_training, plant_parts_df):
+    """
+    Get and prepare the training connections.
 
-    def __init__(self, file_path):
-        """Initialize a compiler of training data."""
-        self.train_df = None
-        self.file_path = file_path
+    We have stored connections between ferc1 steam and the eia master unit
+    list. These records should be compiled of connections between these data
+    sets that are known to be correct because we will use these records to
+    train a machine learning model.
 
-    def _grab_test_xlxs(self):
-        """TODO: Add file path."""
-        if self.train_df is not None:
-            pass
-        else:
-            logger.info('grabbing xlxs file.')
-            self.train_df = pd.read_excel(
-                self.file_path,
-                skiprows=1,
-                dtype={'EIA Plant Code': pd.Int64Dtype(),
-                       'Generator': pd.Int64Dtype(),
-                       'EIA Utility Code': pd.Int64Dtype(),
-                       'report_year': pd.Int64Dtype(),
-                       'report_prd': pd.Int64Dtype(),
-                       'respondent_id': pd.Int64Dtype(),
-                       'spplmnt_num': pd.Int64Dtype(),
-                       })
-        return self.train_df
+    Args:
+        training_file_path (path-like): path to the CSV of training data. The
+            training data needs to have at least two columns: record_id_eia and
+            record_id_ferc1.
+        plant_parts_df (pandas.DataFrame): master unit list. generated from
+            `CompilePlantParts.generate_master_unit_list()` or
+            `get_master_unit_list_eia()`.
 
+    Returns:
+        pandas.DataFrame: training connections. A dataframe with has a
+        MultiIndex with record_id_eia and record_id_ferc1.
+    """
+    mul_cols = ['true_gran', 'appro_part_label',
+                'appro_record_id_eia', 'plant_part']
+    train_df = (
+        pd.read_csv(file_path_training,)
+        # we want to ensure that the records are associated with a
+        # "true granularity" - which is a way we filter out whether or not each
+        # record in the master unit list is actually a new/unique collection of
+        # plant parts
+        .merge(
+            plant_parts_df.reset_index()[['record_id_eia'] + mul_cols],
+            how='left', on=['record_id_eia'],
+        )
+        .assign(plant_part=lambda x: x['appro_part_label'],
+                record_id_eia=lambda x: x['appro_record_id_eia'])
 
-def prep_train_connections(compiler_mul, compiler_train):
-    """TODO: Clean and condense."""
-    # grab the excel file
-    test_df = compiler_train._grab_test_xlxs()
-    # some things to use for cleaning
-    cols_to_rename = {
-        'EIA Plant Code': 'plant_id_eia',
-        'FERC Line Type': 'plant_part',
-        'EIA Utility Code': 'utility_id_eia',
-        'Unit Code': 'unit_id_pudl',
-        'EIA Technology': 'technology_description',
-        'Generator': 'generator_id',
-        'EIA Prime Mover': 'prime_mover_code',
-        'EIA Energy Source Code': 'energy_source_code_1',
-        'FERC Account': 'ferc_acct_name',
-        # use the RMI labels, not our eia_ownership relabel
-        'Owned or Total': 'ownership', }
-    string_cols = ['FERC Line Type', 'EIA Technology',
-                   'EIA Prime Mover', 'EIA Energy Source Code',
-                   'Owned or Total']
-    plant_part_rename = {'plant_part': {
-        'plant': 'plant',
-        'generator': 'plant_gen',
-        'unit': 'plant_unit',
-        'technology': 'plant_technology',
-        'plant_prime_fuel': 'plant_prime_fuel',
-        'plant_prime': 'plant_prime_mover'}, }
-
-    for col in string_cols:
-        if col in test_df.columns:
-            test_df.loc[:, col] = (
-                test_df[col].astype(str).
-                str.strip().
-                str.lower().
-                str.replace(r'\s+', '_')
-            )
-
-    test_df = (test_df.assign(report_date='2018-01-01').
-               rename(columns=cols_to_rename).
-               astype({'report_date': 'datetime64[ns]',
-                       'utility_id_eia': pd.Int64Dtype()}).
-               replace(plant_part_rename))
-
-    train_df_ids = compiler_mul.assign_record_id_eia(test_df)
-    train_df_ids['plant_part_og'] = train_df_ids['plant_part']
-    train_df_ids = (
-        train_df_ids.set_index(['record_id_eia']).
-        merge(compiler_mul.plant_parts_df[['true_gran', 'appro_part_label',
-                                           'appro_record_id_eia']],
-              how='left', right_index=True, left_index=True).
-        assign(plant_part=lambda x: x['appro_part_label'],
-               record_id_eia=lambda x: x['appro_record_id_eia']).
-        reset_index(drop=True))
-    # train_df_ids = compiler_mul.assign_record_id_eia(train_df_ids)
-
-    train_df_ids['record_id_ferc'] = (
-        train_df_ids.Source + '_' +
-        train_df_ids.report_year.astype(str) + '_' +
-        train_df_ids.report_prd.astype(str) + '_' +
-        train_df_ids.respondent_id.astype(str) + '_' +
-        train_df_ids.spplmnt_num.astype(str)
+        # come light cleaning
+        .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
+        .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
+        # recordlinkage and sklearn wants MultiIndexs to do the stuff
+        .set_index(['record_id_ferc1', 'record_id_eia', ])
+        .drop(columns=mul_cols)
     )
-    if "row_number" in train_df_ids.columns:
-        train_df_ids["record_id_ferc"] = train_df_ids["record_id_ferc"] + \
-            "_" + train_df_ids.row_number.astype('Int64').astype(str)
-
-    return train_df_ids.set_index(['record_id_ferc', 'record_id_eia'])
+    return train_df
 
 
 def prep_ferc_data(pudl_out):
@@ -132,7 +112,11 @@ def prep_ferc_data(pudl_out):
                    'installation_year',
                    'primary_fuel_by_mmbtu',
                    'plant_type',
-                   'record_id']
+                   'record_id',
+                   # we don't need this for the record linkage, but we do want
+                   # it when we connect depreciation to ferc.
+                   'opex_production_total',
+                   ]
     fpb_cols_to_use = ['report_year',
                        'utility_id_ferc1',
                        'plant_name_ferc1',
@@ -150,17 +134,17 @@ def prep_ferc_data(pudl_out):
                 'utility_id_pudl',
                 'plant_name_ferc1'
                 ],
-            how='left')[cols_to_use].
-        pipe(pudl.helpers.convert_cols_dtypes,
-             'ferc1', 'ferc1 plant records').
+            how='left')[cols_to_use]
+        .pipe(pudl.helpers.convert_cols_dtypes,
+              'ferc1', 'ferc1 plant records').
         # dropna().
         rename(columns={
             'fuel_cost': 'total_fuel_cost',
             'fuel_mmbtu': 'total_mmbtu',
             'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
             'primary_fuel_by_mmbtu': 'fuel_type_code_pudl',
-            'record_id': 'record_id_ferc', }).
-        set_index('record_id_ferc').
+            'record_id': 'record_id_ferc1', }).
+        set_index('record_id_ferc1').
         assign(
             fuel_cost_per_mmbtu=lambda x: x.total_fuel_cost / x.total_mmbtu,
             heat_rate_mmbtu_mwh=lambda x: x.total_mmbtu / x.net_generation_mwh,
@@ -388,7 +372,7 @@ def weight_features(features, coefs):
             assign(score=lambda x: x.sum(axis=1)).
             pipe(pudl.helpers.organize_cols, ['score']).
             sort_values(['score'], ascending=False).
-            sort_index(level='record_id_ferc'))
+            sort_index(level='record_id_ferc1'))
 
 
 def calc_match_stats(df):
@@ -404,27 +388,27 @@ def calc_match_stats(df):
 
     """
     df = df.reset_index()
-    gb = df.groupby('record_id_ferc')[['record_id_ferc', 'score']]
+    gb = df.groupby('record_id_ferc1')[['record_id_ferc1', 'score']]
     df = (
-        df.sort_values(['record_id_ferc', 'score'])
+        df.sort_values(['record_id_ferc1', 'score'])
         # rank the scores
         .assign(rank=gb.rank(ascending=0, method='average'))
         # calculate differences between scores
         .assign(diffs=lambda x: x['score'].diff()).
         # count grouped records
-        merge(pudl.helpers.count_records(df, ['record_id_ferc'], 'count'),
+        merge(pudl.helpers.count_records(df, ['record_id_ferc1'], 'count'),
               how='left',).
         # calculate the iqr for each
         merge((gb.agg({'score': scipy.stats.iqr}).
                droplevel(0, axis=1).
-               rename(columns={'score': 'iqr'})), left_on=['record_id_ferc'],
+               rename(columns={'score': 'iqr'})), left_on=['record_id_ferc1'],
               right_index=True))
 
     # assign the first diff of each ferc_id as a nan
-    df['diffs'][df.record_id_ferc != df.record_id_ferc.shift(1)] = np.nan
+    df['diffs'][df.record_id_ferc1 != df.record_id_ferc1.shift(1)] = np.nan
 
     # [['sum','diffs','count','rank']]
-    df = df.set_index(['record_id_ferc', 'record_id_eia'])
+    df = df.set_index(['record_id_ferc1', 'record_id_eia'])
     return(df)
 
 
@@ -455,14 +439,14 @@ def calc_wins(df, ferc1_options, iqr_perc_diff):
         df (pandas.DataFrame): dataframe with all of the model generate
             matches. This df needs to have been run through `calc_match_stats`.
         ferc1_options (pandas.DataFrame): dataframe with all of the possible.
-            `record_id_ferc`s.
+            `record_id_ferc1`s.
 
     Returns
         pandas.DataFrame : winning matches. Matches that had the highest rank
-            in their record_id_ferc, by a wide enough margin.
+        in their record_id_ferc1, by a wide enough margin.
 
     """
-    unique_ferc = df.reset_index().drop_duplicates(subset=['record_id_ferc'])
+    unique_ferc = df.reset_index().drop_duplicates(subset=['record_id_ferc1'])
     ties = df[df['rank'] == 1.5]
     distinction = (df['iqr_all'] * iqr_perc_diff)
     # for the winners, grab the top ranked,
@@ -481,6 +465,55 @@ def calc_wins(df, ferc1_options, iqr_perc_diff):
         f'murk vs matches:        {len(murky_wins)/len(unique_ferc):.02}')
     logger.info(
         f'ties vs matches:        {len(ties)/2/len(unique_ferc):.02}')
+    return winners
+
+
+def override_winners_with_training_df(winners, train_df):
+    """
+    Override winning matches with training data matches.
+
+    We want to ensure that all of the matches that we put in the training
+    data for the record linkage model actually end up in the resutls from the
+    record linkage model.
+
+    Args:
+        winners (pandas.DataFrame): winning matches generated via `calc_wins`.
+            Matches that had the highest rank in their record_id_ferc1, by a
+            wide enough margin.
+        train_df (pandas.DataFrame): training data/known matches between ferc
+            and the master unit list. Result of `prep_train_connections`.
+
+    Returns:
+        pandas.DataFrame: overridden winning matches. Matches that show up in
+        the training data `train_df` or if there was no corresponding training
+        data, matches that had the highest rank in their record_id_ferc1, by a
+        wide enough margin.
+    """
+    # we want to override the eia when the training id is
+    # different than the "winning" match from the recrod linkage
+    winners = (
+        pd.merge(
+            winners.reset_index(),
+            train_df.reset_index(),
+            on=['record_id_ferc1'],
+            how='outer',
+            suffixes=('_rl', '_trn'))
+        .assign(
+            record_id_eia=lambda x: np.where(
+                x.record_id_eia_trn.notnull(),
+                x.record_id_eia_trn,
+                x.record_id_eia_rl)
+        )
+    )
+    # check how many records were overridden
+    overridden = winners.loc[
+        (winners.record_id_eia_trn.notnull())
+        & (winners.record_id_eia_rl.notnull())
+        & (winners.record_id_eia_trn != winners.record_id_eia_rl)
+    ]
+    logger.info(f"Overridden records: {len(overridden)}")
+    # we don't need these cols anymore...
+    winners = winners.drop(columns=['record_id_eia_trn', 'record_id_eia_rl'])
     return winners
 
 

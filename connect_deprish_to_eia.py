@@ -2,9 +2,12 @@
 Connect the master unit list with depreciation records from PUCs and FERC1.
 
 This module connects the records from the depreciation data to their
-appropirate ids in the EIA mater unit list. The PUC and FERC1 data that have
-been compiled into an excel spreadsheet. The master unit list is a compilation
-of various slices of EIA records.
+appropirate ids in the EIA master unit list. The master unit list is generated
+via `make_plant_parts_eia.py`; see the documenation there for additional
+details about the master unit list. The depreciation data is annual
+depreciation studies from PUC and FERC1 data that have been compiled into an
+excel spreadsheet. The master unit list is a compilation of various slices of
+EIA records.
 """
 
 import argparse
@@ -37,12 +40,22 @@ RESTRICT_MATCH_COLS = ['plant_id_pudl', 'utility_id_pudl', 'report_year']
 
 MUL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
-    # 'plant_name_eia', 'plant_id_eia',
-    # 'generator_id', 'unit_id_pudl',
-    # 'prime_mover_code', 'energy_source_code_1',
-    # 'technology_description', 'ferc_acct_name', 'utility_id_eia',
-    # 'true_gran', 'appro_part_label', 'appro_record_id_eia',
+    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
+    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+    'technology_description', 'ferc_acct_name', 'utility_id_eia',
+    'true_gran', 'appro_part_label', 'appro_record_id_eia',
 ]
+
+MUL_RENAME = {
+    'record_id_eia': 'record_id_eia_name_match',
+    'appro_record_id_eia': 'record_id_eia_fuzzy',
+    'plant_part': 'plant_part_name_match',
+    'appro_part_label': 'plant_part',
+    'true_gran': 'true_gran_name_match'
+}
+"""dict: to rename the columns from the master unit list. Because we want
+to fuzzy match with all possible MUL records names but only use the true
+granualries."""
 
 DEPRISH_COLS = [
     'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1', 'state',
@@ -173,7 +186,9 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
 def match_merge(deprish_df, mul_df, key_deprish, key_mul):
     """Generate fuzzy matches and merge relevant colums from eia."""
     logger.info("Merging fuzzy matches.")
-    match_merge = (pd.merge(
+    # we are going to match with all of the names from the
+    # master unit list, but then use the "true granularity"
+    match_merge_df = (pd.merge(
         get_fuzzy_matches(
             deprish_df, mul_df,
             key_deprish=key_deprish, key_mul=key_mul,
@@ -182,10 +197,14 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             subset=['report_year', 'plant_name_new'])[MUL_COLS],
         left_on=['report_year', 'plant_name_match'],
         right_on=['report_year', key_mul], how='left')
-        .rename(columns={'record_id_eia': 'record_id_eia_fuzzy'})
+        # rename the ids so that we have the "true granularity"
+        # Every MUL record has identifying columns for it's true granualry,
+        # even when the true granularity is the same record, so we can use the
+        # true gran columns across the board.
+        .rename(columns=MUL_RENAME)
     )
-    logger.info(f"Matching resulted in {len(match_merge)} connections.")
-    return match_merge
+    logger.info(f"Matching resulted in {len(match_merge_df)} connections.")
+    return match_merge_df
 
 
 def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
@@ -247,6 +266,12 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
                     key_deprish=key_deprish, key_mul=key_mul)
         .pipe(add_overrides, file_path_deprish=file_path_deprish,
               sheet_name_output=sheet_name_output)
+        .pipe(pudl.helpers.organize_cols,
+              # we want to pull the used columns to the front, but there is
+              # some overlap in columns from these two datasets. And we have
+              # renamed some of the columns from the master unit list.
+              list(set(DEPRISH_COLS + [MUL_RENAME.get(c, c)
+                                       for c in MUL_COLS])))
     )
     possible_matches_mul = (
         pd.merge(
@@ -267,7 +292,13 @@ def generate_depreciation_matches(file_path_mul,
                                   sheet_name_deprish,
                                   sheet_name_output):
     """
-    Generate the matched names and save to execl.
+    Generate the matched names and save to excel.
+
+    This method generates a link between depreciation records and the master
+    unit list. It generates all of the options that could have been matched
+    from the master unit list; this will help with generating mannual
+    overrides. It then saves these outputs into the same spreadsheet that the
+    depreciation records were pulled from.
 
     Args:
          file_path_mul (pathlib.Path): path to the master unit list.
@@ -280,7 +311,7 @@ def generate_depreciation_matches(file_path_mul,
 
     Returns:
         pandas.DataFrame : dataframe including matched names from depreciation
-            data to names in the mater unit list, including appropirate id's
+            data to names in the master unit list, including appropirate id's
             from the master unit list.
     """
     if not file_path_deprish.is_file():
@@ -303,6 +334,11 @@ def generate_depreciation_matches(file_path_mul,
 def save_to_workbook(file_path, sheets_df_dict):
     """
     Save dataframes to sheets in an existing workbook.
+
+    This method enables us to save multiple dataframes into differnt tabs in
+    the same excel workbook. If those tabs already exist, the default process
+    is to make save a new tab with a suffix, so we remove the tab if it exists
+    before saving.
 
     Args:
         file_path (path-like): the location of the excel workbook.

@@ -1,4 +1,59 @@
-"""Aggregate plant parts."""
+"""
+Aggregate plant parts to make an EIA master unit list.
+
+The EIA data about power plants (from EIA 923 and 860) is reported in tables
+with records that correspond to mostly generators and plants. Practically
+speaking, a plant is a collection of generator(s). There are many attributes
+of generators (i.e. prime mover, primary fuel source, technology type). We can
+use these generator attributes to group generator records into larger aggregate
+records which we call "plant parts. A "plant part" is a record which
+corresponds to a particular collection of generators that all share an
+identical attribute. E.g. all of the generators with unit_id=2, or all of the
+generators with coal as their primary fuel source.
+
+Because generators are often owned by multiple utilities, another dimention of
+the master unit list involves generating two records for each owner: one of the
+portion of the plant part they own and one for the plant part as a whole. The
+portion records are labeled in the `ownership` column as "owned" and the total
+records are labeled as "total".
+
+This module refers to "true granularies". Many plant parts we cobble together
+here in the master unit list refer to the same collection of infrastructure as
+other master unit list records. For example, if we have a "plant_prime_mover"
+plant part record and a "plant_unit" plant part record which were both cobbled
+together from the same two generators. We want to be able to reduce the master
+unit list to only unique collections of generators, so we label the first
+unique granularity as a true granularity and label the subsequent records as
+false granularities with the `true_gran` column. In order to choose which plant
+part to keep in these instances, we assigned a `plant_parts_ordered` and
+effectively keep the first instance of a unique granularity.
+
+Overview of flow for generating the master unit list:
+
+There are two classes in here - one which compiles input tables (CompileTables)
+and one which compiles the master unit list (CompilePlantParts). The method
+that rules the show here is `generate_master_unit_list`, which is a method of
+CompilePlantParts.
+
+`PLANT_PARTS` is basically the main recipe book for how each of the plant parts
+need to be compiled. CompilePlantParts eats this recipe book and follows the
+recipe to make the master unit list.
+
+All of the plant parts are compiled from generators. So we first generate a
+big dataframe of generators with any columns we'll need. This is where we add
+records regarding utility ownership slices. Then we use that generator
+dataframe and information stored in `PLANT_PARTS` to know how to aggregate each
+of the plant parts. Then we have plant part dataframes with the columns which
+identify the plant part and all of the data columns aggregated to the level of
+the plant part.
+
+With that compiled plant part dataframe we also add in qualifier columns with
+`get_qualifiers()`. A qualifer column is a column which contain data that is
+not endemic to the plant part record (it is not one of the identifying columns
+or aggregated data columns) but the data is still useful data that is
+attributable to each of the plant part records. For more detail on what a
+qualifier column is, see the `get_qualifiers()` method.
+"""
 
 
 import logging
@@ -242,6 +297,13 @@ QUAL_RECORD_TABLES = {
     'fuel_type_code_pudl': 'generators_eia860',
     'operational_status': 'generators_eia860',
     'planned_retirement_date': 'generators_eia860',
+    'generator_id': 'generators_eia860',
+    'unit_id_pudl': 'generators_eia860',
+    'technology_description': 'generators_eia860',
+    'energy_source_code_1': 'generators_eia860',
+    'prime_mover_code': 'generators_eia860',
+    'ferc_acct_name': 'generators_eia860',
+
 }
 """
 dict: a dictionary of qualifier column name (key) and original table (value).
@@ -290,7 +352,7 @@ class CompileTables(object):
         """
         Initialize a table compiler.
 
-        grabs the stuff....
+        gets the stuff....
         """
         self.pudl_engine = pudl_engine
         self.freq = freq
@@ -315,7 +377,7 @@ class CompileTables(object):
             raise AssertionError('PudlTabl object needs a pudl_engine')
         self.pudl_engine = pudl_engine
 
-        # grabing the metadata object for the sqlite db
+        # geting the metadata object for the sqlite db
         self.pt = pudl.output.pudltabl.get_table_meta(self.pudl_engine)
 
         self.pudl_out = pudl.output.pudltabl.PudlTabl(
@@ -341,7 +403,7 @@ class CompileTables(object):
             'ferc_acct_rmi': None,
         }
 
-    def grab_the_table(self, table):
+    def get_the_table(self, table):
         """Get a dataframe from the sqlite tables or the output object."""
         if table is None:
             return
@@ -351,11 +413,11 @@ class CompileTables(object):
             # if pt[table] is not None:
             try:
                 tbl = self.pt[table]
-                logger.info(f'grabbing {table} from the sqlite db')
+                logger.info(f'getting {table} from the sqlite db')
                 select = sa.sql.select([tbl, ])
                 # for the non-date tables...
                 if 'report_date' not in tbl.columns:
-                    logger.debug('grabbing a non-date table')
+                    logger.debug('getting a non-date table')
                     df = pd.read_sql(select, self.pudl_engine)
                 else:
                     if self.start_date is not None:
@@ -380,18 +442,18 @@ class CompileTables(object):
             except KeyError:
                 # getattr turns the string of the table into an attribute
                 # of the object, so this runs the output function
-                logger.info(f'grabbing {table} from the output object')
+                logger.info(f'getting {table} from the output object')
                 # the pudl_out.mcoe function has defaults set for data purity.
                 # these defaults were removing ~20% of the fuel cost records.
                 # mcoe is the only pudl_out function that is used in the MUL -
-                # this if/else enables grabbing other pudl_out tables w/o args
+                # this if/else enables getting other pudl_out tables w/o args
                 if table == 'mcoe':
                     df = self.pudl_out.mcoe(min_heat_rate=None,
                                             min_fuel_cost_per_mwh=None,
                                             min_cap_fact=None,
                                             max_cap_fact=None)
                 elif table == 'ferc_acct_rmi':
-                    df = grab_eia_ferc_acct_map()
+                    df = get_eia_ferc_acct_map()
                 else:
                     df = getattr(self.pudl_out, table,)()
             self._dfs[table] = pudl.helpers.convert_cols_dtypes(df,
@@ -452,6 +514,7 @@ class CompilePlantParts(object):
         self.freq = table_compiler.freq
         self.plant_parts = PLANT_PARTS
         self.plant_gen_df = None
+        self.part_bools = None
         self.plant_parts_df = None
         self.clobber = clobber
         self.plant_parts_ordered = ['plant', 'plant_unit',
@@ -467,6 +530,9 @@ class CompilePlantParts(object):
             self.ids_to_parts[self.plant_parts[part]['id_cols'][-1]] = part
 
         self.id_cols_dict = self.make_id_cols_dict()
+        self.id_cols_list = self.get_id_cols_list()
+        self.parts_to_ids = {v: k for k, v
+                             in self.ids_to_parts.items()}
 
     def make_id_cols_dict(self):
         """Make a dict of part to corresponding peer part id columns."""
@@ -485,16 +551,31 @@ class CompilePlantParts(object):
             id_cols_dict[part] = list(ids)
         return id_cols_dict
 
-    def grab_denormalize_table(self,
-                               table,
-                               denorm_table=None,
-                               denorm_cols=None,
-                               id_cols=None,
-                               indicator=False):
+    def get_id_cols_list(self):
         """
-        Grab and denormalize the table.
+        Get all the identifying columns for the plant parts.
 
-        Grab the table that you want, and merge it with another table based
+        We sometimes need the list of the identifying colums from all of the
+        plant parts in order to have quick access to all of the column names.
+
+        Returns:
+            list: list of identifying columns for all of the plant parts.
+        """
+        id_cols_list = []
+        for id_cols in self.ids_to_parts.keys():
+            id_cols_list = id_cols_list + [id_cols]
+        return id_cols_list
+
+    def get_denormalize_table(self,
+                              table,
+                              denorm_table=None,
+                              denorm_cols=None,
+                              id_cols=None,
+                              indicator=False):
+        """
+        Get and denormalize the table.
+
+        get the table that you want, and merge it with another table based
         on the 'denorm_cols'.
 
         Args:
@@ -510,7 +591,7 @@ class CompilePlantParts(object):
             pandas.Dataframe
 
         """
-        table_df = self.table_compiler.grab_the_table(table)
+        table_df = self.table_compiler.get_the_table(table)
         if denorm_table:
             logger.info(f'denormalizing {table}')
             table_df = self.denoramlize_table(
@@ -523,20 +604,20 @@ class CompilePlantParts(object):
                           denorm_table,
                           denorm_cols,
                           indicator=False):
-        """Merge data table with additional table to grab additional colums."""
+        """Merge data table with additional table to get additional colums."""
         # denormalize the plant granularity
         table_df = table_df.merge(
-            self.table_compiler.grab_the_table(denorm_table)
+            self.table_compiler.get_the_table(denorm_table)
             [list(set(id_cols + denorm_cols))].drop_duplicates(),
             on=denorm_cols,
             how='outer',
             indicator=indicator)
         return(table_df)
 
-    def grab_ownership(self):
-        """Grab the ownership table and create total rows."""
-        # grab the ownership table and do some munging
-        own860 = (self.table_compiler.grab_the_table('ownership_eia860')
+    def get_ownership(self):
+        """Get the ownership table and create total rows."""
+        # get the ownership table and do some munging
+        own860 = (self.table_compiler.get_the_table('ownership_eia860')
                   [['plant_id_eia', 'generator_id', 'report_date',
                     'utility_id_eia', 'fraction_owned',
                     'owner_utility_id_eia']])
@@ -548,8 +629,8 @@ class CompilePlantParts(object):
         plant_part_df = pd.DataFrame(columns=cols_to_grab)
         for table_name, table_deets in plant_part_details['ag_tables'].items():
             logger.info(f'beginning the aggregation for {table_name}')
-            # grab the table
-            table = self.grab_denormalize_table(
+            # get the table
+            table = self.get_denormalize_table(
                 table_name,
                 denorm_table=table_deets['denorm_table'],
                 denorm_cols=table_deets['denorm_cols'],
@@ -587,7 +668,7 @@ class CompilePlantParts(object):
 
     def slice_by_ownership(self, plant_gen_df):
         """Generate proportional data by ownership %s."""
-        own860 = self.grab_ownership()
+        own860 = self.get_ownership()
         logger.debug(f'# of generators before munging: {len(plant_gen_df)}')
         plant_gen_df = plant_gen_df.merge(
             own860,
@@ -654,11 +735,11 @@ class CompilePlantParts(object):
                         'id_cols': self.plant_parts[part]['id_cols'],
                         'denorm_cols': self.plant_parts[part]['denorm_cols']
                     }
-        # grab the demorn tables and squish the id cols in with the gens
+        # get the demorn tables and squish the id cols in with the gens
         for k, v in denorm_tables.items():
             if not set(v['id_cols']).issubset(set(self.plant_gen_df.columns)):
                 logger.debug(f'no id cols from {k}')
-                denorm_df = self.table_compiler.grab_the_table(
+                denorm_df = self.table_compiler.get_the_table(
                     k)[list(set(v['id_cols']
                                 + v['denorm_cols']))].drop_duplicates()
                 self.plant_gen_df = self.plant_gen_df.merge(
@@ -742,14 +823,21 @@ class CompilePlantParts(object):
         """
         plant_parts_df = (
             calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq).
-            merge(self.table_compiler.grab_the_table('utilities_eia'),
+            merge(self.table_compiler.get_the_table('utilities_eia'),
                   how='left').
-            merge(self.table_compiler.grab_the_table('plants_eia'), how='left')
+            merge(self.table_compiler.get_the_table('plants_eia'), how='left')
         )
         return plant_parts_df
 
     def add_record_id(self, part_df, id_cols, plant_part_col='plant_part'):
-        """Add a record id to a compiled part df."""
+        """
+        Add a record id to a compiled part df.
+
+        We need a standardized way to refer to these compiled records that
+        contains enough information in the id itself that in theory we could
+        deconstruct the id and determine which plant id and plant part id
+        columns are associated with this record.
+        """
         ids = deepcopy(id_cols)
         # we want the plant id first... mostly just bc it'll be easier to read
         part_df = part_df.assign(record_id_eia=part_df.plant_id_eia.map(str))
@@ -769,7 +857,7 @@ class CompilePlantParts(object):
     def add_install_year(self, part_df, id_cols, install_table):
         """Add the install year from the entities table to your plant part."""
         logger.debug(f'pre count of part DataFrame: {len(part_df)}')
-        gen_ent = self.table_compiler.grab_the_table('generators_entity_eia')
+        gen_ent = self.table_compiler.get_the_table('generators_entity_eia')
         install = (gen_ent.
                    assign(installation_year=gen_ent['operating_date'].dt.year).
                    astype({'installation_year': 'Int64', }).
@@ -789,7 +877,7 @@ class CompilePlantParts(object):
         else:
             part_install = (install[['plant_id_eia', 'generator_id',
                                      'installation_year']].
-                            merge(self.table_compiler.grab_the_table(
+                            merge(self.table_compiler.get_the_table(
                                 install_table))
                             [id_cols + ['installation_year']].
                             drop_duplicates(subset=id_cols, keep='first'))
@@ -798,13 +886,14 @@ class CompilePlantParts(object):
         logger.debug(f'post count of part DataFrame: {len(part_df)}')
         return part_df
 
-    def grab_consistent_qualifiers(self, record_df, base_cols, record_name):
+    def get_consistent_qualifiers(self, record_df, base_cols, record_name):
         """
-        Grab fully consistent qualifier records.
+        Get fully consistent qualifier records.
 
-        When qualitative data is consistent for every record in a plant part,
-        we grab these catagoricals. If the records are not consistent, then
-        nothing is compiled.
+        When data is a qualifer column is identical for every record in a
+        plant part, we associate this data point with the record. If the data
+        points for the related generator records are not identical, then
+        nothing is associated with the record.
 
         Args:
             record_df (pandas.DataFrame): the dataframe with the record
@@ -834,33 +923,16 @@ class CompilePlantParts(object):
             drop_duplicates())
         return consistent_records
 
-    def grab_max_op_status(self, record_df, base_cols, record_name, sorter):
-        """
-        Grab the max operating status.
-
-        We want to find the most relevant record  as defined by the sorter. In
-        the example case of the operating status means that if any related
-        generator is operable, than we'll label the whole plant as operable.
-
-        Args:
-            record_df (pandas.DataFrame): the dataframe with the record
-            base_cols (list) : list of identifying columns.
-            record_name (string) : name of qualitative record
-            sorter (list): sorted list of category options
-        """
-        record_df[record_name] = record_df[record_name].astype("category")
-        record_df[record_name].cat.set_categories(sorter, inplace=True)
-        record_df = record_df.sort_values(record_name)
-        return (record_df[base_cols + [record_name]]
-                .drop_duplicates(keep='first'))
-
     def dedup_on_category(self, dedup_df, base_cols, category_name, sorter):
         """
-        Drop duplicates based on category.
+        Deduplicate a df using a sorted category to retain prefered values.
+
+        Use a sorted category column to retain your prefered values when a
+        dataframe is deduplicated.
 
         Args:
             dedup_df (pandas.DataFrame): the dataframe with the record
-            base_cols (list) : list of identifying columns.
+            base_cols (list) : list of identifying columns
             category_name (string) : name of qualitative record
             sorter (list): sorted list of category options
         """
@@ -869,26 +941,51 @@ class CompilePlantParts(object):
         dedup_df = dedup_df.sort_values(category_name)
         return dedup_df.drop_duplicates(subset=base_cols, keep='first')
 
-    def grab_qualifiers(self,
-                        part_df,
-                        record_name,
-                        id_cols,
-                        denorm_table,
-                        denorm_cols
-                        ):
+    def get_qualifiers(self,
+                       part_df,
+                       record_name,
+                       id_cols,
+                       denorm_table,
+                       denorm_cols
+                       ):
         """
-        Grab qualifier records.
+        Get qualifier records.
 
-        For an individual compiled dataframe for each of the plant parts, we
-        want to add back in some non-data columns (qualifier columns). When
-        qualitative data is consistent for every record in a plant part, we
-        assign these catagoricals. If the records are not consistent, then
-        nothing is added.
+        For an individual dataframe of one plant part (e.g. only
+        "plant_prime_mover" plant part records), we typically have identifying
+        columns and aggregated data columns. The identifying columns for a
+        given plant part are only those columns which are required to uniquely
+        specify a record of that type of plant part. For example, to uniquely
+        specify a plant_unit record, we need both plant_id_eia and the
+        unit_id_pudl, and nothing else. In other words, the identifying columns
+        for a given plant part would make up a natural composite primary key
+        for a table composed entirely of that type of plant part. Every plant
+        part is cobbled together from generator records, so each record in
+        each part_df can be thought of as a collection of generators.
+
+        Identifier and qualifier columns are the same columns; whether a column
+        is an identifier or a qualifier is a function of the plant part you're
+        considering. All the other columns which could be identifiers in the
+        context of other plant parrts (but aren't for this plant part) are
+        qualifiers.
+
+        This method takes a part_df and goes and checks whether or not the data
+        we are trying to grab from the record_name column is consistent across
+        every component genertor from each record.
+
+        When record_df is "operational_status", we are not going to check for
+        consistency; instead we will grab the highest level of operational
+        status that is associated with each records' component generators. The
+        order of operational status is defined within the method as:
+        'existing', 'proposed', then 'retired'. For example if a plant_unit is
+        composed of two generators, and one of them is "existing" and another
+        is "retired" the entire plant_unit will be considered "existing".
 
         Args:
-            part_df (pandas.DataFrame)
-            record_name (string) : name of qualitative record
-            id_cols (list) : list of identifying columns.
+            part_df (pandas.DataFrame): dataframe containing records associated
+                with one plant part.
+            record_name (string) : name of qualitative record column
+            id_cols (list) : list of identifying columns
             denorm_table (string) : name of table needed to denormalize
             denorm_cols (list): list of columns to denormalize on
 
@@ -899,25 +996,33 @@ class CompilePlantParts(object):
 
         record_df = pd.merge(
             self.plant_gen_df,
-            self.table_compiler.grab_the_table(QUAL_RECORD_TABLES[record_name])
+            self.table_compiler.get_the_table(QUAL_RECORD_TABLES[record_name])
         )
 
+        base_cols = id_cols
         if 'report_date' in record_df.columns:
-            base_cols = id_cols + ['report_date']
-        else:
-            base_cols = id_cols
+            base_cols = base_cols + ['report_date']
 
         if record_name != 'operational_status':
-            logger.debug(f'grabbing consistent {record_name}s')
-            consistent_records = self.grab_consistent_qualifiers(
+            logger.debug(f'getting consistent {record_name}s')
+            consistent_records = self.get_consistent_qualifiers(
                 record_df, base_cols, record_name)
         if record_name == 'operational_status':
-            logger.debug(f'grabbing max {record_name}')
+            logger.debug(f'getting max {record_name}')
             sorter = ['existing', 'proposed', 'retired']
+            # restric the number of columns in here to only include the ones we
+            # need, unlike get_consistent_qualifiers, dedup_on_category
+            # preserves all of the columns from record_df
+            record_df = record_df[
+                [c for c in record_df.columns
+                 if c in base_cols + list(part_df.columns) + [record_name]]]
             consistent_records = self.dedup_on_category(
                 record_df, base_cols, record_name, sorter
             )
-        logger.debug(f'merging in consistent {record_name}')
+        non_nulls = consistent_records[consistent_records[record_name].notnull(
+        )]
+        logger.debug(
+            f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
 
     def count_peer_parts(self, part_name):
@@ -997,6 +1102,9 @@ class CompilePlantParts(object):
         """
         Label the false granularities with their true parts.
 
+        This method is relying on the output from `make_all_the_bools` and
+        `make_all_the_counts`.
+
         Args:
             part_name (string)
             bools (pandas.DataFrame)
@@ -1030,7 +1138,7 @@ class CompilePlantParts(object):
 
         """
         bool_df = deepcopy(self.part_bools)
-        # grab only the columns you need for this part and drop duplicates
+        # get only the columns you need for this part and drop duplicates
         bool_df = (bool_df[self.plant_parts[part_name]['id_cols'] +
                            ['report_date', f'true_gran_{part_name}',
                             f'appro_part_label_{part_name}',
@@ -1070,22 +1178,25 @@ class CompilePlantParts(object):
             drop_duplicates(subset=['record_id_eia']).
             set_index('record_id_eia'))
 
-    def add_new_plant_name(self, plant_parts_df):
-        """Add plants names into the compiled plant part df."""
-        df = plant_parts_df
-        id_cols_all = ['generator_id', 'unit_id_pudl', 'prime_mover_code',
-                       'energy_source_code_1', 'technology_description']
-        df['plant_name_new'] = df['plant_name_eia']
-        col = 'generator_id'
-        for col in id_cols_all:
-            df.loc[df[col].notnull(), 'plant_name_new'] = (
-                df['plant_name_new'] + " " + df[col].astype(str))
-        self.plant_parts_df = df
-        return self.plant_parts_df
+    def add_new_plant_name(self, part_df, part_name):
+        """
+        Add plants names into the compiled plant part df.
+
+        Args:
+            part_df (pandas.DataFrame)
+            part_name (string)
+        """
+        part_df = (pd.merge(
+            part_df, self.table_compiler.get_the_table('plants_eia'))
+            .assign(plant_name_new=lambda x: x.plant_name_eia))
+        col = self.parts_to_ids[part_name]
+        part_df.loc[part_df[col].notnull(), 'plant_name_new'] = (
+            part_df['plant_name_new'] + " " + part_df[col].astype(str))
+        return part_df
 
     def add_ferc_acct(self, plant_gen_df):
         """Merge the plant_gen_df with the ferc_acct map."""
-        return pd.merge(plant_gen_df, grab_eia_ferc_acct_map(), how='left')
+        return pd.merge(plant_gen_df, get_eia_ferc_acct_map(), how='left')
 
     def prep_plant_gen_df(self):
         """Prepare plant gen dataframe."""
@@ -1126,7 +1237,8 @@ class CompilePlantParts(object):
             return self.plant_parts_df
         if self.plant_gen_df is None:
             self.plant_gen_df = self.prep_plant_gen_df()
-        self.part_bools = self.prep_part_bools()
+        if self.part_bools is None:
+            self.part_bools = self.prep_part_bools()
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
@@ -1139,19 +1251,20 @@ class CompilePlantParts(object):
             id_cols = plant_part['id_cols']
 
             thing = (
-                self.ag_part_by_own_slice(part_name).
-                pipe(self.add_install_year, id_cols,
-                     plant_part['install_table']).
-                assign(plant_part=part_name).
-                pipe(self.assign_true_gran, part_name).
-                pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+                self.ag_part_by_own_slice(part_name)
+                .pipe(self.add_install_year, id_cols,
+                      plant_part['install_table'])
+                .assign(plant_part=part_name)
+                .pipe(self.assign_true_gran, part_name)
+                .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+                .pipe(self.add_new_plant_name, part_name)
             )
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
                     logger.debug(
-                        f'grab consistent {qual_record} for {part_name}')
-                    thing = self.grab_qualifiers(
+                        f'get consistent {qual_record} for {part_name}')
+                    thing = self.get_qualifiers(
                         thing,
                         qual_record,
                         id_cols,
@@ -1178,7 +1291,6 @@ class CompilePlantParts(object):
                 'record_id_eia', 'ownership', 'appro_record_id_eia', ]],
             sorter=['owned', 'total']
         )
-        self.plant_parts_df = self.add_new_plant_name(self.plant_parts_df)
         return self.plant_parts_df
 
     def _test_prep_merge(self, part_name):
@@ -1285,9 +1397,9 @@ def weighted_average(df, data_col, weight_col, by_col):
     return result.to_frame(name=data_col).reset_index()
 
 
-def grab_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
+def get_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
     """
-    Grab map of EIA technology_description/pm codes <> ferc accounts.
+    Get map of EIA technology_description/pm codes <> ferc accounts.
 
     We must refactor this with a better path dependency. Or just store this
     map as a dataframe or dictionary.
@@ -1300,10 +1412,12 @@ def grab_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
 
 def get_master_unit_list_eia(file_path_mul, clobber=False):
     """
-    Get the master unit list; generate it or grab if from a file.
+    Get the master unit list; generate it or get if from a file.
 
     Args:
-        file_path_mul (path-like)
+        file_path_mul (pathlib.Path)
+        clobber (boolean): True if you want to regenerate the master unit list
+            whether or not it is saved at the file_path_mul
     """
     if not file_path_mul.is_file() or clobber:
         logger.info(
