@@ -15,20 +15,20 @@ records for various levels or granularies of plant parts.
 For each of the FERC1 steam records we want to figure out if which master unit
 list record is the corresponding record. We do this with a record linkage/
 scikitlearn machine learning model. The recordlinkage package helps us create
-feature vectors (via `make_features()`) for each candidate match between FERC
-and EIA. Feature vectors are a number between 0 and 1 that indicates the
-closeness for each value we want to compare.
+feature vectors (`make_features()`) for each candidate match between FERC and
+EIA. Feature vectors are a number between 0 and 1 that indicates the closeness
+for each value we want to compare.
 
 We use the feature vectors of our known-to-be-connected training data to cross
 validate and tune parameters to choose hyperparameters for scikitlearn models
 (via `test_model_parameters()`). We choose the "best" model based on the cross
 validated results. This best scikitlearn model is then used to generate matches
 with the full dataset (`fit_predict_lrc()`). The model can return multiple
-options for each FERC1 record, so we rank them and choose the best/winning
-match (`calc_wins()`). We then ensure those connections cointain our training
-data (`override_winners_with_training_df()`). These "best" results are the
-connections we keep as the matches between FERC1 steam records and the EIA
-master unit list.
+options for each FERC1 record, so we rank them and choose the highest ranking
+match (`calc_best_matches()`). We then ensure those connections cointain our
+training data (`override_best_match_with_training_df()`). These best results
+are the connections we keep as the matches between FERC1 steam records and the
+EIA master unit list (`get_best_matches()`).
 """
 
 import logging
@@ -83,22 +83,22 @@ class MakeCandidateFeatures(object):
 
         # generate the list of the records in the EIA and FERC records that
         # exist in the training data
-        self.eia_known = self.get_known_connections(
+        self.plant_parts_train_df = self.get_train_records(
             self.plant_parts_true_df,
             dataset_id_col='record_id_eia')
-        self.ferc_known = self.get_known_connections(
+        self.steam_train_df = self.get_train_records(
             self.steam_df,
             dataset_id_col='record_id_ferc1')
 
         logger.info("Generate candidate features.")
         # generate feature matrixes for known/training data
         self.features_train = self.make_features(
-            dfa=self.ferc_known,
-            dfb=self.eia_known,
+            ferc1_df=self.steam_train_df,
+            eia_df=self.plant_parts_train_df,
             block_col='plant_id_report_year')
         self.features_all = self.make_features(
-            dfa=self.steam_df,
-            dfb=self.plant_parts_true_df,
+            ferc1_df=self.steam_df,
+            eia_df=self.plant_parts_true_df,
             block_col='plant_id_report_year')
 
     def prep_train_connections(self):
@@ -166,13 +166,10 @@ class MakeCandidateFeatures(object):
             fuel cost data.
 
         """
-        fpb_cols_to_use = ['report_year',
-                           'utility_id_ferc1',
-                           'plant_name_ferc1',
-                           'utility_id_pudl',
-                           'fuel_cost',
-                           'fuel_mmbtu',
-                           'primary_fuel_by_mmbtu']
+        fpb_cols_to_use = [
+            'report_year', 'utility_id_ferc1', 'plant_name_ferc1',
+            'utility_id_pudl', 'fuel_cost', 'fuel_mmbtu',
+            'primary_fuel_by_mmbtu']
 
         logger.info("Preparing the FERC1 steam table.")
         self.steam_df = (
@@ -213,7 +210,7 @@ class MakeCandidateFeatures(object):
 
         return self.steam_df
 
-    def get_known_connections(self, dataset_df, dataset_id_col):
+    def get_train_records(self, dataset_df, dataset_id_col):
         """
         Generate a set of known connections from a dataset using training data.
 
@@ -243,15 +240,39 @@ class MakeCandidateFeatures(object):
                              'total_mmbtu': float}))
         return known_df
 
-    @staticmethod
-    def make_candidate_links(dfa, dfb, block_col=None):
-        """Generate canidate links for comparison features."""
-        indexer = rl.Index()
-        indexer.block(block_col)
-        return indexer.index(dfa, dfb)
+    def make_features(self, ferc1_df, eia_df, block_col=None):
+        """
+        Generate comparison features based on defined features.
 
-    def make_features(self, dfa, dfb, block_col=None):
-        """Generate comparison features based on defined features."""
+        The recordlinkage package helps us create feature vectors.
+        For each column that we have in both datasets, this method generates
+        a column of feature vecotrs, which contain values between 0 and 1 that
+        are measures of the similarity between each datapoint the two datasets
+        (1 meaning the two datapoints were exactly the same and 0 meaning they
+        were not similar at all).
+
+        For more details see recordlinkage's documentaion:
+        https://recordlinkage.readthedocs.io/en/latest/ref-compare.html
+
+        TODO: Should this be a @staticmethod?
+
+        Args:
+            ferc1_df (pandas.DataFrame): Either training or all records from
+                steam table (`steam_train_df` or `steam_df`).
+            eia_df (pandas.DataFrame): Either training or all records from the
+                EIA master unit list (`plant_parts_train_df` or
+                `plant_parts_true_df`).
+            block_col (string):  If you want to restrict possible matches
+                between ferc_df and eia_df based on a particular column,
+                block_col is the column name of blocking column. Default is
+                None. If None, this method will generate features between all
+                possible matches.
+
+        Returns:
+            pandas.DataFrame: a dataframe of feature vectors between FERC and
+            EIA.
+
+        """
         compare_cl = rl.Compare(features=[
             String('plant_name_ferc1', 'plant_name_new',
                    label='plant_name', method='jarowinkler'),
@@ -278,8 +299,12 @@ class MakeCandidateFeatures(object):
                   label='utility_id_pudl'),
         ])
 
-        features = compare_cl.compute(
-            self.make_candidate_links(dfa, dfb, block_col), dfa, dfb)
+        # generate the index of all candidate features
+        indexer = rl.Index()
+        indexer.block(block_col)
+        feature_index = indexer.index(ferc1_df, eia_df)
+
+        features = compare_cl.compute(feature_index, ferc1_df, eia_df)
         return features
 
 
@@ -478,7 +503,7 @@ class TuneModel(MakeCandidateFeatures):
         Returns:
             pandas.DataFrame: dataframe in which each record correspondings to
             one model run and contains info like scores of the run (how well
-            it predicted our training data), info about the results.
+            it predicted our training data).
 
         """
         hyper_options = self.get_hyperparameters_options()
@@ -494,7 +519,7 @@ class TuneModel(MakeCandidateFeatures):
 
 
 class Matches(TuneModel):
-    """Managers the results of TuneModel and chooses winning matches."""
+    """Manages the results of TuneModel and chooses best matches."""
 
     def _apply_weights(self, features, coefs):
         """
@@ -544,6 +569,8 @@ class Matches(TuneModel):
         """
         Calculate stats needed to judge candidate matches.
 
+        rank: diffs: iqr:
+
         Args:
             df (pandas.DataFrame): Dataframe of comparison features with
                 MultiIndex containing the ferc and eia record ids.
@@ -552,20 +579,19 @@ class Matches(TuneModel):
             pandas.DataFrame: the input df with the stats.
 
         """
-        df = self.weight_features(df)
-        df = df.reset_index()
+        df = self.weight_features(df).reset_index()
         gb = df.groupby('record_id_ferc1')[['record_id_ferc1', 'score']]
         df = (
             df.sort_values(['record_id_ferc1', 'score'])
             # rank the scores
-            .assign(rank=gb.rank(ascending=0, method='average'))
-            # calculate differences between scores
-            .assign(diffs=lambda x: x['score'].diff())
+            .assign(rank=gb.rank(ascending=0, method='average'),
+                    # calculate differences between scores
+                    diffs=lambda x: x['score'].diff())
             # count grouped records
             .merge(pudl.helpers.count_records(df, ['record_id_ferc1'],
                                               'count'),
                    how='left',)
-            # calculate the iqr for each
+            # calculate the iqr for each record_id_ferc1 group
             .merge((gb.agg({'score': scipy.stats.iqr})
                     .droplevel(0, axis=1)
                     .rename(columns={'score': 'iqr'})),
@@ -580,27 +606,27 @@ class Matches(TuneModel):
         return df
 
     def calc_murk(self, df, iqr_perc_diff):
-        """Calculate the murky wins."""
+        """Calculate the murky model matches."""
         distinction = (df['iqr_all'] * iqr_perc_diff)
-        murky_wins = (df[(df['rank'] == 1) &
-                         (df['diffs'] < distinction)])
-        return murky_wins
+        matches_murk = (df[(df['rank'] == 1) &
+                           (df['diffs'] < distinction)])
+        return matches_murk
 
-    def calc_wins(self, df, ferc1_options, iqr_perc_diff):
+    def calc_best_matches(self, df, ferc1_options, iqr_perc_diff):
         """
-        Find the winners and report on winning ratios.
+        Find the highest scoring matches and report on match coverage.
 
-        With the matches resulting from a model run, generate "winning"
-        matches by finding the highest ranking EIA match for each FERC
-        record. If it is either the only match or it is different enough
-        from the #2 ranked match, we consider it a winner. Also log win
-        stats.
+        With the matches resulting from a model run, generate "best" matches by
+        finding the highest ranking EIA match for each FERC record. If it is
+        either the only match or it is different enough from the #2 ranked
+        match, we consider it a winner. Also log stats about the coverage of
+        the best matches.
 
-        The matches are all of the results from the model prediction. the
-        wins are all of the matches that are distinct enough from it’s
-        closest match. The murky_wins are the matches that are not
-        “distinct enough” from its closes match. Distinct enough means that
-        the top match isn’t one iqr away from the second top match.
+        The matches are all of the results from the model prediction. The
+        best matches are all of the matches that are distinct enough from it’s
+        next closest match. The `murky_df` are the matches that are not
+        “distinct enough” from the closes match. Distinct enough means that
+        the best match isn’t one iqr away from the second best match.
 
         Args:
             df (pandas.DataFrame): dataframe with all of the model generate
@@ -608,6 +634,7 @@ class Matches(TuneModel):
                 `calc_match_stats()`.
             ferc1_options (pandas.DataFrame): dataframe with all of the
                 possible `record_id_ferc1`s.
+            iqr_perc_diff (float):
 
         Returns
             pandas.DataFrame : winning matches. Matches that had the
@@ -616,28 +643,33 @@ class Matches(TuneModel):
         """
         unique_f = df.reset_index().drop_duplicates(
             subset=['record_id_ferc1'])
-        ties = df[df['rank'] == 1.5]
         distinction = (df['iqr_all'] * iqr_perc_diff)
-        # for the winners, grab the top ranked,
-        winners = (df[((df['rank'] == 1) & (df['diffs'] > distinction)) |
-                      ((df['rank'] == 1) & (df['diffs'].isnull()))])
-
+        # for the best matches, grab the top ranked model match if there is a
+        # big enough difference between it and the next highest ranked match
+        # diffs is a measure of the difference between each record and the next
+        # highest ranked model match
+        # the other option here is if a model match is the highest rank and
+        # there there is no other model matches
+        best_match = (df[((df['rank'] == 1) & (df['diffs'] > distinction))
+                         | ((df['rank'] == 1) & (df['diffs'].isnull()))])
+        # we want to know how many of the
         self.murk_df = self.calc_murk(df, iqr_perc_diff)
+        ties = df[df['rank'] == 1.5]
 
         logger.info('Winning match stats:')
         logger.info(
-            f' matches vs total ferc:  {len(unique_f)/len(ferc1_options):.02}')
+            f' matches vs ferc:      {len(unique_f)/len(ferc1_options):.02}')
         logger.info(
-            f' wins vs total ferc:     {len(winners)/len(ferc1_options):.02}')
+            f' best match v ferc:    {len(best_match)/len(ferc1_options):.02}')
         logger.info(
-            f' wins vs matches:        {len(winners)/len(unique_f):.02}')
+            f' best match vs matches:{len(best_match)/len(unique_f):.02}')
         logger.info(
-            f' murk vs matches:        {len(self.murk_df)/len(unique_f): .02}')
+            f' murk vs matches:      {len(self.murk_df)/len(unique_f):.02}')
         logger.info(
-            f' ties vs matches:        {len(ties)/2/len(unique_f):.02}')
-        return winners
+            f' ties vs matches:      {len(ties)/2/len(unique_f):.02}')
+        return best_match
 
-    def override_winners_with_training_df(self, winners, train_df):
+    def override_best_match_with_training_df(self, matches_best_df, train_df):
         """
         Override winning matches with training data matches.
 
@@ -646,9 +678,9 @@ class Matches(TuneModel):
         resutls from the record linkage model.
 
         Args:
-            winners (pandas.DataFrame): winning matches generated via
-                `calc_wins`. Matches that had the highest rank in their
-                record_id_ferc1, by a wide enough margin.
+            matches_best_df (pandas.DataFrame): best matches generated via
+                `calc_best_matches()`. Matches that had the highest rank in
+                their record_id_ferc1, by a wide enough margin.
             train_df (pandas.DataFrame): training data/known matches
                 between ferc and the master unit list. Result of
                 `prep_train_connections()`.
@@ -661,9 +693,9 @@ class Matches(TuneModel):
         """
         # we want to override the eia when the training id is
         # different than the "winning" match from the recrod linkage
-        winners = (
+        matches_best_df = (
             pd.merge(
-                winners.reset_index(),
+                matches_best_df.reset_index(),
                 train_df.reset_index(),
                 on=['record_id_ferc1'],
                 how='outer',
@@ -676,17 +708,18 @@ class Matches(TuneModel):
             )
         )
         # check how many records were overridden
-        overridden = winners.loc[
-            (winners.record_id_eia_trn.notnull())
-            & (winners.record_id_eia_rl.notnull())
-            & (winners.record_id_eia_trn != winners.record_id_eia_rl)
+        overridden = matches_best_df.loc[
+            (matches_best_df.record_id_eia_trn.notnull())
+            & (matches_best_df.record_id_eia_rl.notnull())
+            & (matches_best_df.record_id_eia_trn !=
+               matches_best_df.record_id_eia_rl)
         ]
         logger.info(
             f"Overridden records: {len(overridden)/len(train_df):.01%}")
         # we don't need these cols anymore...
-        winners = winners.drop(
+        matches_best_df = matches_best_df.drop(
             columns=['record_id_eia_trn', 'record_id_eia_rl'])
-        return winners
+        return matches_best_df
 
     @staticmethod
     def fit_predict_lrc(best,
@@ -705,7 +738,6 @@ class Matches(TuneModel):
             multi_class=best['multi_class'].values[0])
         # fit the model with all of the
         lrc.fit(features_known, train_df_ids.index)
-
         # this step is getting preditions on all of the possible matches based
         # on the last run model above
         predict_all = lrc.predict(features_all)
@@ -716,36 +748,79 @@ class Matches(TuneModel):
                                   how='left')
         return predict_all_df
 
-    def get_matches(self):
-        """Make."""
-        # grab the highest scoring
+    def get_best_matches(self):
+        """
+        Run logistic regression model and choose highest scoring matches.
+
+        From `TuneModel.test_model_parameters()`, we get a dataframe in which
+        each record correspondings to one model run and contains info like
+        scores of the run (how well it predicted our training data). This
+        method takes the result from `TuneModel.test_model_parameters()` and
+        choose the model hyperparameters that scored the highest.
+
+        The logistic regression model this method employs returns all matches
+        from the candiate matches in `features_all`. But we only want one match
+        for each FERC1 Steam record. So this method uses the coeficients from
+        the model (which are a measure of the importance of each of the
+        features/columns in `features_all`) so weight the feature vecotrs. With
+        the sum of the weighted feature vectors for each model match, this
+        method selects the hightest scoring match via `calc_best_matches()`.
+
+        This method relies on:
+        * results_options (pandas.DataFrame): table in which each record
+          correspondings to one model run and contains info like scores of the
+          run (how well it predicted our training data). Result of
+          `TuneModel.test_model_parameters()`
+        * features_train (pandas.DataFrame): feature vectors between training
+          data from FERC steam and EIA master unit list. Result of
+          `MakeCandidateFeatures.make_features()`.
+        * features_all (pandas.DataFrame): feature vectors between all data
+          from FERC steam and EIA master unit list. Result of
+          `MakeCandidateFeatures.make_features()`.
+        * train_df (pandas.DataFrame): training data/known matches between ferc
+          and the master unit list. Result of
+          `MakeCandidateFeatures.prep_train_connections()`.
+        * steam_df (pandas.DataFrame): a cleaned table of FERC1 steam plant
+          records with fuel cost data. Result of
+          `MakeCandidateFeatures.prep_ferc_data()`
+
+        Returns:
+            pandas.DataFrame: the best matches between ferc1 steam records and
+            the EIA master unit list. Each ferc1 steam record has a maximum of
+            one best match. The dataframe has a MultiIndex with `record_id_eia`
+            and `record_id_ferc1`.
+        """
+        # grab the highest scoring model... the f_score is most encompassing
+        # score so we'll lead with that f_score
         self.best = (self.results_options.sort_values(
             ['f_score', 'precision', 'accuracy'], ascending=False).head(1))
         logger.info("Scores from the best model hyperparameters:")
         logger.info(f"  F-Score:   {self.best.loc[0,'f_score']:.02}")
         logger.info(f"  Precision: {self.best.loc[0,'precision']:.02}")
         logger.info(f"  Accuracy:  {self.best.loc[0,'accuracy']:.02}")
-
         # actually run a model using the "best" model!!
         logger.info(
             "Fit and predict a model w/ the highest scoring hyperparameters.")
-        predict_all_df = self.fit_predict_lrc(
+        # this returns all matches that the model deems good enough from the
+        # candidate matches in the `features_all`
+        matches_model = self.fit_predict_lrc(
             self.best, self.features_train, self.features_all, self.train_df)
-
-        self.coefs = self.best.loc[0, 'coef']
-
-        # generate results with weighted features
-        # we want a metric of how merge in the IRQ of the full options
-        self.results = pd.merge(
-            self.calc_match_stats(predict_all_df),
+        # the coeficients are the measure of relative importance that the model
+        # determined that each feature vector
+        self.coefs = self.best.loc[0, "coef"]
+        # weight the features of model matches with the coeficients
+        # we need a metric of how different each match is
+        # merge in the IRQ of the full options
+        self.matches_model = pd.merge(
+            self.calc_match_stats(matches_model),
             self.calc_match_stats(self.features_all)[['iqr']],
             left_index=True,
             right_index=True,
             how='left',
             suffixes=("", "_all"))
-
-        winners = (self.calc_wins(self.results, self.steam_df, .1)
-                   .pipe(self.override_winners_with_training_df, self.train_df)
-                   )
-
-        return winners
+        logger.info("Get the top scoring match for each FERC1 steam record.")
+        matches_best_df = (
+            self.calc_best_matches(self.matches_model, self.steam_df, .1)
+            .pipe(self.override_best_match_with_training_df, self.train_df)
+        )
+        return matches_best_df

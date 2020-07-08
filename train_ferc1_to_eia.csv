@@ -1,4 +1,4 @@
-record_id_eia,record_id_ferc
+record_id_eia,record_id_ferc1
 1005_2018_plant_owned_15470,f1_hydro_2018_12_144_0_1
 10773_2018_plant_owned_19876,f1_steam_2018_12_186_0_1
 10774_2018_plant_owned_19876,f1_steam_2018_12_186_3_2
@@ -429,6 +429,5 @@ record_id_eia,record_id_ferc
 ,f1_gnrt_plant_2018_12_312_0_1
 ,f1_gnrt_plant_2018_12_312_0_2
 ,f1_gnrt_plant_2018_12_312_0_3
-
-,f1_gnrt_plant_2018_12_312_0_4,
-3803_2016_plant_owned_19876,f1_steam_2016_12_186_4_3,
+,f1_gnrt_plant_2018_12_312_0_4
+3803_2016_plant_owned_19876,f1_steam_2016_12_186_4_3
