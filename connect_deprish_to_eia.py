@@ -43,7 +43,7 @@ MUL_COLS = [
     'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
-    'true_gran', 'appro_part_label', 'appro_record_id_eia',
+    'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
 ]
 
 MUL_RENAME = {
@@ -111,9 +111,18 @@ def prep_deprish(file_path_deprish, plant_parts_df,
     return deprish_ids
 
 
-def prep_master_parts_eia(plant_parts_df, key_mul):
+def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
     """Prepare the EIA master plant parts."""
-    plant_parts_df[key_mul] = pudl.helpers.cleanstrings_series(
+    plant_id_pudls_d = deprish_df.loc[:, 'plant_id_pudl'].unique().tolist()
+    report_years_d = deprish_df.loc[:, 'report_year'].unique().tolist()
+    utility_ids_d = deprish_df.loc[:, 'utility_id_pudl'].unique().tolist()
+
+    plant_parts_df = plant_parts_df.loc[
+        (plant_parts_df.plant_id_pudl.isin(plant_id_pudls_d))
+        & (plant_parts_df.report_year.isin(report_years_d))
+        & (plant_parts_df.utility_id_pudl.isin(utility_ids_d))]
+
+    plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)
     return plant_parts_df
 
@@ -123,7 +132,7 @@ def prep_master_parts_eia(plant_parts_df, key_mul):
 ###############################################################################
 
 
-def get_plant_year_util_list(plant_name, df1, df2, key2):
+def get_plant_year_util_list(plant_name, deprish_df, mul_df, key_mul):
     """
     Get the possible key matches from df2 a plant_id_pudl and report_year.
 
@@ -131,15 +140,16 @@ def get_plant_year_util_list(plant_name, df1, df2, key2):
     match. This is for use within `get_fuzzy_matches`.
     """
     logger.debug(plant_name)
-    plant_id_pudls = df1.loc[df1.plant_name ==
-                             plant_name, 'plant_id_pudl'].values
-    report_years = df1.loc[df1.plant_name ==
-                           plant_name, 'report_year'].values
-    utility_ids = df1.loc[df1.plant_name ==
-                          plant_name, 'utility_id_pudl'].values
-    names = df2.loc[(df2.plant_id_pudl.isin(plant_id_pudls))
-                    & (df2.report_year.isin(report_years))
-                    & (df2.utility_id_pudl.isin(utility_ids))][key2].to_list()
+    plant_id_pudls = deprish_df.loc[deprish_df.plant_name ==
+                                    plant_name, 'plant_id_pudl'].values
+    report_years = deprish_df.loc[deprish_df.plant_name ==
+                                  plant_name, 'report_year'].values
+    utility_ids = deprish_df.loc[deprish_df.plant_name ==
+                                 plant_name, 'utility_id_pudl'].values
+    names = mul_df.loc[
+        (mul_df.plant_id_pudl.isin(plant_id_pudls))
+        & (mul_df.report_year.isin(report_years))
+        & (mul_df.utility_id_pudl.isin(utility_ids))][key_mul].to_list()
     return names
 
 
@@ -156,7 +166,7 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
         key_deprish (str): is the key column of the left table
         key_mul (str): is the key column of the right table
         threshold (int): is how close the matches should be to return a match,
-        based on Levenshtein distance. Range between 0 and 100.
+            based on Levenshtein distance. Range between 0 and 100.
 
     Returns:
         pandas.DataFrame
@@ -195,8 +205,8 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             threshold=75)[DEPRISH_COLS + ['plant_name_match']],
         mul_df.reset_index().drop_duplicates(
             subset=['report_year', 'plant_name_new'])[MUL_COLS],
-        left_on=['report_year', 'plant_name_match'],
-        right_on=['report_year', key_mul], how='left')
+        left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
+        right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
         # rename the ids so that we have the "true granularity"
         # Every MUL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
@@ -260,7 +270,7 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
         sheet_name_deprish=sheet_name_deprish,
         key_deprish=key_deprish
     )
-    mul_df = prep_master_parts_eia(plant_parts_df, key_mul=key_mul)
+    mul_df = prep_master_parts_eia(plant_parts_df, deprish_df, key_mul=key_mul)
     deprish_match = (
         match_merge(deprish_df, mul_df,
                     key_deprish=key_deprish, key_mul=key_mul)
