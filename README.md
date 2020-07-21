@@ -9,7 +9,7 @@ Below is a visual overview of the main processes in this repo:
 ![Design overview:](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/rmi_design.png?raw=true)
 
 
-![Design overview:](rmi_design.jpg?raw=true)
+![Design overview](rmi_design.jpg?raw=true)
 
 
 RMI Collaborators include:
