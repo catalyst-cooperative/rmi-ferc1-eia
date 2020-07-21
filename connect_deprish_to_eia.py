@@ -115,14 +115,9 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
     """Prepare the EIA master plant parts."""
     # restrict the possible matches to only those that match on the
     # RESTRICT_MATCH_COLS
-    plant_id_pudls_d = deprish_df.loc[:, 'plant_id_pudl'].unique().tolist()
-    report_years_d = deprish_df.loc[:, 'report_year'].unique().tolist()
-    utility_ids_d = deprish_df.loc[:, 'utility_id_pudl'].unique().tolist()
-
-    plant_parts_df = plant_parts_df.loc[
-        (plant_parts_df.plant_id_pudl.isin(plant_id_pudls_d))
-        & (plant_parts_df.report_year.isin(report_years_d))
-        & (plant_parts_df.utility_id_pudl.isin(utility_ids_d))]
+    options_index = (deprish_df[RESTRICT_MATCH_COLS].drop_duplicates()
+                     .set_index(RESTRICT_MATCH_COLS).index)
+    plant_parts_df.set_index(RESTRICT_MATCH_COLS).loc[options_index]
 
     plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)

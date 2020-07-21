@@ -35,11 +35,11 @@ SPLIT_COLS_STANDARD = [
 ]
 """
 list: the standard columns to split ferc1 data columns to be used in
-`DATA_COLS_TO_SPLIT`.
+``DATA_COLS_TO_SPLIT``.
 """
 
 DATA_COLS_TO_SPLIT = {
-    'opex_nofuel': SPLIT_COLS_STANDARD,
+    'opex_nonfuel': SPLIT_COLS_STANDARD,
     'net_generation_mwh_ferc1': SPLIT_COLS_STANDARD,
 }
 """
@@ -47,12 +47,12 @@ dictionary: FERC1 data columns (keys) that we want to associated with
 depreciation records. When the FERC1 record is larger than the depreciation
 record (e.g. a group of depreciation generators matched with a FERC1 plant),
 this module attemps to split the depreciation record based on the list of
-columns to weight the split (values). See  `split_ferc1_data_on_split_cols()`
+columns to weight the split (values). See  ``split_ferc1_data_on_split_cols()``
 for more details.
 """
 
 
-class DeprishToFERC1Inputs():
+class InputsCompiler():
     """
     Input manager for matches between FERC 1 and depreciation data.
 
@@ -98,7 +98,8 @@ class DeprishToFERC1Inputs():
         self.connects_deprish_eia_raw = pd.read_pickle(
             file_path_deprish_eia, compression='gzip')
 
-        self.prep_inputs()
+        # store a bool which will indicate whether the inputs have been prepped
+        self.inputs_prepped = False
 
     def _prep_plant_parts_eia(self):
         self.plant_parts_eia = (
@@ -128,11 +129,11 @@ class DeprishToFERC1Inputs():
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
             # we want the backbone of this table to be the steam records
             # so we have all possible steam records, even the unmapped ones
-            .pipe(pd.merge, self.steam_cleaned_ferc1,
-                  how='right', on=['record_id_ferc1'] + id_cols,
-                  suffixes=('_eia_ferc1', ''))
-            .assign(opex_nofuel=lambda x: (x.opex_production_total -
-                                           x.opex_fuel))
+            .merge(self.steam_cleaned_ferc1,
+                   how='right', on=['record_id_ferc1'] + id_cols,
+                   suffixes=('_eia_ferc1', ''))
+            .assign(opex_nonfuel=lambda x: (x.opex_production_total -
+                                            x.opex_fuel))
         )
 
         if len(self.connects_ferc1_eia) != len(self.steam_cleaned_ferc1):
@@ -195,12 +196,13 @@ class DeprishToFERC1Inputs():
         """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
         # for later inputs
-        self._prep_plant_parts_eia()
-        self._prep_steam_cleaned_ferc1()
-        self._prep_connects_ferc1_eia()
-        self._prep_connects_deprish_eia()
-
-        self._prep_info_from_parts_compiler_eia()
+        if not self.inputs_prepped:
+            self._prep_plant_parts_eia()
+            self._prep_steam_cleaned_ferc1()
+            self._prep_connects_ferc1_eia()
+            self._prep_connects_deprish_eia()
+            self._prep_info_from_parts_compiler_eia()
+            self.inputs_prepped = True
 
 
 class MatchMaker():
@@ -215,14 +217,15 @@ class MatchMaker():
         """
         Initialize MatchMaker.
 
-        Store instance of DeprishToFERC1Inputs so we can use the prepared
+        Store instance of InputsCompiler so we can use the prepared
         dataframes.
 
         Args:
-            inputs (object): an instance of DeprishToFERC1Inputs
+            inputs (object): an instance of InputsCompiler
 
         """
         self.inputs = inputs
+        inputs.prep_inputs()
 
     def check_all_candidate_matches(self, candidate_matches_all):
         """
@@ -265,9 +268,6 @@ class MatchMaker():
 
         Before choosing the specific match between depreciation and ferc1, we
         need to compile all possible options - or candidate links.
-
-        Args:
-            inputs (object): an instance of DeprishToFERC1Inputs
 
         Returns:
             pandas.DataFrame: a dataframe with all of the possible combinations
@@ -573,10 +573,10 @@ class Scaler(object):
             The data columns properly scaled will be labled as
             "{data_col}_ferc1_deprish".
         """
-        same_smol = self.split_ferc1_data_cols()
         same_true = self.assign_ferc1_data_cols_same_true()
+        same_smol = self.split_ferc1_data_cols()
         # TODO: Add the remaining scaling methods
-        scaled_df = pd.concat([same_smol, same_true])
+        scaled_df = pd.concat([same_true, same_smol, ])
         return scaled_df
 
     def assign_ferc1_data_cols_same_true(self):
@@ -595,9 +595,8 @@ class Scaler(object):
         same_true = (
             self.matches_df[self.matches_df.match_method == 'same_true']
         )
-        for data_col in DATA_COLS_TO_SPLIT.keys():
-            new_data_col = self._get_clean_new_data_col(
-                f"{data_col}_ferc1_deprish")
+        for data_col in DATA_COLS_TO_SPLIT:
+            new_data_col = self._get_clean_new_data_col(data_col)
             same_true.loc[:, new_data_col] = same_true.loc[:, f"{data_col}"]
         return same_true
 
@@ -671,26 +670,15 @@ class Scaler(object):
         )
         # for each of the columns we want to split the frc data by
         # generate the % of the total group, so we can split the data_col
-        # we want an iterater here w/ n at the end of the column names
-        # so we can later sort in order of priority
-        n = 1
+        new_data_col = self._get_clean_new_data_col(data_col)
+        df_w_tots[new_data_col] = pd.NA
         for split_col in split_cols:
             df_w_tots[f"{split_col}_pct"] = (
                 df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
-            df_w_tots[f"{data_col}_ferc1_deprish_split_{n}"] = (
-                df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"])
-            n = n + 1
-
-        new_data_col = self._get_clean_new_data_col(
-            f"{data_col}_ferc1_deprish")
-        # now we have several ways to split the ferc data. we want to choose
-        # the first non-null option.
-        df_w_tots[new_data_col] = pd.NA
-        fill_col_options = set(
-            df_w_tots.filter(like=f"{data_col}_ferc1_deprish_split_").columns)
-        for fill_col in fill_col_options:
+            # choose the first non-null option.
             df_w_tots[new_data_col] = (
-                df_w_tots[new_data_col].fillna(df_w_tots[fill_col]))
+                df_w_tots[new_data_col].fillna(
+                    df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
 
         # merge in the newly generated split/assigned data column
         df_final = pd.merge(
@@ -703,6 +691,5 @@ class Scaler(object):
         # column name also shows up in the EIA data... so we want to remove the
         # double ferc1 if it shows up
         new_data_col = f"{data_col}_ferc1_deprish"
-        if "ferc1_ferc1" in new_data_col:
-            new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
+        new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
         return new_data_col
