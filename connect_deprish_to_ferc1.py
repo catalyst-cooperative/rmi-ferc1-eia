@@ -34,7 +34,7 @@ SPLIT_COLS_STANDARD = [
     'capacity_mw_deprish',
 ]
 """
-list: the standard columns to split ferc1 data columns based on in
+list: the standard columns to split ferc1 data columns to be used in
 `DATA_COLS_TO_SPLIT`.
 """
 
@@ -377,18 +377,6 @@ class MatchMaker():
         )
         return diff_own
 
-    def get_matches_diff_owner_id(self, candidate_matches):
-        """Write docs."""
-        diff_own_id = (
-            candidate_matches[
-                candidate_matches.record_id_eia_deprish.str.replace(
-                    r"_[^_]+$", "", regex=True) ==
-                candidate_matches.record_id_eia_ferc1.str.replace(
-                    r"_[^_]+$", "", regex=True)
-            ]
-        )
-        return diff_own_id
-
     def get_only_ferc1_matches(self, candidate_matches):
         """
         Get the matches when there is only one FERC1 match.
@@ -509,7 +497,6 @@ class MatchMaker():
         methods = {
             "same_true": self.get_same_true,
             "same_diff_own": self.get_matches_at_diff_ownership,
-            "same_diff_owner_id": self.get_matches_diff_owner_id,
             "same_quals": self.get_matches_same_qualifiers_ids,
             "one_ferc1_opt": self.get_only_ferc1_matches,
         }

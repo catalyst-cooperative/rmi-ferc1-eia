@@ -113,6 +113,8 @@ def prep_deprish(file_path_deprish, plant_parts_df,
 
 def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
     """Prepare the EIA master plant parts."""
+    # restrict the possible matches to only those that match on the
+    # RESTRICT_MATCH_COLS
     plant_id_pudls_d = deprish_df.loc[:, 'plant_id_pudl'].unique().tolist()
     report_years_d = deprish_df.loc[:, 'report_year'].unique().tolist()
     utility_ids_d = deprish_df.loc[:, 'utility_id_pudl'].unique().tolist()
