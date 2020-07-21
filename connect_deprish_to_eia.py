@@ -117,7 +117,8 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
     # RESTRICT_MATCH_COLS
     options_index = (deprish_df[RESTRICT_MATCH_COLS].drop_duplicates()
                      .set_index(RESTRICT_MATCH_COLS).index)
-    plant_parts_df.set_index(RESTRICT_MATCH_COLS).loc[options_index]
+    plant_parts_df = plant_parts_df.set_index(
+        RESTRICT_MATCH_COLS).loc[options_index].reset_index()
 
     plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)
@@ -137,16 +138,14 @@ def get_plant_year_util_list(plant_name, deprish_df, mul_df, key_mul):
     match. This is for use within `get_fuzzy_matches`.
     """
     logger.debug(plant_name)
-    plant_id_pudls = deprish_df.loc[deprish_df.plant_name ==
-                                    plant_name, 'plant_id_pudl'].values
-    report_years = deprish_df.loc[deprish_df.plant_name ==
-                                  plant_name, 'report_year'].values
-    utility_ids = deprish_df.loc[deprish_df.plant_name ==
-                                 plant_name, 'utility_id_pudl'].values
-    names = mul_df.loc[
-        (mul_df.plant_id_pudl.isin(plant_id_pudls))
-        & (mul_df.report_year.isin(report_years))
-        & (mul_df.utility_id_pudl.isin(utility_ids))][key_mul].to_list()
+    options_index = (
+        deprish_df.loc[deprish_df.plant_name ==
+                       plant_name, RESTRICT_MATCH_COLS]
+        .drop_duplicates().set_index(RESTRICT_MATCH_COLS).index)
+
+    # get the set of possible names
+    names = (mul_df.set_index(RESTRICT_MATCH_COLS)
+             .loc[options_index, key_mul].to_list())
     return names
 
 
