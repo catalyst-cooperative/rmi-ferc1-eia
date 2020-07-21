@@ -6,6 +6,9 @@ data linkages reproducible and re-usable.
 For now this will primarily be a collection of Jupyter Notebooks that rely on
 PUDL.
 
+![Design overview:](rmi_design.jpg?raw=true)
+
+
 RMI Collaborators include:
  * @UdayVaradarajan
  * @SamMardell
