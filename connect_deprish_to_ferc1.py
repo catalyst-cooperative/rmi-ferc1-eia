@@ -28,8 +28,31 @@ CONNECT_COLS = ['plant_id_pudl',
                 'utility_id_pudl',
                 'report_date']
 
+SPLIT_COLS_STANDARD = [
+    'total_fuel_cost_deprish',
+    'net_generation_mwh_deprish',
+    'capacity_mw_deprish',
+]
+"""
+list: the standard columns to split ferc1 data columns to be used in
+``DATA_COLS_TO_SPLIT``.
+"""
 
-class DeprishToFERC1Inputs():
+DATA_COLS_TO_SPLIT = {
+    'opex_nonfuel': SPLIT_COLS_STANDARD,
+    'net_generation_mwh_ferc1': SPLIT_COLS_STANDARD,
+}
+"""
+dictionary: FERC1 data columns (keys) that we want to associated with
+depreciation records. When the FERC1 record is larger than the depreciation
+record (e.g. a group of depreciation generators matched with a FERC1 plant),
+this module attemps to split the depreciation record based on the list of
+columns to weight the split (values). See  ``split_ferc1_data_on_split_cols()``
+for more details.
+"""
+
+
+class InputsCompiler():
     """
     Input manager for matches between FERC 1 and depreciation data.
 
@@ -75,7 +98,8 @@ class DeprishToFERC1Inputs():
         self.connects_deprish_eia_raw = pd.read_pickle(
             file_path_deprish_eia, compression='gzip')
 
-        self.prep_inputs()
+        # store a bool which will indicate whether the inputs have been prepped
+        self.inputs_prepped = False
 
     def _prep_plant_parts_eia(self):
         self.plant_parts_eia = (
@@ -96,14 +120,20 @@ class DeprishToFERC1Inputs():
                 self.connects_ferc1_eia_raw.reset_index()[
                     ['record_id_ferc1', 'record_id_eia']],
                 # we only want the identifying columns from the MUL
-                self.plant_parts_eia[connect_deprish_to_eia.MUL_COLS
-                                     + id_cols],
-                how='left')
+                self.plant_parts_eia[list(set(
+                    connect_deprish_to_eia.MUL_COLS + id_cols
+                    + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']
+                ))],
+                how='left', on=['record_id_eia'])
             .astype(connect_deprish_to_eia.prep_int_ids(id_cols))
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
             # we want the backbone of this table to be the steam records
             # so we have all possible steam records, even the unmapped ones
-            .pipe(pd.merge, self.steam_cleaned_ferc1, how='right')
+            .merge(self.steam_cleaned_ferc1,
+                   how='right', on=['record_id_ferc1'] + id_cols,
+                   suffixes=('_eia_ferc1', ''))
+            .assign(opex_nonfuel=lambda x: (x.opex_production_total -
+                                            x.opex_fuel))
         )
 
         if len(self.connects_ferc1_eia) != len(self.steam_cleaned_ferc1):
@@ -137,7 +167,9 @@ class DeprishToFERC1Inputs():
 
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
-            self.plant_parts_eia[connect_deprish_to_eia.MUL_COLS])
+            self.plant_parts_eia[
+                connect_deprish_to_eia.MUL_COLS
+                + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']])
 
     def _prep_info_from_parts_compiler_eia(self):
         """
@@ -164,15 +196,16 @@ class DeprishToFERC1Inputs():
         """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
         # for later inputs
-        self._prep_plant_parts_eia()
-        self._prep_steam_cleaned_ferc1()
-        self._prep_connects_ferc1_eia()
-        self._prep_connects_deprish_eia()
+        if not self.inputs_prepped:
+            self._prep_plant_parts_eia()
+            self._prep_steam_cleaned_ferc1()
+            self._prep_connects_ferc1_eia()
+            self._prep_connects_deprish_eia()
+            self._prep_info_from_parts_compiler_eia()
+            self.inputs_prepped = True
 
-        self._prep_info_from_parts_compiler_eia()
 
-
-class ConnectorDeprishFERC1():
+class MatchMaker():
     """
     Generate matches between depreciation and FERC1 steam records.
 
@@ -182,16 +215,17 @@ class ConnectorDeprishFERC1():
 
     def __init__(self, inputs):
         """
-        Initialize ConnectorDeprishFERC1.
+        Initialize MatchMaker.
 
-        Store instance of DeprishToFERC1Inputs so we can use the prepared
+        Store instance of InputsCompiler so we can use the prepared
         dataframes.
 
         Args:
-            inputs (object): an instance of DeprishToFERC1Inputs
+            inputs (object): an instance of InputsCompiler
 
         """
         self.inputs = inputs
+        inputs.prep_inputs()
 
     def check_all_candidate_matches(self, candidate_matches_all):
         """
@@ -234,9 +268,6 @@ class ConnectorDeprishFERC1():
 
         Before choosing the specific match between depreciation and ferc1, we
         need to compile all possible options - or candidate links.
-
-        Args:
-            inputs (object): an instance of DeprishToFERC1Inputs
 
         Returns:
             pandas.DataFrame: a dataframe with all of the possible combinations
@@ -375,18 +406,15 @@ class ConnectorDeprishFERC1():
         """
         df = pd.DataFrame()
         for part_name in self.inputs.plant_parts_ordered:
-            # we have to exclude the plant as a MUL level bc all of the records
-            # within a plant share the plant id
-            if part_name != 'plant':
-                part_df = candidate_matches[
-                    candidate_matches[f"plant_part_{source}"] == part_name]
-                # add the slice of the df for this part if the id columns for
-                # both contain the same values
-                df = df.append(part_df[
-                    part_df[f"{self.inputs.parts_to_ids[part_name]}_deprish"]
-                    ==
-                    part_df[f"{self.inputs.parts_to_ids[part_name]}_ferc1"]])
-        df = df.assign(connect_method=f"same_qualifiers_{source}")
+            part_df = candidate_matches[
+                candidate_matches[f"plant_part_{source}"] == part_name]
+            # add the slice of the df for this part if the id columns for
+            # both contain the same values
+            df = df.append(part_df[
+                part_df[f"{self.inputs.parts_to_ids[part_name]}_deprish"]
+                ==
+                part_df[f"{self.inputs.parts_to_ids[part_name]}_ferc1"]])
+        df = df.assign(match_method=f"same_qualifiers_{source}")
         return df
 
     def get_matches_same_qualifiers_ids(self, candidate_matches):
@@ -446,7 +474,7 @@ class ConnectorDeprishFERC1():
             .isin(matches_df.record_id_eia_deprish.unique())]
         return candidate_matches_remainder
 
-    def connect(self):
+    def match(self):
         """
         Connect depreciation records with ferc1 steam records.
 
@@ -454,10 +482,8 @@ class ConnectorDeprishFERC1():
         where this is going, not what is currently happening...
 
         Returns:
-            pandas.DataFrame: a dataframe of unique records from the
-            depreciation data with ferc1 steam data associated with as many
-            records as possible. FERC1 steam data has been either aggregated
-            or disaggregated to match the level of the depreciation records.
+            pandas.DataFrame: a dataframe of records from the depreciation data
+            with ferc1 steam data associated in a many to many relationship.
         """
         # matches are known to be connected records and candidate matches are
         # the options for matches
@@ -465,31 +491,34 @@ class ConnectorDeprishFERC1():
 
         # we are going to go through various methods for grabbing the true
         # matches out of the candidate matches. we will then label those
-        # candidate matches with a connect_method column. we are going to
+        # candidate matches with a match_method column. we are going to
         # continually remove the known matches from the candidates
 
         methods = {
             "same_true": self.get_same_true,
             "same_diff_own": self.get_matches_at_diff_ownership,
-            "one_ferc1_opt": self.get_only_ferc1_matches,
             "same_quals": self.get_matches_same_qualifiers_ids,
+            "one_ferc1_opt": self.get_only_ferc1_matches,
         }
         # compile the connected dfs in a dictionary
         matches_dfs = {}
         candidate_matches = deepcopy(candidate_matches_all)
         for method in methods:
-            logger.info(f"Generating matches for {method}")
             connects_method_df = (
                 methods[method](candidate_matches)
-                .assign(connect_method=method)
+                .assign(match_method=method)
             )
+            logger.info(
+                f"Generated {len(connects_method_df)} matches for {method}")
             candidate_matches = self.remove_matches_from_candidates(
                 candidate_matches, connects_method_df)
             matches_dfs[method] = connects_method_df
         # squish all of the known matches together
         matches_df = pd.concat(matches_dfs.values())
 
+        ###########################################
         # everything below here is just for logging
+        ###########################################
         ids_to_match = (candidate_matches_all[
             candidate_matches_all.record_id_eia_ferc1.notnull()]
             .record_id_eia_deprish.unique())
@@ -503,12 +532,164 @@ class ConnectorDeprishFERC1():
         logger.info(
             f"    No link:   {len(ids_no_match)/len(ids_to_match):.02%}")
         logger.info(f"""Connected:
-{matches_df.connect_method.value_counts(dropna=False)}""")
+{matches_df.match_method.value_counts(dropna=False)}""")
         logger.info(f"""Connection Levels:
-{candidate_matches.level_deprish.value_counts(dropna=False)}""")
+{matches_df.level_deprish.value_counts(dropna=False)}""")
         logger.debug(f"""Only one ferc1 match levels:
 {matches_dfs['one_ferc1_opt'].level_deprish.value_counts(dropna=False)}""")
 
-        # evertually this will be a dealt w/ squished together output
-        # for now, this is a few important outputs
-        return candidate_matches_all, candidate_matches, matches_df
+        # for debugging return all outputs.. remove when this all feels stable
+        # return candidate_matches_all, candidate_matches, matches_df
+        self.matches_df = matches_df
+        return self.matches_df
+
+
+class Scaler(object):
+    """Scales FERC1 data to matching depreciation records."""
+
+    def __init__(self, match_maker):
+        """
+        Initialize Scaler.
+
+        Args:
+            match_maker (instance): instance of MatchMaker. If `matches_df` has
+                not been generated, then `match()` will be run in this method.
+        """
+        try:
+            self.matches_df = match_maker.matches_df
+        except AttributeError:
+            self.matches_df = match_maker.match()
+
+    def scale(self):
+        """
+        WIP. Scale ferc1 data to the depreciation records.
+
+        Note: the following return is the aspirational desire for where this
+        method is going.
+
+        Returns:
+            pandas.DataFrame: FERC1 steam data has been either aggregated
+            or disaggregated to match the level of the depreciation records.
+            The data columns properly scaled will be labled as
+            "{data_col}_ferc1_deprish".
+        """
+        same_true = self.assign_ferc1_data_cols_same_true()
+        same_smol = self.split_ferc1_data_cols()
+        # TODO: Add the remaining scaling methods
+        scaled_df = pd.concat([same_true, same_smol, ])
+        return scaled_df
+
+    def assign_ferc1_data_cols_same_true(self):
+        """
+        Assign FERC1 data cols to deprecation when records are the same.
+
+        For matched depreciation and FERC1 records are exactly the same, this
+        method simply assigns the original data column to the new associated
+        data column (with the format of "{data_col}_ferc1_deprish").
+
+        Relies on:
+        * matches_df (pandas.DataFrame): a dataframe of records from the
+            depreciation data with ferc1 steam data associated in a many to
+            many relationship.
+        """
+        same_true = (
+            self.matches_df[self.matches_df.match_method == 'same_true']
+        )
+        for data_col in DATA_COLS_TO_SPLIT:
+            new_data_col = self._get_clean_new_data_col(data_col)
+            same_true.loc[:, new_data_col] = same_true.loc[:, f"{data_col}"]
+        return same_true
+
+    def split_ferc1_data_cols(self):
+        """
+        Split and assign portions of FERC1 columns to depreciation records.
+
+        For each FERC1 data column that we want to associated with depreciation
+        records, this method splits the FERC1 data based on a prioritized list
+        of columns to weight and split the FERC1 data on.
+
+        Relies on:
+        * matches_df (pandas.DataFrame): a dataframe of records from the
+            depreciation data with ferc1 steam data associated in a many to
+            many relationship.
+        """
+        # get the records that are matches with the same qualifier records and
+        # the deprecation records are at a smaller level than the FERC1 records
+        same_smol = self.matches_df.loc[
+            (self.matches_df.match_method == 'same_quals')
+            & (self.matches_df.level_deprish == 'smol')
+        ]
+        idx_cols_ferc1 = ['plant_id_pudl', 'record_id_eia_ferc1']
+        for data_col, split_cols in DATA_COLS_TO_SPLIT.items():
+            same_smol = self.split_ferc1_data_on_split_cols(
+                same_smol,
+                data_col=data_col,
+                idx_cols_ferc1=idx_cols_ferc1,
+                split_cols=split_cols,
+            )
+        return same_smol
+
+    def split_ferc1_data_on_split_cols(self,
+                                       same_smol,
+                                       data_col,
+                                       idx_cols_ferc1,
+                                       split_cols,):
+        """
+        Split larger ferc1 records porportionally by depreciation columns.
+
+        This method associates slices of ferc1 records - which are larger than
+        their depreciation counter parts - via prioritized columns.
+
+        Args:
+            same_smol (pandas.DataFrame): table with matched records from ferc1
+                and depreciation records.
+            data_col (string): name of the ferc1 data column.
+            idx_cols_ferc1 (list): columns to group by.
+            split_cols (list): ordered list of columns to split porportionally
+                based on. Ordered based on priority: if non-null result from
+                frist column, result will include first column result, then
+                second and so on.
+        Returns:
+            pandas.DataFrame: a modified version of `same_smol` with a new
+                assigned data_col
+
+        """
+        # we want to know the sum of the potential split_cols for each ferc1
+        # option
+        df_fgb = (
+            same_smol[idx_cols_ferc1 + split_cols]
+            .fillna(0)  # remove w/ pandas 1.1
+            .groupby(by=idx_cols_ferc1)  # add dropna=False w/ pandas 1.1
+            .sum()
+            .reset_index()
+        )
+        df_w_tots = (
+            pd.merge(same_smol, df_fgb,
+                     on=idx_cols_ferc1,
+                     suffixes=("", "_fgb"))
+        )
+        # for each of the columns we want to split the frc data by
+        # generate the % of the total group, so we can split the data_col
+        new_data_col = self._get_clean_new_data_col(data_col)
+        df_w_tots[new_data_col] = pd.NA
+        for split_col in split_cols:
+            df_w_tots[f"{split_col}_pct"] = (
+                df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
+            # choose the first non-null option.
+            df_w_tots[new_data_col] = (
+                df_w_tots[new_data_col].fillna(
+                    df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
+
+        # merge in the newly generated split/assigned data column
+        df_final = pd.merge(
+            same_smol, df_w_tots[
+                idx_cols_ferc1 + ['record_id_eia_deprish', new_data_col]])
+        return df_final
+
+    def _get_clean_new_data_col(self, data_col):
+        # some of the data columns already have a ferc1 suffix because the same
+        # column name also shows up in the EIA data... so we want to remove the
+        # double ferc1 if it shows up
+        new_data_col = f"{data_col}_ferc1_deprish"
+        new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
+        return new_data_col

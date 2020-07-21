@@ -1218,7 +1218,7 @@ class CompilePlantParts(object):
                                                          self.part_bools)
         return self.part_bools
 
-    def generate_master_unit_list(self, qual_records):
+    def generate_master_unit_list(self, qual_records=True):
         """
         Aggreate and slice data points by each plant part.
 
@@ -1227,11 +1227,13 @@ class CompilePlantParts(object):
         3) aggreate everything by each plant part
 
         Args:
-            plant_parts (dict): a dictionary of information required to
-                aggregate each plant part.
-            relabel (bool): if True, the one owner plants will be labeled as
-                "owned" in the ownership column.
+            qual_records (bool): if True, the master unit list will be
+                generated with all consistent qualifer records in
+                `QUAL_RECORD_TABLES`. See `get_qualifiers()` for more details.
+                Default is True.
 
+        Returns:
+            pandas.DataFrame
         """
         if self.plant_parts_df is not None and self.clobber is False:
             return self.plant_parts_df
@@ -1430,8 +1432,7 @@ def get_master_unit_list_eia(file_path_mul, clobber=False):
                 pudl.workspace.setup.get_defaults()["pudl_db"]),
             freq='AS', rolling=True)
         parts_compilers = CompilePlantParts(table_compiler)
-        plant_parts_df = parts_compilers.generate_master_unit_list(
-            qual_records=False)
+        plant_parts_df = parts_compilers.generate_master_unit_list()
         plant_parts_df.to_csv(file_path_mul, compression='gzip')
 
     elif file_path_mul.is_file():
