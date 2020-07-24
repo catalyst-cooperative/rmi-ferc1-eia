@@ -44,6 +44,7 @@ MUL_COLS = [
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
+    'record_count', 'fraction_owned'
 ]
 
 MUL_RENAME = {
@@ -279,6 +280,20 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
               list(set(DEPRISH_COLS + [MUL_RENAME.get(c, c)
                                        for c in MUL_COLS])))
     )
+
+    first_cols = [
+        'plant_name', 'plant_name_match', 'record_id_eia',
+        'record_id_eia_name_match', 'record_id_eia_fuzzy',
+        'record_id_eia_override', 'record_id_eia_override2',
+        'record_id_eia_override3', 'record_id_eia_override4',
+        'record_id_eia_override5', 'record_id_eia_override6',
+        'record_id_eia_override7', 'record_id_eia_override8',
+        'record_id_eia_override9', 'record_id_eia_override10',
+    ]
+    deprish_match = deprish_match.loc[
+        :, first_cols + [x for x in deprish_match.columns
+                         if x not in first_cols]]
+
     possible_matches_mul = (
         pd.merge(
             plant_parts_df.dropna(subset=RESTRICT_MATCH_COLS),
@@ -296,7 +311,9 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
 def generate_depreciation_matches(file_path_mul,
                                   file_path_deprish,
                                   sheet_name_deprish,
-                                  sheet_name_output):
+                                  sheet_name_output,
+                                  save_to_xls=True,
+                                  ):
     """
     Generate the matched names and save to excel.
 
@@ -330,10 +347,12 @@ def generate_depreciation_matches(file_path_mul,
         sheet_name_deprish=sheet_name_deprish,
         sheet_name_output=sheet_name_output
     )
-    sheets_df_dict = {sheet_name_output: deprish_match_df,
-                      "Subset of Master Unit List": possible_matches_mul_df}
-    save_to_workbook(file_path=file_path_deprish,
-                     sheets_df_dict=sheets_df_dict)
+    if save_to_xls:
+        sheets_df_dict = {
+            sheet_name_output: deprish_match_df,
+            "Subset of Master Unit List": possible_matches_mul_df}
+        save_to_workbook(file_path=file_path_deprish,
+                         sheets_df_dict=sheets_df_dict)
     return deprish_match_df
 
 

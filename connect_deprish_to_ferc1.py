@@ -105,6 +105,15 @@ class InputsCompiler():
         self.plant_parts_eia = (
             self.plant_parts_eia_raw.reset_index()
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
+        # remove once this is in make_plant_parts_eia
+        # dfs = []
+        # for part_name, id_cols in self.parts_to_ids.items():
+        #    part_df = self.plant_parts_eia.loc[
+        #        self.plant_parts_eia.plant_part == part_name]
+        #    dfs.append(
+        #        make_plant_parts_eia.CompilePlantParts.add_record_count(
+        #            part_df=part_df))
+        # self.plant_parts_eia = pd.concat(dfs)
 
     def _prep_steam_cleaned_ferc1(self):
         self.steam_cleaned_ferc1 = (
@@ -182,7 +191,7 @@ class InputsCompiler():
         pudl_engine = sa.create_engine(
             pudl.workspace.setup.get_defaults()["pudl_db"])
         table_compiler = make_plant_parts_eia.CompileTables(
-            pudl_engine, freq='AS', rolling=True)
+            pudl_engine, freq='AS')
         parts_compilers = make_plant_parts_eia.CompilePlantParts(
             table_compiler, clobber=True)
         self.plant_parts_ordered = parts_compilers.plant_parts_ordered
@@ -192,16 +201,18 @@ class InputsCompiler():
         self.parts_to_ids = {v: k for k, v
                              in parts_compilers.ids_to_parts.items()}
 
-    def prep_inputs(self):
+    def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
         # for later inputs
-        if not self.inputs_prepped:
+        if not self.inputs_prepped or clobber:
+            self._prep_info_from_parts_compiler_eia()
+
             self._prep_plant_parts_eia()
             self._prep_steam_cleaned_ferc1()
             self._prep_connects_ferc1_eia()
             self._prep_connects_deprish_eia()
-            self._prep_info_from_parts_compiler_eia()
+
             self.inputs_prepped = True
 
 
@@ -283,7 +294,10 @@ class MatchMaker():
         )
         # reorder cols so they are easier to see, maybe remove later
         first_cols = ['plant_part_deprish', 'plant_part_ferc1',
-                      'record_id_eia_deprish', 'record_id_eia_ferc1']
+                      'record_id_eia_deprish', 'record_id_eia_ferc1',
+                      'plant_name', 'plant_name_match',
+                      'fraction_owned_deprish', 'fraction_owned_ferc1',
+                      ]
         candidate_matches_all = candidate_matches_all[
             first_cols + [x for x in candidate_matches_all.columns
                           if x not in first_cols]]
@@ -390,7 +404,10 @@ class MatchMaker():
             candidate_matches (pandas.DataFrame): dataframe of the canidate
                 matches between the ferc1 and depreciation.
         """
-        return candidate_matches[candidate_matches.count_ferc1 == 1]
+        return candidate_matches[
+            (candidate_matches.count_ferc1 == 1)
+            & (candidate_matches.plant_part_ferc1.notnull())
+        ]
 
     def get_matches_same_qualifiers_ids_by_source(
             self, candidate_matches, source):
@@ -509,7 +526,7 @@ class MatchMaker():
                 .assign(match_method=method)
             )
             logger.info(
-                f"Generated {len(connects_method_df)} matches for {method}")
+                f"Matches for {method}:   {len(connects_method_df)}")
             candidate_matches = self.remove_matches_from_candidates(
                 candidate_matches, connects_method_df)
             matches_dfs[method] = connects_method_df
@@ -556,9 +573,9 @@ class Scaler(object):
                 not been generated, then `match()` will be run in this method.
         """
         try:
-            self.matches_df = match_maker.matches_df
+            self.matches_df = deepcopy(match_maker.matches_df)
         except AttributeError:
-            self.matches_df = match_maker.match()
+            self.matches_df = deepcopy(match_maker.match())
 
     def scale(self):
         """
@@ -573,31 +590,58 @@ class Scaler(object):
             The data columns properly scaled will be labled as
             "{data_col}_ferc1_deprish".
         """
-        same_true = self.assign_ferc1_data_cols_same_true()
+        self.scale_by_ownership_fraction()
+        same_true = self.assign_ferc1_data_cols_same()
         same_smol = self.split_ferc1_data_cols()
+        same_beeg = self.agg_ferc_data_cols()
         # TODO: Add the remaining scaling methods
-        scaled_df = pd.concat([same_true, same_smol, ])
+        scaled_df = pd.concat([same_true, same_smol, same_beeg])
+
+        self.test_same_true_fraction_owned(same_true)
         return scaled_df
 
-    def assign_ferc1_data_cols_same_true(self):
+    def scale_by_ownership_fraction(self):
+        """
+        Scale the data columns by the fraction owned ratio in matches_df.
+
+        This method makes new columns in matches_df for each of the data
+        columns in `DATA_COLS_TO_SPLIT` that scale the ferc1 data based on the
+        ownership fractions of the depreciation and ferc1 records.
+        """
+        for data_col in DATA_COLS_TO_SPLIT:
+            self.matches_df.loc[:, f"{data_col}_own_frac"] = (
+                self.matches_df[data_col]
+                * (self.matches_df.fraction_owned_deprish
+                   / self.matches_df.fraction_owned_ferc1)
+            )
+
+    def assign_ferc1_data_cols_same(self):
         """
         Assign FERC1 data cols to deprecation when records are the same.
 
         For matched depreciation and FERC1 records are exactly the same, this
         method simply assigns the original data column to the new associated
-        data column (with the format of "{data_col}_ferc1_deprish").
+        data column (with the format of "{data_col}_ferc1_deprish"). This
+        method scales ferc1 data for both the `same_true` match method and the
+        `same_diff_own` method - it uses the scaled `{data_col}_own_frac`
+        generated in `scale_by_ownership_fraction()`.
 
         Relies on:
         * matches_df (pandas.DataFrame): a dataframe of records from the
             depreciation data with ferc1 steam data associated in a many to
             many relationship.
         """
-        same_true = (
-            self.matches_df[self.matches_df.match_method == 'same_true']
+        same_true = deepcopy(
+            self.matches_df.loc[
+                (self.matches_df.match_method == 'same_true')
+                | (self.matches_df.match_method == 'same_diff_own')
+            ]
         )
         for data_col in DATA_COLS_TO_SPLIT:
             new_data_col = self._get_clean_new_data_col(data_col)
-            same_true.loc[:, new_data_col] = same_true.loc[:, f"{data_col}"]
+            same_true.loc[:, new_data_col] = (
+                same_true[f"{data_col}_own_frac"]
+            )
         return same_true
 
     def split_ferc1_data_cols(self):
@@ -619,11 +663,25 @@ class Scaler(object):
             (self.matches_df.match_method == 'same_quals')
             & (self.matches_df.level_deprish == 'smol')
         ]
+
         idx_cols_ferc1 = ['plant_id_pudl', 'record_id_eia_ferc1']
+        # add a count for the nuber of depreciation records that match to each
+        # ferc1 record
+        df_fgb = (
+            same_smol
+            .groupby(by=idx_cols_ferc1)
+            [['record_id_eia_deprish']].count()
+            .rename(columns={
+                'record_id_eia_deprish': 'record_count_matches_deprish'})
+            .reset_index()
+        )
+
+        same_smol = pd.merge(same_smol, df_fgb)
+
         for data_col, split_cols in DATA_COLS_TO_SPLIT.items():
             same_smol = self.split_ferc1_data_on_split_cols(
                 same_smol,
-                data_col=data_col,
+                data_col=f"{data_col}_own_frac",
                 idx_cols_ferc1=idx_cols_ferc1,
                 split_cols=split_cols,
             )
@@ -657,7 +715,7 @@ class Scaler(object):
         # we want to know the sum of the potential split_cols for each ferc1
         # option
         df_fgb = (
-            same_smol[idx_cols_ferc1 + split_cols]
+            same_smol.loc[:, idx_cols_ferc1 + split_cols]
             .fillna(0)  # remove w/ pandas 1.1
             .groupby(by=idx_cols_ferc1)  # add dropna=False w/ pandas 1.1
             .sum()
@@ -682,9 +740,47 @@ class Scaler(object):
 
         # merge in the newly generated split/assigned data column
         df_final = pd.merge(
-            same_smol, df_w_tots[
-                idx_cols_ferc1 + ['record_id_eia_deprish', new_data_col]])
+            same_smol,
+            df_w_tots[idx_cols_ferc1 + ['record_id_eia_deprish',
+                                        new_data_col]].drop_duplicates(),
+        )
         return df_final
+
+    def agg_ferc_data_cols(self):
+        """
+        Aggregate smaller level FERC1 data columns to depreciation records.
+
+        When the depreciation matches are at a higher level than the FERC1,
+        this method aggregates the many FERC1 records into the level of the
+        depreciation records.
+        """
+        data_cols_own_frac = [
+            f"{col}_own_frac" for col in DATA_COLS_TO_SPLIT.keys()]
+        same_beeg = self.matches_df.loc[
+            (self.matches_df.match_method == 'same_quals')
+            & (self.matches_df.level_deprish == 'beeg')
+        ]
+
+        # dict to rename the summed data columns to their new name
+        rename_dict = {}
+        for data_col_of, data_col in zip(data_cols_own_frac,
+                                         DATA_COLS_TO_SPLIT):
+            rename_dict[data_col_of] = self._get_clean_new_data_col(data_col)
+        # sum the data columns at the level of the depreciation records
+        same_beeg_sum = (
+            same_beeg.groupby('record_id_eia_deprish')
+            [data_cols_own_frac]
+            .sum()
+            .reset_index()
+            .rename(columns=rename_dict)
+        )
+
+        # squish the new summed columns back into the og df
+        same_beeg = pd.merge(same_beeg,
+                             same_beeg_sum,
+                             on=['record_id_eia_deprish'],
+                             how='left')
+        return same_beeg
 
     def _get_clean_new_data_col(self, data_col):
         # some of the data columns already have a ferc1 suffix because the same
@@ -693,3 +789,30 @@ class Scaler(object):
         new_data_col = f"{data_col}_ferc1_deprish"
         new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
         return new_data_col
+
+    def test_same_true_fraction_owned(self, same_true):
+        """
+        Test the same_true scaling.
+
+        Raises:
+            AssertionError: If there is some error in the standard scaling with
+            fraction_owned columns.
+        """
+        for data_col in DATA_COLS_TO_SPLIT:
+            new_data_col = self._get_clean_new_data_col(data_col)
+            not_same = same_true[
+                (same_true.match_method == 'same_true')
+                & ~(same_true[data_col] == same_true[new_data_col])
+                & (same_true[data_col].notnull())
+                & (same_true[new_data_col].notnull())
+            ]
+            if len(not_same) != 0:
+                raise AssertionError(
+                    "Scaling for same_true match method errored with "
+                    f"{len(not_same)}. Check fraction owned split in "
+                    "scale_by_ownership_fraction."
+                )
+            else:
+                logger.debug(
+                    f"testing the same_true match method passed for {data_col}"
+                )
