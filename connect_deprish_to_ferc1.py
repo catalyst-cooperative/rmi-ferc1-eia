@@ -105,15 +105,6 @@ class InputsCompiler():
         self.plant_parts_eia = (
             self.plant_parts_eia_raw.reset_index()
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
-        # remove once this is in make_plant_parts_eia
-        # dfs = []
-        # for part_name, id_cols in self.parts_to_ids.items():
-        #    part_df = self.plant_parts_eia.loc[
-        #        self.plant_parts_eia.plant_part == part_name]
-        #    dfs.append(
-        #        make_plant_parts_eia.CompilePlantParts.add_record_count(
-        #            part_df=part_df))
-        # self.plant_parts_eia = pd.concat(dfs)
 
     def _prep_steam_cleaned_ferc1(self):
         self.steam_cleaned_ferc1 = (
@@ -297,6 +288,7 @@ class MatchMaker():
                       'record_id_eia_deprish', 'record_id_eia_ferc1',
                       'plant_name', 'plant_name_match',
                       'fraction_owned_deprish', 'fraction_owned_ferc1',
+                      'record_count_deprish', 'record_count_ferc1'
                       ]
         candidate_matches_all = candidate_matches_all[
             first_cols + [x for x in candidate_matches_all.columns
@@ -754,8 +746,7 @@ class Scaler(object):
         this method aggregates the many FERC1 records into the level of the
         depreciation records.
         """
-        data_cols_own_frac = [
-            f"{col}_own_frac" for col in DATA_COLS_TO_SPLIT.keys()]
+        data_cols_own_frac = [f"{col}_own_frac" for col in DATA_COLS_TO_SPLIT]
         same_beeg = self.matches_df.loc[
             (self.matches_df.match_method == 'same_quals')
             & (self.matches_df.level_deprish == 'beeg')
@@ -806,7 +797,7 @@ class Scaler(object):
                 & (same_true[data_col].notnull())
                 & (same_true[new_data_col].notnull())
             ]
-            if len(not_same) != 0:
+            if not_same:
                 raise AssertionError(
                     "Scaling for same_true match method errored with "
                     f"{len(not_same)}. Check fraction owned split in "
