@@ -348,7 +348,7 @@ class CompileTables(object):
     """Compile tables from sqlite db or pudl output object."""
 
     def __init__(self, pudl_engine, freq=None, start_date=None, end_date=None,
-                 rolling=False):
+                 roll=True, fill=True):
         """
         Initialize a table compiler.
 
@@ -381,7 +381,7 @@ class CompileTables(object):
         self.pt = pudl.output.pudltabl.get_table_meta(self.pudl_engine)
 
         self.pudl_out = pudl.output.pudltabl.PudlTabl(
-            pudl_engine=pudl_engine, freq=self.freq, roll=rolling)
+            pudl_engine=pudl_engine, freq=self.freq, roll=roll, fill=fill)
 
         self._dfs = {
             # pudl sqlite tables
@@ -1189,9 +1189,34 @@ class CompilePlantParts(object):
         part_df = (pd.merge(
             part_df, self.table_compiler.get_the_table('plants_eia'))
             .assign(plant_name_new=lambda x: x.plant_name_eia))
-        col = self.parts_to_ids[part_name]
-        part_df.loc[part_df[col].notnull(), 'plant_name_new'] = (
-            part_df['plant_name_new'] + " " + part_df[col].astype(str))
+        # we don't want the plant_id_eia to be part of the plant name, but all
+        # of the other parts should have their id column in the new plant name
+        if part_name != 'plant':
+            col = self.parts_to_ids[part_name]
+            part_df.loc[part_df[col].notnull(), 'plant_name_new'] = (
+                part_df['plant_name_new'] + " " + part_df[col].astype(str))
+        return part_df
+
+    @staticmethod
+    def add_record_count(part_df):
+        """
+        Add a record count for each set of plant part records in each plant.
+
+        Args:
+            part_df (pandas.DataFrame): dataframe containing records associated
+                with one plant part.
+            id_cols (list): list of identifying columns
+        """
+        group_cols = ['plant_id_eia', 'report_date', 'ownership']
+        # count unique records per plant
+        part_count = (part_df.groupby(group_cols)
+                      [['record_id_eia']].count()
+                      .rename(columns={'record_id_eia': 'record_count'})
+                      .reset_index()
+                      )
+        part_df = pd.merge(part_df, part_count,
+                           on=group_cols, how='left'
+                           )
         return part_df
 
     def add_ferc_acct(self, plant_gen_df):
@@ -1260,6 +1285,7 @@ class CompilePlantParts(object):
                 .pipe(self.assign_true_gran, part_name)
                 .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
                 .pipe(self.add_new_plant_name, part_name)
+                .pipe(self.add_record_count)
             )
             if qual_records:
                 # add in the qualifier records
