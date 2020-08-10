@@ -715,7 +715,7 @@ class CompilePlantParts(object):
                 'There should be more records labeled as total.')
         return plant_gen_df
 
-    def denorm_plant_gen(self):
+    def denorm_plant_gen(self, qual_records):
         """Denromalize the plant_gen_df."""
         og_len = len(self.plant_gen_df)
         # compile all of the denorm table info in one place
@@ -750,6 +750,20 @@ class CompilePlantParts(object):
                         'plant_gen_df we must get the same number of records')
         if 'plant_ferc_acct' in self.plant_parts.keys():
             self.plant_gen_df = self.add_ferc_acct(self.plant_gen_df)
+        # if
+        if qual_records:
+            # add all the missing qualifiers
+            qual_records_missing = [
+                x for x in QUAL_RECORD_TABLES.keys()
+                if x not in self.plant_gen_df.columns
+            ]
+            idx_cols_gen = ['plant_id_eia', 'generator_id', 'report_date']
+            self.plant_gen_df = pd.merge(
+                self.plant_gen_df,
+                self.table_compiler.get_the_table('generators_eia860')[
+                    idx_cols_gen + qual_records_missing],
+                on=idx_cols_gen
+            )
         return self.plant_gen_df
 
     def ag_part_by_own_slice(self, part_name):
@@ -973,7 +987,7 @@ class CompilePlantParts(object):
         we are trying to grab from the record_name column is consistent across
         every component genertor from each record.
 
-        When record_df is "operational_status", we are not going to check for
+        When record_name is "operational_status", we are not going to check for
         consistency; instead we will grab the highest level of operational
         status that is associated with each records' component generators. The
         order of operational status is defined within the method as:
@@ -994,10 +1008,16 @@ class CompilePlantParts(object):
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = pd.merge(
-            self.plant_gen_df,
-            self.table_compiler.get_the_table(QUAL_RECORD_TABLES[record_name])
-        )
+        record_df = deepcopy(self.plant_gen_df)
+        # only grab the qualifer record table if the record we are trying to
+        # get isn't in plant_gen_df
+        if record_name not in record_df.columns:
+            logger.info(f"denorming plant_gen_df for qualifier: {record_name}")
+            record_df = pd.merge(
+                self.plant_gen_df,
+                self.table_compiler.get_the_table(
+                    QUAL_RECORD_TABLES[record_name])
+            )
 
         base_cols = id_cols
         if 'report_date' in record_df.columns:
@@ -1030,8 +1050,7 @@ class CompilePlantParts(object):
         df = self.plant_gen_df[self.id_cols_dict[part_name]].drop_duplicates()
         part_cols = self.plant_parts[part_name]['id_cols'] + ['report_date']
         # create the count
-        df_count = (df.dropna(subset=part_cols).
-                    groupby(by=part_cols).nunique().
+        df_count = (df.groupby(by=part_cols).nunique().
                     drop(columns=[self.plant_parts[part_name]['id_cols'][-1],
                                   'plant_id_eia',
                                   'report_date']).
@@ -1050,8 +1069,14 @@ class CompilePlantParts(object):
         """All of them."""
         all_the_counts = deepcopy(self.plant_gen_df)
         for part in self.plant_parts_ordered:
+            if part == 'plant_unit':
+                self.plant_gen_df = self.plant_gen_df.fillna(
+                    {'unit_id_pudl': -999999})
             all_the_counts = all_the_counts.merge(
                 self.count_peer_parts(part), how='left')
+            if part == 'plant_unit':
+                self.plant_gen_df = self.plant_gen_df.replace(
+                    {'unit_id_pudl': {-999999: pd.NA}})
         return all_the_counts
 
     def make_all_the_bools(self):
@@ -1062,20 +1087,28 @@ class CompilePlantParts(object):
             columns=['fuel_cost_per_mmbtu', 'heat_rate_mmbtu_mwh',
                      'fuel_cost_per_mwh', 'total_fuel_cost',
                      'total_mmbtu', 'net_generation_mwh', 'capacity_mw', ])
+        counts.loc[counts.unit_id_pudl.isnull(),
+                   counts.filter(like='plant_unit_count_').columns] = pd.NA
+        counts.loc[:, counts.filter(like='_count_').columns] = (
+            counts.loc[:, counts.filter(like='_count_').columns]
+            .astype(pd.Int64Dtype())
+        )
 
         # convert the count columns to bool columns
         for col in counts.filter(like='_count_').columns:
-            counts.loc[counts[col].notnull(), col] = counts[col] > 1
-            # counts = counts.astype({col: 'bool'})
-
-        # TODO: turn on this astype when we convert over to pandas 1.0
-        # counts = counts.filter(like='_count_').astype(pd.BooleanDtype())
+            bool_col = col.replace("_count_", "_only_")
+            counts.loc[counts[col].notnull(), bool_col] = counts[col] > 1
+        # force the nullable bool type for all our count cols
+        counts.loc[:, counts.filter(like='_only_').columns] = (
+            counts.filter(like='_only_').astype(pd.BooleanDtype())
+        )
         # assign a bool for the true gran only if all of the subparts are true
         for part in self.plant_parts.keys():
             counts[f'true_gran_{part}'] = (
-                counts.filter(like=part + '_count_').
-                all(axis='columns'))
-            # counts = counts.astype({f'true_gran_{part}': pd.BooleanDtype()})
+                counts.filter(like=part + '_only_')
+                # .fillna(False)
+                .all(axis='columns'))
+            counts = counts.astype({f'true_gran_{part}': pd.BooleanDtype()})
 
         return counts
 
@@ -1089,13 +1122,14 @@ class CompilePlantParts(object):
 
         """
         test_df_ids = pd.DataFrame()
-        for part in self.plant_parts.keys():
+        for part in self.plant_parts:
             test_df_ids = pd.concat(
                 [test_df_ids,
-                 self.add_record_id(test_df[test_df[plant_part_col] == part],
-                                    self.plant_parts[part]['id_cols'],
-                                    plant_part_col=plant_part_col
-                                    )])
+                 self.add_record_id(
+                     part_df=test_df[test_df[plant_part_col] == part],
+                     id_cols=self.plant_parts[part]['id_cols'],
+                     plant_part_col=plant_part_col
+                 )])
         return test_df_ids
 
     def label_true_id_by_part(self, part_name, bools):
@@ -1110,19 +1144,21 @@ class CompilePlantParts(object):
             bools (pandas.DataFrame)
 
         """
+        logger.info(f'labeling true gran for {part_name}')
         # another way to do this would be to construct the list of colums based
         # on self.plant_parts_ordered
-        cols = list(bools.filter(like=part_name + '_count_').columns)
+        cols = list(bools.filter(like=part_name + '_only_').columns)
         # reserve the columns because we want the biggest part to be the last
         # assigned
+        cols.reverse()
         assign_col = "appro_part_label_" + part_name
         bools[assign_col] = part_name
-        cols.reverse()
+        # sift through the possible columns to assign the id for the true
+        # granularity. The assign_col is potentially rewritten multiple times -
+        # they are orderd based on self.plant_parts_ordered (plant is last)
         for col in cols:
-            # TODO: go back to ~bools[col] when we convert over to pandas 1.0
-            # bools.loc[~bools[col], assign_col] = col.split(sep="_count_")[1]
-            bools.loc[bools[col] == False, assign_col] = \
-                col.split(sep="_count_")[1]
+            bools.loc[~bools[col], assign_col] = col.split(sep="_only_")[1]
+
         bools = (
             self.assign_record_id_eia(bools, assign_col).
             rename(columns={'record_id_eia': f'record_id_eia_{part_name}'}))
@@ -1197,17 +1233,16 @@ class CompilePlantParts(object):
                 part_df['plant_name_new'] + " " + part_df[col].astype(str))
         return part_df
 
-    @staticmethod
-    def add_record_count(part_df):
+    def add_record_count(self, part_df):
         """
         Add a record count for each set of plant part records in each plant.
 
         Args:
             part_df (pandas.DataFrame): dataframe containing records associated
                 with one plant part.
-            id_cols (list): list of identifying columns
         """
-        group_cols = ['plant_id_eia', 'report_date', 'ownership']
+        group_cols = ['plant_id_eia', 'utility_id_eia',
+                      'report_date', 'ownership']
         # count unique records per plant
         part_count = (part_df.groupby(group_cols)
                       [['record_id_eia']].count()
@@ -1223,7 +1258,7 @@ class CompilePlantParts(object):
         """Merge the plant_gen_df with the ferc_acct map."""
         return pd.merge(plant_gen_df, get_eia_ferc_acct_map(), how='left')
 
-    def prep_plant_gen_df(self):
+    def prep_plant_gen_df(self, qual_records):
         """Prepare plant gen dataframe."""
         logger.info('Generating the master generator table with ownership.')
         self.plant_gen_df = (
@@ -1263,7 +1298,7 @@ class CompilePlantParts(object):
         if self.plant_parts_df is not None and self.clobber is False:
             return self.plant_parts_df
         if self.plant_gen_df is None:
-            self.plant_gen_df = self.prep_plant_gen_df()
+            self.plant_gen_df = self.prep_plant_gen_df(qual_records)
         if self.part_bools is None:
             self.part_bools = self.prep_part_bools()
 

@@ -797,7 +797,7 @@ class Scaler(object):
                 & (same_true[data_col].notnull())
                 & (same_true[new_data_col].notnull())
             ]
-            if not_same:
+            if not not_same.empty:
                 raise AssertionError(
                     "Scaling for same_true match method errored with "
                     f"{len(not_same)}. Check fraction owned split in "
