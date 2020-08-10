@@ -163,7 +163,7 @@ class Transformer:
             )
             # get rid of the bool columns we used to clean % columns
             filled_df = filled_df.drop(
-                colums=filled_df.filter(like='num_or_pct'))
+                columns=filled_df.filter(like='num_or_pct'))
 
             # then we need to do the actuall filling in
             self.filled_df = filled_df.assign(
