@@ -1,6 +1,35 @@
 """
 Aggregate plant parts to make an EIA master unit list.
 
+The EIA data about power plants (from EIA 923 and 860) is reported in tables
+with records that correspond to mostly generators and plants. Practically
+speaking, a plant is a collection of generator(s). There are many attributes
+of generators (i.e. prime mover, primary fuel source, technology type). We can
+use these generator attributes to group generator records into larger aggregate
+records which we call "plant parts. A "plant part" is a record which
+corresponds to a particular collection of generators that all share an
+identical attribute. E.g. all of the generators with unit_id=2, or all of the
+generators with coal as their primary fuel source.
+
+Because generators are often owned by multiple utilities, another dimention of
+the master unit list involves generating two records for each owner: one of the
+portion of the plant part they own and one for the plant part as a whole. The
+portion records are labeled in the `ownership` column as "owned" and the total
+records are labeled as "total".
+
+This module refers to "true granularies". Many plant parts we cobble together
+here in the master unit list refer to the same collection of infrastructure as
+other master unit list records. For example, if we have a "plant_prime_mover"
+plant part record and a "plant_unit" plant part record which were both cobbled
+together from the same two generators. We want to be able to reduce the master
+unit list to only unique collections of generators, so we label the first
+unique granularity as a true granularity and label the subsequent records as
+false granularities with the `true_gran` column. In order to choose which plant
+part to keep in these instances, we assigned a `plant_parts_ordered` and
+effectively keep the first instance of a unique granularity.
+
+Overview of flow for generating the master unit list:
+
 There are two classes in here - one which compiles input tables (CompileTables)
 and one which compiles the master unit list (CompilePlantParts). The method
 that rules the show here is `generate_master_unit_list`, which is a method of
@@ -11,17 +40,19 @@ need to be compiled. CompilePlantParts eats this recipe book and follows the
 recipe to make the master unit list.
 
 All of the plant parts are compiled from generators. So we first generate a
-big dataframe of generators with any columns we'll need. Then we use that
-generator dataframe and information stored in `PLANT_PARTS` to know how to
-aggregate each of the plant parts. Then we have plant part dataframes with the
-columns which identify the plant part and all of the data columns aggregated to
-the level of the plant part.
+big dataframe of generators with any columns we'll need. This is where we add
+records regarding utility ownership slices. Then we use that generator
+dataframe and information stored in `PLANT_PARTS` to know how to aggregate each
+of the plant parts. Then we have plant part dataframes with the columns which
+identify the plant part and all of the data columns aggregated to the level of
+the plant part.
 
 With that compiled plant part dataframe we also add in qualifier columns with
-`get_qualifiers`. A qualifer column is a column which contain data that is not
-endemic to the plant part record (it is not one of the identifying columns or
-aggregated data columns) but the data is still useful data that is attributable
-to each of the plant part records.
+`get_qualifiers()`. A qualifer column is a column which contain data that is
+not endemic to the plant part record (it is not one of the identifying columns
+or aggregated data columns) but the data is still useful data that is
+attributable to each of the plant part records. For more detail on what a
+qualifier column is, see the `get_qualifiers()` method.
 """
 
 
@@ -802,10 +833,10 @@ class CompilePlantParts(object):
         """
         Add a record id to a compiled part df.
 
-        We need a standarized way to refer to these compiled records that
+        We need a standardized way to refer to these compiled records that
         contains enough information in the id itself that in theory we could
         deconstruct the id and determine which plant id and plant part id
-        columns are assocaited with this record.
+        columns are associated with this record.
         """
         ids = deepcopy(id_cols)
         # we want the plant id first... mostly just bc it'll be easier to read
@@ -859,9 +890,10 @@ class CompilePlantParts(object):
         """
         Get fully consistent qualifier records.
 
-        When qualitative data is consistent for every record in a plant part,
-        we get these catagoricals. If the records are not consistent, then
-        nothing is compiled.
+        When data is a qualifer column is identical for every record in a
+        plant part, we associate this data point with the record. If the data
+        points for the related generator records are not identical, then
+        nothing is associated with the record.
 
         Args:
             record_df (pandas.DataFrame): the dataframe with the record
@@ -893,7 +925,7 @@ class CompilePlantParts(object):
 
     def dedup_on_category(self, dedup_df, base_cols, category_name, sorter):
         """
-        Deuplicate a df using a sorted category to retain prefered values.
+        Deduplicate a df using a sorted category to retain prefered values.
 
         Use a sorted category column to retain your prefered values when a
         dataframe is deduplicated.
@@ -919,23 +951,35 @@ class CompilePlantParts(object):
         """
         Get qualifier records.
 
-        For an individual dataframe of one plant part, we typically have
-        identifying columns and aggregated data columns. The identifying
-        columns are only the identifying columns associated with that plant
-        part (i.e. for plant_unit (plant part) we have ('plant_id_eia' and
-        'unit_id_pudl')). Ever plant part is cobbled together from generator
-        records, so each record in each part_df can be thought of as a
-        collection of generators.
+        For an individual dataframe of one plant part (e.g. only
+        "plant_prime_mover" plant part records), we typically have identifying
+        columns and aggregated data columns. The identifying columns for a
+        given plant part are only those columns which are required to uniquely
+        specify a record of that type of plant part. For example, to uniquely
+        specify a plant_unit record, we need both plant_id_eia and the
+        unit_id_pudl, and nothing else. In other words, the identifying columns
+        for a given plant part would make up a natural composite primary key
+        for a table composed entirely of that type of plant part. Every plant
+        part is cobbled together from generator records, so each record in
+        each part_df can be thought of as a collection of generators.
+
+        Identifier and qualifier columns are the same columns; whether a column
+        is an identifier or a qualifier is a function of the plant part you're
+        considering. All the other columns which could be identifiers in the
+        context of other plant parrts (but aren't for this plant part) are
+        qualifiers.
 
         This method takes a part_df and goes and checks whether or not the data
         we are trying to grab from the record_name column is consistent across
-        ever component genertor from each record.
+        every component genertor from each record.
 
         When record_df is "operational_status", we are not going to check for
         consistency; instead we will grab the highest level of operational
-        status that is assocaited with each records' component generators. The
+        status that is associated with each records' component generators. The
         order of operational status is defined within the method as:
-        'existing', 'proposed', then 'retired'.
+        'existing', 'proposed', then 'retired'. For example if a plant_unit is
+        composed of two generators, and one of them is "existing" and another
+        is "retired" the entire plant_unit will be considered "existing".
 
         Args:
             part_df (pandas.DataFrame): dataframe containing records associated

@@ -2,7 +2,9 @@
 Connect the master unit list with depreciation records from PUCs and FERC1.
 
 This module connects the records from the depreciation data to their
-appropirate ids in the EIA mater unit list. The deprecation data is annual
+appropirate ids in the EIA master unit list. The master unit list is generated
+via `make_plant_parts_eia.py`; see the documenation there for additional
+details about the master unit list. The depreciation data is annual
 depreciation studies from PUC and FERC1 data that have been compiled into an
 excel spreadsheet. The master unit list is a compilation of various slices of
 EIA records.
@@ -290,12 +292,12 @@ def generate_depreciation_matches(file_path_mul,
                                   sheet_name_deprish,
                                   sheet_name_output):
     """
-    Generate the matched names and save to execl.
+    Generate the matched names and save to excel.
 
-    We want to generate a link between depreciation records and the master unit
-    list. We want to generate all of the options that could have been matched
-    from the master unit list; this will help with generating overrides. We
-    also want to save these outputs into the same spreadsheet that the
+    This method generates a link between depreciation records and the master
+    unit list. It generates all of the options that could have been matched
+    from the master unit list; this will help with generating mannual
+    overrides. It then saves these outputs into the same spreadsheet that the
     depreciation records were pulled from.
 
     Args:
@@ -309,7 +311,7 @@ def generate_depreciation_matches(file_path_mul,
 
     Returns:
         pandas.DataFrame : dataframe including matched names from depreciation
-            data to names in the mater unit list, including appropirate id's
+            data to names in the master unit list, including appropirate id's
             from the master unit list.
     """
     if not file_path_deprish.is_file():
@@ -333,10 +335,10 @@ def save_to_workbook(file_path, sheets_df_dict):
     """
     Save dataframes to sheets in an existing workbook.
 
-    We want to be able to save multiple dataframes into differnt tabs in the
-    same excel workbook. If those tabs already exist, the default process is to
-    make save a new tab with a suffix, so we want to remove the tab if it
-    exists before saving.
+    This method enables us to save multiple dataframes into differnt tabs in
+    the same excel workbook. If those tabs already exist, the default process
+    is to make save a new tab with a suffix, so we remove the tab if it exists
+    before saving.
 
     Args:
         file_path (path-like): the location of the excel workbook.

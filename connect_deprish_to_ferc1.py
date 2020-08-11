@@ -1,5 +1,5 @@
 """
-Connect the deprecation data with FERC1 steam plant records.
+Connect the depreciation data with FERC1 steam plant records.
 
 This module attempts to connect the depreciation data with FERC1 steam records.
 Both the depreciation records and FERC1 steam has been connected to the EIA
@@ -7,7 +7,7 @@ master unit list, which is a compilation of various possible combinations of
 generator records.
 
 Matches are determined to be correct record linkages.
-Options are potential matches or candidate matches.
+Candidate matches are potential matches.
 """
 
 import logging
@@ -31,18 +31,18 @@ CONNECT_COLS = ['plant_id_pudl',
 
 class DeprishToFERC1Inputs():
     """
-    Input manager for matches betweenn FERC 1 and depreciation data.
+    Input manager for matches between FERC 1 and depreciation data.
 
     This input mananger reads in and stores data from four sources. The data is
     prepared, which generally involved ensuring that all output tables have
     all of the neccesary columns from the master unit list to determine if
-    candidate options are indeed true matches.
+    candidate matches are indeed true matches.
 
-    The outpts thatare generated from this class and used later on are:
-    * connects_deprish_eia: a connection between the deprecation data and eia's
-        master unit list
+    The outputs that are generated from this class and used later on are:
+    * connects_deprish_eia: a connection between the depreciation data and
+        eia's master unit list
     * connects_ferc1_eia.
-    * plant_parts_ordered: list of orderd plant parts for the master unit list
+    * plant_parts_ordered: list of ordered plant parts for the master unit list
     * parts_to_ids: dictionary of plant part names (keys) to identifying
         columns (values)
     """
@@ -59,7 +59,7 @@ class DeprishToFERC1Inputs():
             file_path_ferc1_eia (path-like): file path to the table connecting
                 FERC1 steam records to the master unit list
             file_path_deprish_eia (path-like): file path to the table
-                connecting the deprecation records to the EIA master unit list
+                connecting the depreciation records to the EIA master unit list
         """
         # TODO: This is a bit of a placeholder riht now. I'd like to make
         # functions like the get_master_unit_list_eia for each of these
@@ -114,7 +114,8 @@ class DeprishToFERC1Inputs():
 
     def _prep_connects_deprish_eia(self):
         self.connects_deprish_eia = (
-            # we only want options that have actually been connected to the MUL
+            # we only want candidate matches that have actually been connected
+            # to the MUL
             self.connects_deprish_eia_raw[
                 self.connects_deprish_eia_raw.record_id_eia.notnull()]
             .pipe(pudl.helpers.convert_to_date)
@@ -160,7 +161,7 @@ class DeprishToFERC1Inputs():
                              in parts_compilers.ids_to_parts.items()}
 
     def prep_inputs(self):
-        """Prepare all inputs needed for connecting deprecation to FERC1."""
+        """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
         # for later inputs
         self._prep_plant_parts_eia()
@@ -192,25 +193,25 @@ class ConnectorDeprishFERC1():
         """
         self.inputs = inputs
 
-    def check_high_level_options(self, options_all_deprish_ferc1):
+    def check_all_candidate_matches(self, candidate_matches_all):
         """
-        Check the options between deprecation data and ferc1.
+        Check the candidate matches between depreciation data and ferc1.
 
-        This method explores the generation of options between depreciation
+        This method explores the generation of matches between depreciation
         and ferc1 records. We want to know how many depreciation records aren't
-        associated with any ferc1 record. We want to know if we are any plant
-        ids that show up in the depreciation data and aren't mapped to ferc
-        records but do show up in the ferc data somewhere. At a high level, we
-        want a gut check of whether or not connects_all_deprish_ferc1 was
-        connected properly.
+        associated with any ferc1 record. We want to know if there are any
+        plant ids that show up in the depreciation data and aren't mapped to
+        ferc records but do show up in the ferc data somewhere. At a high
+        level, we want a gut check of whether or not connects_all_deprish_ferc1
+        was connected properly.
         """
         # there was a merge iindicator here and left df was the depreciation
         # data
-        connected_plant_ids = options_all_deprish_ferc1[
-            options_all_deprish_ferc1._merge == 'both'].plant_id_pudl.unique()
+        connected_plant_ids = candidate_matches_all[
+            candidate_matches_all._merge == 'both'].plant_id_pudl.unique()
         # how many plant_id_pudl's didn't get a corresponding FERC1 record
-        not_in_ferc1_plant_ids = (options_all_deprish_ferc1[
-            options_all_deprish_ferc1._merge == 'left_only']
+        not_in_ferc1_plant_ids = (candidate_matches_all[
+            candidate_matches_all._merge == 'left_only']
             .plant_id_pudl.unique())
         # these are a subset of the not_in_ferc1_plant_ids that show up in the
         # steam table
@@ -227,9 +228,9 @@ class ConnectorDeprishFERC1():
             warnings.warn(
                 f'There are {len(missing_plant_ids)} missing plant records.')
 
-    def prep_all_options(self):
+    def get_candidate_matches(self):
         """
-        Prepare all options between deprecation and ferc1 steam.
+        Prepare all candidate matches between depreciation and ferc1 steam.
 
         Before choosing the specific match between depreciation and ferc1, we
         need to compile all possible options - or candidate links.
@@ -239,10 +240,10 @@ class ConnectorDeprishFERC1():
 
         Returns:
             pandas.DataFrame: a dataframe with all of the possible combinations
-            of the deprecation data and ferc1 (with their relative EIA master
+            of the deprecation data and ferc1 (with their respective EIA master
             unit list records associated).
         """
-        options_all_deprish_ferc1 = pd.merge(
+        candidate_matches_all = pd.merge(
             self.inputs.connects_deprish_eia,
             self.inputs.connects_ferc1_eia,
             on=CONNECT_COLS,
@@ -252,11 +253,11 @@ class ConnectorDeprishFERC1():
         # reorder cols so they are easier to see, maybe remove later
         first_cols = ['plant_part_deprish', 'plant_part_ferc1',
                       'record_id_eia_deprish', 'record_id_eia_ferc1']
-        options_all_deprish_ferc1 = options_all_deprish_ferc1[
-            first_cols + [x for x in options_all_deprish_ferc1.columns
+        candidate_matches_all = candidate_matches_all[
+            first_cols + [x for x in candidate_matches_all.columns
                           if x not in first_cols]]
 
-        self.check_high_level_options(options_all_deprish_ferc1)
+        self.check_all_candidate_matches(candidate_matches_all)
 
         # rename dict with the ordered plant part names with numbered prefixes
         replace_dict = {
@@ -267,8 +268,8 @@ class ConnectorDeprishFERC1():
         # we're going to add a column level_deprish, which indicates the
         # relative size of the plant part granularity between deprecaition and
         # ferc1
-        options_all_deprish_ferc1 = (
-            options_all_deprish_ferc1.assign(
+        candidate_matches_all = (
+            candidate_matches_all.assign(
                 part_no_deprish=lambda x:
                     x.plant_part_deprish.replace(replace_dict),
                 part_no_ferc1=lambda x:
@@ -288,24 +289,24 @@ class ConnectorDeprishFERC1():
         )
         # we are going to make a count_ferc1 column to know how many possible
         # ferc1 connections are possible.
-        options_all_deprish_ferc1 = pd.merge(
-            options_all_deprish_ferc1,
-            options_all_deprish_ferc1.groupby(['record_id_eia_deprish'])
+        candidate_matches_all = pd.merge(
+            candidate_matches_all,
+            candidate_matches_all.groupby(['record_id_eia_deprish'])
             .agg({'record_id_ferc1': 'count'})
             .rename(columns={'record_id_ferc1': 'count_ferc1', })
             .reset_index(),
         )
-        return options_all_deprish_ferc1
+        return candidate_matches_all
 
-    def get_same_true(self, options_deprish_ferc1):
+    def get_same_true(self, candidate_matches):
         """
         Grab the obvious matches which have the same record_id_eia.
 
-        If an option/candidation match has the same id from both the
-        depreciation records and ferc1.... then we have found a match.
+        If an candidation match has the same id from both the depreciation
+        records and ferc1.... then we have found a match.
 
         Args:
-            options_deprish_ferc1 (pandas.DataFrame): dataframe of the options
+            candidate_matches (pandas.DataFrame): dataframe of the matches
                 of possible matches between the ferc1 and deprecation.
 
         Returns:
@@ -313,11 +314,11 @@ class ConnectorDeprishFERC1():
                 record id
 
         """
-        return options_deprish_ferc1[
-            options_deprish_ferc1.record_id_eia_deprish ==
-            options_deprish_ferc1.record_id_eia_ferc1]
+        return candidate_matches[
+            candidate_matches.record_id_eia_deprish ==
+            candidate_matches.record_id_eia_ferc1]
 
-    def get_matches_at_diff_ownership(self, options_df):
+    def get_matches_at_diff_ownership(self, candidate_matches):
         """
         Get matches when the record_id_eia matches except for the ownership.
 
@@ -332,44 +333,44 @@ class ConnectorDeprishFERC1():
         Note: Is there a cleaner way to do this??
 
         Args:
-            options_df (pandas.DataFrame): dataframe of the options
+            candidate_matches (pandas.DataFrame): dataframe of the matches
                 of possible matches between the ferc1 and deprecation.
         """
         diff_own = (
-            options_df[
-                options_df.record_id_eia_deprish.str.replace(
+            candidate_matches[
+                candidate_matches.record_id_eia_deprish.str.replace(
                     '(owned|total)', "", regex=True) ==
-                options_df.record_id_eia_ferc1.str.replace(
+                candidate_matches.record_id_eia_ferc1.str.replace(
                     '(owned|total)', "", regex=True)
             ]
         )
         return diff_own
 
-    def get_only_ferc1_option(self, options_deprish_ferc1):
+    def get_only_ferc1_matches(self, candidate_matches):
         """
-        Get the matches when there is only one FERC1 option.
+        Get the matches when there is only one FERC1 match.
 
         If there is only one optioin from FERC1, then we have no other choices,
-        so we are going to assume the one option is the right option. We've
-        alredy generated a `count_ferc1` column in `prep_all_options`, so we
-        can use that here.
+        so we are going to assume the one match is the right match. We've
+        alredy generated a `count_ferc1` column in `get_candidate_matches`, so
+        we can use that here.
 
         Args:
-            options_deprish_ferc1 (pandas.DataFrame): dataframe of the options
-                of possible matches between the ferc1 and deprecation.
+            candidate_matches (pandas.DataFrame): dataframe of the canidate
+                matches between the ferc1 and depreciation.
         """
-        return options_deprish_ferc1[options_deprish_ferc1.count_ferc1 == 1]
+        return candidate_matches[candidate_matches.count_ferc1 == 1]
 
     def get_matches_same_qualifiers_ids_by_source(
-            self, options_deprish_ferc1, source):
+            self, candidate_matches, source):
         """
         Get matches that have the same qualifier ids part level by source.
 
         See `get_matches_same_qualifiers_ids` for details.
 
         Args:
-            options_deprish_ferc1 (pandas.DataFrame): dataframe of the options
-                of possible matches between the ferc1 and deprecation.
+            candidate_matches (pandas.DataFrame): dataframe of the canidate
+                matches between the ferc1 and depreciation.
             source (string): either `ferc1` or `deprish`
         """
         df = pd.DataFrame()
@@ -377,8 +378,8 @@ class ConnectorDeprishFERC1():
             # we have to exclude the plant as a MUL level bc all of the records
             # within a plant share the plant id
             if part_name != 'plant':
-                part_df = options_deprish_ferc1[
-                    options_deprish_ferc1[f"plant_part_{source}"] == part_name]
+                part_df = candidate_matches[
+                    candidate_matches[f"plant_part_{source}"] == part_name]
                 # add the slice of the df for this part if the id columns for
                 # both contain the same values
                 df = df.append(part_df[
@@ -388,14 +389,14 @@ class ConnectorDeprishFERC1():
         df = df.assign(connect_method=f"same_qualifiers_{source}")
         return df
 
-    def get_matches_same_qualifiers_ids(self, options_deprish_ferc1):
+    def get_matches_same_qualifiers_ids(self, candidate_matches):
         """
         Get the matches that have the same plant part id columns.
 
         The master unit list is make up of records which correspond to
         different levels or granularies of plants. These records are all
         cobbled together at different levels from generator records. When a
-        certain record is compiled from generators that have a consitent
+        certain record is compiled from generators that have a consistent
         identifyier for another plant part, that record is associated with the
         record (ie. if a prime move level record was compiled from generators
         that all have the same unit id).
@@ -408,8 +409,8 @@ class ConnectorDeprishFERC1():
         associate them together.
 
         Args:
-            options_df_current (pandas.DataFrame): dataframe of the options
-                of possible matches between the ferc1 and deprecation.
+            candidate_matches (pandas.DataFrame): dataframe of the canidate
+                matches between the ferc1 and depreciation.
         """
         # we are going to check if things are consistent from both "directions"
         # meaning from each of our data sets
@@ -417,32 +418,33 @@ class ConnectorDeprishFERC1():
         for source in ['ferc1', 'deprish']:
             same_quals = same_quals.append(
                 self.get_matches_same_qualifiers_ids_by_source(
-                    options_deprish_ferc1, source))
+                    candidate_matches, source))
         return same_quals
 
-    def remove_matches_from_options(self,
-                                    options_df_current, matches_df):
+    def remove_matches_from_candidates(self,
+                                       candidate_matches_current, matches_df):
         """
-        Remove the matches from the possible options.
+        Remove the matches from the candidate matches.
 
         Because we are iteratively generating matches, we want to remove
-        the matches we've determined from the options for future
+        the matches we've determined from the candidate matches for future
         iterations.
 
         Args:
-            options_df_current (pandas.DataFrame): dataframe of the options
-                of possible matches between the ferc1 and deprecation.
+            candidate_matches (pandas.DataFrame): dataframe of the canidate
+                matches between the ferc1 and depreciation.
             matches_df (pandas.DataFrame): the known matches which
                 will be removed as possibilities for future matches
         Returns:
             pandas.DataFrame:
         """
-        # if the record_id_eia_deprish shows up in the options, remove it the
-        # only options left are the ones that do not show up in the matches
-        options_df_remainder = options_df_current[
-            ~options_df_current.record_id_eia_deprish
+        # if the record_id_eia_deprish shows up in the candidates, remove it
+        # the only candidates left are the ones that do not show up in the
+        # matches
+        candidate_matches_remainder = candidate_matches_current[
+            ~candidate_matches_current.record_id_eia_deprish
             .isin(matches_df.record_id_eia_deprish.unique())]
-        return options_df_remainder
+        return candidate_matches_remainder
 
     def connect(self):
         """
@@ -453,48 +455,47 @@ class ConnectorDeprishFERC1():
 
         Returns:
             pandas.DataFrame: a dataframe of unique records from the
-            deprecation data with ferc1 steam data associated with as many
+            depreciation data with ferc1 steam data associated with as many
             records as possible. FERC1 steam data has been either aggregated
             or disaggregated to match the level of the depreciation records.
         """
-        # matches are known to be connected records and options are the
-        # possible matches.
-        # candidate matches
-        options_all_deprish_ferc1 = self.prep_all_options()
+        # matches are known to be connected records and candidate matches are
+        # the options for matches
+        candidate_matches_all = self.get_candidate_matches()
 
         # we are going to go through various methods for grabbing the true
-        # matches out of the options. we will then label those options with
-        # a connect_method column. we are going to continually remove the known
-        # matches from the options
+        # matches out of the candidate matches. we will then label those
+        # candidate matches with a connect_method column. we are going to
+        # continually remove the known matches from the candidates
 
         methods = {
             "same_true": self.get_same_true,
             "same_diff_own": self.get_matches_at_diff_ownership,
-            "one_ferc1_opt": self.get_only_ferc1_option,
+            "one_ferc1_opt": self.get_only_ferc1_matches,
             "same_quals": self.get_matches_same_qualifiers_ids,
         }
         # compile the connected dfs in a dictionary
-        connect_dfs = {}
-        options_deprish_ferc1 = deepcopy(options_all_deprish_ferc1)
+        matches_dfs = {}
+        candidate_matches = deepcopy(candidate_matches_all)
         for method in methods:
             logger.info(f"Generating matches for {method}")
             connects_method_df = (
-                methods[method](options_deprish_ferc1)
+                methods[method](candidate_matches)
                 .assign(connect_method=method)
             )
-            options_deprish_ferc1 = self.remove_matches_from_options(
-                options_deprish_ferc1, connects_method_df)
-            connect_dfs[method] = connects_method_df
+            candidate_matches = self.remove_matches_from_candidates(
+                candidate_matches, connects_method_df)
+            matches_dfs[method] = connects_method_df
         # squish all of the known matches together
-        connects = pd.concat(connect_dfs.values())
+        matches_df = pd.concat(matches_dfs.values())
 
         # everything below here is just for logging
-        ids_to_match = (options_all_deprish_ferc1[
-            options_all_deprish_ferc1.record_id_eia_ferc1.notnull()]
+        ids_to_match = (candidate_matches_all[
+            candidate_matches_all.record_id_eia_ferc1.notnull()]
             .record_id_eia_deprish.unique())
-        ids_connected = connects.record_id_eia_deprish.unique()
-        ids_no_match = (options_deprish_ferc1[
-            options_deprish_ferc1.record_id_eia_ferc1.notnull()]
+        ids_connected = matches_df.record_id_eia_deprish.unique()
+        ids_no_match = (candidate_matches[
+            candidate_matches.record_id_eia_ferc1.notnull()]
             .plant_id_pudl.unique())
         logger.info("Portion of unique depreciation records:")
         logger.info(
@@ -502,12 +503,12 @@ class ConnectorDeprishFERC1():
         logger.info(
             f"    No link:   {len(ids_no_match)/len(ids_to_match):.02%}")
         logger.info(f"""Connected:
-{connects.connect_method.value_counts(dropna=False)}""")
+{matches_df.connect_method.value_counts(dropna=False)}""")
         logger.info(f"""Connection Levels:
-{options_deprish_ferc1.level_deprish.value_counts(dropna=False)}""")
-        logger.debug(f"""Only one ferc1 option levels:
-{connect_dfs['one_ferc1_opt'].level_deprish.value_counts(dropna=False)}""")
+{candidate_matches.level_deprish.value_counts(dropna=False)}""")
+        logger.debug(f"""Only one ferc1 match levels:
+{matches_dfs['one_ferc1_opt'].level_deprish.value_counts(dropna=False)}""")
 
         # evertually this will be a dealt w/ squished together output
         # for now, this is a few important outputs
-        return options_all_deprish_ferc1, options_deprish_ferc1, connects
+        return candidate_matches_all, candidate_matches, matches_df
