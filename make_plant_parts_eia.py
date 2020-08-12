@@ -59,6 +59,7 @@ qualifier column is, see the `get_qualifiers()` method.
 import logging
 import pathlib
 from copy import deepcopy
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -744,10 +745,6 @@ class CompilePlantParts(object):
                                 + v['denorm_cols']))].drop_duplicates()
                 self.plant_gen_df = self.plant_gen_df.merge(
                     denorm_df, how='left')
-                if og_len != len(self.plant_gen_df):
-                    raise AssertionError(
-                        'ahh merge error! when adding denorm colunms to'
-                        'plant_gen_df we must get the same number of records')
         if 'plant_ferc_acct' in self.plant_parts.keys():
             self.plant_gen_df = self.add_ferc_acct(self.plant_gen_df)
         # if
@@ -763,6 +760,13 @@ class CompilePlantParts(object):
                 self.table_compiler.get_the_table('generators_eia860')[
                     idx_cols_gen + qual_records_missing],
                 on=idx_cols_gen
+            )
+        if og_len != len(self.plant_gen_df):
+            warnings.warn(
+                'ahh merge error! when adding denorm colunms to'
+                'plant_gen_df we must get the same number of records'
+                f'og # of records: {og_len} vs  end state #: '
+                f'{len(self.plant_gen_df)}'
             )
         return self.plant_gen_df
 
@@ -1008,16 +1012,7 @@ class CompilePlantParts(object):
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = deepcopy(self.plant_gen_df)
-        # only grab the qualifer record table if the record we are trying to
-        # get isn't in plant_gen_df
-        if record_name not in record_df.columns:
-            logger.info(f"denorming plant_gen_df for qualifier: {record_name}")
-            record_df = pd.merge(
-                self.plant_gen_df,
-                self.table_compiler.get_the_table(
-                    QUAL_RECORD_TABLES[record_name])
-            )
+        record_df = self.plant_gen_df.copy()
 
         base_cols = id_cols
         if 'report_date' in record_df.columns:
@@ -1049,34 +1044,41 @@ class CompilePlantParts(object):
         """Count the number of records from peer parts."""
         df = self.plant_gen_df[self.id_cols_dict[part_name]].drop_duplicates()
         part_cols = self.plant_parts[part_name]['id_cols'] + ['report_date']
-        # create the count
-        df_count = (df.groupby(by=part_cols).nunique().
-                    drop(columns=[self.plant_parts[part_name]['id_cols'][-1],
-                                  'plant_id_eia',
-                                  'report_date']).
-                    rename(columns=self.ids_to_parts).
-                    add_suffix(f'_count_{part_name}'))
-        # merge back into the og df
-        df_w_count = df.merge(
-            df_count,
-            how='left',
-            right_index=True,
-            left_on=part_cols,
-        )
+        if set(part_cols) == set(df.columns):
+            logger.info(
+                f"skip the count for {part_name} because there are no peer "
+                "parts to count")
+            df_w_count = df
+        else:
+            # create the count
+            df_count = (df.groupby(by=part_cols).nunique()
+                        .rename(columns=self.ids_to_parts)
+                        .add_suffix(f'_count_{part_name}')
+
+                        )
+            # merge back into the og df
+            df_w_count = df.merge(
+                df_count,
+                how='left',
+                right_index=True,
+                left_on=part_cols,
+            )
         return df_w_count
 
     def make_all_the_counts(self):
         """All of them."""
         all_the_counts = deepcopy(self.plant_gen_df)
+
         for part in self.plant_parts_ordered:
-            if part == 'plant_unit':
-                self.plant_gen_df = self.plant_gen_df.fillna(
-                    {'unit_id_pudl': -999999})
+            logger.info(f"making the counts for: {part}")
+            # if part == 'plant_unit':
+            #    self.plant_gen_df = self.plant_gen_df.fillna(
+            #        {'unit_id_pudl': -999999})
             all_the_counts = all_the_counts.merge(
                 self.count_peer_parts(part), how='left')
-            if part == 'plant_unit':
-                self.plant_gen_df = self.plant_gen_df.replace(
-                    {'unit_id_pudl': {-999999: pd.NA}})
+            # if part == 'plant_unit':
+            #    self.plant_gen_df = self.plant_gen_df.replace(
+            #        {'unit_id_pudl': {-999999: pd.NA}})
         return all_the_counts
 
     def make_all_the_bools(self):
@@ -1096,16 +1098,16 @@ class CompilePlantParts(object):
 
         # convert the count columns to bool columns
         for col in counts.filter(like='_count_').columns:
-            bool_col = col.replace("_count_", "_only_")
+            bool_col = col.replace("_count_", "_onlyhasone_")
             counts.loc[counts[col].notnull(), bool_col] = counts[col] > 1
         # force the nullable bool type for all our count cols
-        counts.loc[:, counts.filter(like='_only_').columns] = (
-            counts.filter(like='_only_').astype(pd.BooleanDtype())
+        counts.loc[:, counts.filter(like='_onlyhasone_').columns] = (
+            counts.filter(like='_onlyhasone_').astype(pd.BooleanDtype())
         )
         # assign a bool for the true gran only if all of the subparts are true
         for part in self.plant_parts.keys():
             counts[f'true_gran_{part}'] = (
-                counts.filter(like=part + '_only_')
+                counts.filter(like='_onlyhasone_' + part)
                 # .fillna(False)
                 .all(axis='columns'))
             counts = counts.astype({f'true_gran_{part}': pd.BooleanDtype()})
@@ -1147,7 +1149,7 @@ class CompilePlantParts(object):
         logger.info(f'labeling true gran for {part_name}')
         # another way to do this would be to construct the list of colums based
         # on self.plant_parts_ordered
-        cols = list(bools.filter(like=part_name + '_only_').columns)
+        cols = list(bools.filter(like='_onlyhasone_' + part_name).columns)
         # reserve the columns because we want the biggest part to be the last
         # assigned
         cols.reverse()
@@ -1157,7 +1159,8 @@ class CompilePlantParts(object):
         # granularity. The assign_col is potentially rewritten multiple times -
         # they are orderd based on self.plant_parts_ordered (plant is last)
         for col in cols:
-            bools.loc[~bools[col], assign_col] = col.split(sep="_only_")[1]
+            bools.loc[~bools[col], assign_col] = col.split(sep="_onlyhasone_")[
+                -1]
 
         bools = (
             self.assign_record_id_eia(bools, assign_col).
@@ -1267,11 +1270,16 @@ class CompilePlantParts(object):
             pipe(self.slice_by_ownership)
             .astype({'utility_id_eia': 'Int64'})
         )
-        self.plant_gen_df = self.denorm_plant_gen()
+        self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
 
     def prep_part_bools(self):
-        """Prep the part_bools df that denotes true_gran for all generators."""
+        """
+        Prep the part_bools df that denotes true_gran for all generators.
+
+        This method will generate a dataframe based on ``self.plant_gen_df``
+        that has boolean columns for
+        """
         self.part_bools = self.make_all_the_bools()
         for part_name1 in self.plant_parts.keys():
             self.part_bools = self.label_true_id_by_part(part_name1,
@@ -1299,6 +1307,8 @@ class CompilePlantParts(object):
             return self.plant_parts_df
         if self.plant_gen_df is None:
             self.plant_gen_df = self.prep_plant_gen_df(qual_records)
+            self.plant_gen_df = self.plant_gen_df.fillna(
+                {'unit_id_pudl': -999999})
         if self.part_bools is None:
             self.part_bools = self.prep_part_bools()
 
@@ -1344,6 +1354,11 @@ class CompilePlantParts(object):
                    'utility_id_eia', 'true_gran', 'appro_part_label'])
             .pipe(self._clean_plant_parts)
         )
+
+        self.plant_gen_df = self.plant_gen_df.replace(
+            {'unit_id_pudl': {-999999: pd.NA}})
+        plant_parts_df = plant_parts_df.replace(
+            {'unit_id_pudl': {-999999: pd.NA}})
 
         self.plant_parts_full_df = plant_parts_df
 
@@ -1468,8 +1483,11 @@ def get_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
     map as a dataframe or dictionary.
     """
     file_path = pathlib.Path.cwd().parent / file_name
-    eia_ferc_acct_map = pd.read_excel(file_path, skiprows=0, sheet_name=3)[
-        ['technology_description', 'prime_mover_code', 'ferc_acct_name']]
+    eia_ferc_acct_map = (
+        pd.read_excel(file_path, skiprows=0, sheet_name=3)
+        [['technology_description', 'prime_mover_code', 'ferc_acct_name']]
+        .drop_duplicates()
+    )
     return eia_ferc_acct_map
 
 
