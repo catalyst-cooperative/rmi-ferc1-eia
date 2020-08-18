@@ -124,7 +124,7 @@ class Transformer:
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
                 self.extract_df
-                .pipe(self._convert_pct_cols)
+                .pipe(self._convert_rate_cols)
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
                 .assign(report_year=lambda x: x.report_date.dt.year)
@@ -165,53 +165,53 @@ class Transformer:
             # convert % columns - which originally are a combination of whole
             # numbers of decimals (e.g. 88.2% would either be represented as
             # 88.2 or .882). Some % columns have boolean columns (ending in
-            # num_or_pct) that we fleshed out to know wether the values were
+            # type_pct) that we fleshed out to know wether the values were
             # reported as numbers or %s. There is one column that was easy to
             # clean by checking whether or not the value is greater than 1.
-            filled_df.loc[filled_df['net_salvage_num_or_pct'],
-                          'net_salvage_pct'] = (
-                filled_df.loc[filled_df['net_salvage_num_or_pct'],
-                              'net_salvage_pct'] / 100
+            filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+                          'net_salvage_rate'] = (
+                filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+                              'net_salvage_rate'] * 100
             )
-            filled_df.loc[filled_df['depreciation_annual_num_or_pct'],
-                          'depreciation_annual_pct'] = (
-                filled_df.loc[filled_df['depreciation_annual_num_or_pct'],
-                              'depreciation_annual_pct'] / 100
+            filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
+                          'depreciation_annual_rate'] = (
+                filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
+                              'depreciation_annual_rate'] / 100
             )
-            filled_df.loc[abs(filled_df.reserve_pct) >= 1,
-                          'reserve_pct'] = filled_df.loc[
-                abs(filled_df.reserve_pct) >= 1, 'reserve_pct'] / 100
+            filled_df.loc[abs(filled_df.reserve_rate) >= 1,
+                          'reserve_rate'] = filled_df.loc[
+                abs(filled_df.reserve_rate) >= 1, 'reserve_rate'] / 100
             logger.info(
-                f"# of reserve_pct over 100%: "
-                f"{len(filled_df.loc[abs(filled_df.reserve_pct) >= 1])} "
+                f"# of reserve_rate over 1 (100%): "
+                f"{len(filled_df.loc[abs(filled_df.reserve_rate) >= 1])} "
                 "Higher #s here may indicate an issue with the original data "
                 "or the fill_in method"
             )
             # get rid of the bool columns we used to clean % columns
             filled_df = filled_df.drop(
-                columns=filled_df.filter(like='num_or_pct'))
+                columns=filled_df.filter(like='num'))
 
             # then we need to do the actuall filling in
             self.filled_df = filled_df.assign(
-                net_salvage_pct=lambda x:
+                net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_pct.fillna(x.net_removal / x.book_reserve),
+                    x.net_salvage_rate.fillna(x.net_removal / x.book_reserve),
                 net_removal=lambda x:
-                    x.net_removal.fillna(x.net_salvage_pct * x.book_reserve),
+                    x.net_removal.fillna(x.net_salvage_rate * x.book_reserve),
                 unaccrued_balance=lambda x:
                     x.unaccrued_balance.fillna(
                         x.plant_balance_w_common - x.book_reserve
                         + x.net_removal),
-                reserve_pct=lambda x: x.book_reserve / x.plant_balance_w_common
+                reserve_rate=lambda x: x.book_reserve / x.plant_balance_w_common
             )
 
         return self.filled_df
 
-    def _convert_pct_cols(self, tidy_df):
+    def _convert_rate_cols(self, tidy_df):
         """Convert percent columns to numeric."""
-        to_num_cols = ['net_salvage_pct',
-                       'reserve_pct',
-                       'depreciation_annual_pct']
+        to_num_cols = ['net_salvage_rate',
+                       'reserve_rate',
+                       'depreciation_annual_rate']
         for col in to_num_cols:
             tidy_df[col] = pd.to_numeric(tidy_df[col])
         return tidy_df
