@@ -25,13 +25,12 @@ NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•"]
 IDX_COLS_DEPRISH = [
     'report_date',
     'plant_id_pudl',
-    'plant_name',
+    'plant_part_name',
     'ferc_acct',
-    # 'ferc_acct_full',
     'note',
 ]
 
-IDX_WO_PLANT_NAME = [x for x in IDX_COLS_DEPRISH if x != 'plant_name']
+IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
 
 # extract
 
@@ -128,7 +127,7 @@ class Transformer:
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
                 .assign(report_year=lambda x: x.report_date.dt.year)
-                .pipe(pudl.helpers.strip_lower, ['plant_name'])
+                .pipe(pudl.helpers.strip_lower, ['plant_part_name'])
             )
         return self.tidy_df
 
@@ -239,7 +238,7 @@ class Transformer:
         # as a string search of the plant name
         deprish_df = self.early_tidy().assign(
             common=lambda x: x.common.fillna(
-                x.plant_name.str.contains('common')))
+                x.plant_part_name.str.contains('common')))
 
         deprish_c_df = deprish_df.loc[deprish_df.common]
         deprish_df = deprish_df.loc[~deprish_df.common]
@@ -254,6 +253,8 @@ class Transformer:
         dupes = deprish_df[(deprish_df.duplicated(subset=IDX_COLS_DEPRISH))
                            & (deprish_df.plant_id_pudl.notnull())]
         if not dupes.empty:
+            # save it so we can see the dupes
+            self.dupes = dupes
             raise ValueError(
                 f"There are {len(dupes)} duplicate records of the depreciation"
                 f" records. Check if there are duplicate with idx columns: "
@@ -264,7 +265,7 @@ class Transformer:
         # duplicate records
         deprish_c_df = (
             deprish_c_df
-            .groupby(by=IDX_WO_PLANT_NAME, dropna=False)
+            .groupby(by=IDX_COLS_COMMON, dropna=False)
             [addtl_cols].sum().reset_index()
             .pipe(pudl.helpers.convert_cols_dtypes,
                   'depreciation', name='depreciation')
@@ -275,8 +276,8 @@ class Transformer:
         df_w_c = (
             pd.merge(
                 deprish_df,
-                deprish_c_df[IDX_WO_PLANT_NAME + addtl_cols],
-                on=IDX_WO_PLANT_NAME,
+                deprish_c_df[IDX_COLS_COMMON + addtl_cols],
+                on=IDX_COLS_COMMON,
                 how='left',
                 suffixes=('', common_suffix)
             )
@@ -289,7 +290,9 @@ class Transformer:
             )
         return df_w_c
 
-    def split_allocate_common(self):
+    def split_allocate_common(self,
+                              split_col='plant_balance',
+                              common_suffix='_common'):
         """
         Split and allocate the common plant depreciation lines.
 
@@ -301,14 +304,15 @@ class Transformer:
         associated with "common" records that pertain to no generation unit in
         particular, across all generation units, in proportion to each unit's
         own remaining plant balance.
+
+        Args:
+            split_col (string): column name of common records to split and
+                allocate. Column must contain numeric data. Default
+                'plant_balance'.
+            common_suffix (string): suffix to use for the common columns when
+                they are merged into the other plant-part records.
         """
-        # columns we want to split, suffix for the merged common cols, the new
-        # data col we are trying to generate, and the id cols for groupby
-        # Note: Some of these top level variables could easily be arguments to
-        # this method instead of hard coded variables set here.... I'm just not
-        # sure we'll ever want/need to.
-        split_col = 'plant_balance'
-        common_suffix = '_common'
+        # the new  data col we are trying to generate
         new_data_col = f'{split_col}_w{common_suffix}'
 
         deprish_w_c = self.split_merge_common_records(
@@ -324,13 +328,15 @@ class Transformer:
         # finally, calcuate the new column w/ the % of the total group. if
         # there is no common data, fill in this new data column with the og col
         deprish_w_common_allocated[new_data_col] = (
-            deprish_w_common_allocated[f"{split_col}_c_portion"].fillna(0)
+            deprish_w_common_allocated[f"{split_col}_common_portion"].fillna(0)
             + deprish_w_common_allocated[split_col].fillna(0))
 
         if len(deprish_w_common_allocated) != len(deprish_w_c):
             raise AssertionError(
-                "smh.. the number of alloacted records don't match the "
-                "original records... so something went wrong here."
+                "smh.. the number of alloacted records "
+                f"({len(deprish_w_common_allocated)}) don't match the "
+                f"original records ({len(deprish_w_c)})... "
+                "so something went wrong here."
             )
         self._check_common_allocation(
             deprish_w_common_allocated, split_col, new_data_col, common_suffix)
@@ -345,16 +351,17 @@ class Transformer:
         """
         Generate the portion of the common plant based on the split_col.
 
-        Most of the deprecation records have data in our standard ``split_col``
+        Most of the deprecation records have data in our default ``split_col``
         (which is ``plant_balance``). For these records, calculating the
-        portion of the common records to allocate to each subpart is simple.
-        This method calculated the ratio of the total ``split_col`` vs the
-        summed ``split_col`` within the group of the ``IDX_WO_PLANT_NAME``.
-        That ratio is used to generate the porportion of the common's
-        ``split_col`` to allocate to each plant sub-part record.
+        portion of the common records to allocate to each plant-part is simple.
+        This method calculates the portion of the common plant balance that
+        should be allocated to each plant-part/ferc_acct records based on the
+        ratio of each records' plant balance compared to the total
+        plant/ferc_acct plant balance.
         """
+        # exclude the nulls and the 0's
         simple_case_df = deprish_w_c[
-            (deprish_w_c[split_col].notnull())
+            (deprish_w_c[split_col].notnull()) & (deprish_w_c[split_col] != 0)
         ]
         logger.info(
             f"We are calculating the common portion for {len(simple_case_df)} "
@@ -364,15 +371,15 @@ class Transformer:
         # option
         gb_df = (
             simple_case_df
-            .groupby(by=IDX_WO_PLANT_NAME, dropna=False)
+            .groupby(by=IDX_COLS_COMMON, dropna=False)
             [[split_col]].sum().reset_index()
         )
 
         df_w_tots = (
             pd.merge(
                 simple_case_df,
-                gb_df.reset_index(),
-                on=IDX_WO_PLANT_NAME,
+                gb_df,
+                on=IDX_COLS_COMMON,
                 how='left',
                 suffixes=("", "_sum"))
         )
@@ -384,7 +391,7 @@ class Transformer:
         # the default way to calculate each plant sub-part's common plant
         # portion is to multiply the ratio (calculated above) with the total
         # common plant balance for the plant/ferc_acct group.
-        df_w_tots[f"{split_col}_c_portion"] = (
+        df_w_tots[f"{split_col}_common_portion"] = (
             df_w_tots[f'{split_col}{common_suffix}']
             * df_w_tots[f"{split_col}_ratio"])
 
@@ -403,7 +410,7 @@ class Transformer:
         is null. In these cases, we still want to check if we need to assocaite
         a portion of the common ``split_col`` should be broken up based on the
         number of other records that the common value is assocaitd with
-        (within the group of the ``IDX_WO_PLANT_NAME``). We check to see if
+        (within the group of the ``IDX_COLS_COMMON``). We check to see if
         there are other plant sub-parts in the common plant grouping that have
         non-zero/non-null ``split_col`` - if they do then we don't assign the
         common portion to these records because their record relatives will be
@@ -413,7 +420,7 @@ class Transformer:
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
         edge_case_df = deprish_w_c[
-            (deprish_w_c[split_col].isnull())
+            (deprish_w_c[split_col].isnull()) | (deprish_w_c[split_col] == 0)
         ]
 
         logger.info(
@@ -431,14 +438,14 @@ class Transformer:
                     deprish_w_c.plant_balance > 0,
                     True, False)
             )
-            .groupby(by=IDX_WO_PLANT_NAME, dropna=False)
+            .groupby(by=IDX_COLS_COMMON, dropna=False)
             .agg({'plant_bal_count': 'count',
                   'plant_bal_any': 'any'})
         )
         edge_case_df = pd.merge(
             edge_case_df,
             edge_case_count.reset_index(),
-            on=IDX_WO_PLANT_NAME,
+            on=IDX_COLS_COMMON,
             how='left'
         )
         # if there is no other plant records with plant balances in the same
@@ -446,7 +453,7 @@ class Transformer:
         # the plant balance evenly amoung the records using plant_bal_count.
         # if there are other plant sub part records with plant balances, the
         # common plant balance will already be distributed amoung those records
-        edge_case_df[f"{split_col}_c_portion"] = np.where(
+        edge_case_df[f"{split_col}_common_portion"] = np.where(
             ~edge_case_df['plant_bal_any'],
             (edge_case_df[f'{split_col}{common_suffix}'] /
              edge_case_df['plant_bal_count']),
@@ -464,7 +471,7 @@ class Transformer:
         calc_check = (
             df_w_tots
             .groupby(by=IDX_COLS_DEPRISH, dropna=False)
-            [[f"{split_col}_ratio", f"{split_col}_c_portion"]]
+            [[f"{split_col}_ratio", f"{split_col}_common_portion"]]
             .sum()
             .add_suffix("_check")
             .reset_index()
@@ -473,11 +480,12 @@ class Transformer:
             df_w_tots, calc_check, on=IDX_COLS_DEPRISH, how='left'
         )
 
-        df_w_tots[f"{split_col}_c_portion_check"] = np.where(
+        df_w_tots[f"{split_col}_common_portion_check"] = np.where(
             (df_w_tots.plant_balance.isnull() &
              df_w_tots.plant_balance_common.notnull()),
-            df_w_tots[f"{split_col}_c_portion"] * df_w_tots["plant_bal_count"],
-            df_w_tots[f"{split_col}_c_portion_check"]
+            df_w_tots[f"{split_col}_common_portion"] *
+            df_w_tots["plant_bal_count"],
+            df_w_tots[f"{split_col}_common_portion_check"]
         )
 
         # sum up all of the slices of the plant balance column.. these will be
@@ -487,7 +495,7 @@ class Transformer:
         plant_balance_w_common = df_w_tots[new_data_col].sum()
         plant_balance_c = (
             df_w_tots.drop_duplicates(
-                subset=[c for c in IDX_COLS_DEPRISH if c != 'plant_name'],
+                subset=[c for c in IDX_COLS_DEPRISH if c != 'plant_part_name'],
                 keep='first')
             [f"{split_col}{common_suffix}"].sum())
 
