@@ -4,6 +4,17 @@ Extract and transform steps for depreciation studies.
 Catalyst has compiled depreciation studies for a project with the Rocky
 Mountain Institue. These studies were compiled from Public Utility Commission
 proceedings as well as the FERC Form 1 table.
+
+how to run this module:
+file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
+sheet_name_deprish='Depreciation Studies Raw'
+transformer = deprish.Transformer(
+    deprish.Extractor(
+        file_path=file_path_deprish,
+        sheet_name=sheet_name_deprish
+    ).execute())
+deprish_df = transformer.execute(clobber=True)
+
 """
 
 import logging
@@ -201,7 +212,8 @@ class Transformer:
                     x.unaccrued_balance.fillna(
                         x.plant_balance_w_common - x.book_reserve
                         + x.net_removal),
-                reserve_rate=lambda x: x.book_reserve / x.plant_balance_w_common
+                reserve_rate=lambda x: x.book_reserve /
+                x.plant_balance_w_common
             )
 
         return self.filled_df
