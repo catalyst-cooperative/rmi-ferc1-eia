@@ -759,11 +759,12 @@ class CompilePlantParts(object):
                 self.plant_gen_df,
                 self.table_compiler.get_the_table('generators_eia860')[
                     idx_cols_gen + qual_records_missing],
-                on=idx_cols_gen
+                on=idx_cols_gen,
+                how='left'
             )
         if og_len != len(self.plant_gen_df):
             warnings.warn(
-                'ahh merge error! when adding denorm colunms to'
+                'ahh merge error! when adding denorm colunms to '
                 'plant_gen_df we must get the same number of records'
                 f'og # of records: {og_len} vs  end state #: '
                 f'{len(self.plant_gen_df)}'
@@ -1053,8 +1054,8 @@ class CompilePlantParts(object):
             # create the count
             df_count = (df.groupby(by=part_cols).nunique()
                         .rename(columns=self.ids_to_parts)
-                        .add_suffix(f'_count_{part_name}')
-
+                        .add_suffix(f'_count_per_{part_name}')
+                        # .add_prefix(f'{part_name}_count_per_')
                         )
             # merge back into the og df
             df_w_count = df.merge(
@@ -1081,24 +1082,23 @@ class CompilePlantParts(object):
             #        {'unit_id_pudl': {-999999: pd.NA}})
         return all_the_counts
 
-    def make_all_the_bools(self):
+    def make_all_the_bools(self, all_the_counts):
         """Count consistency of records and convert that to bools."""
-        all_the_counts = self.make_all_the_counts()
         # remove the data columns... just for ease (maybe remove this later)
         counts = all_the_counts.drop(
             columns=['fuel_cost_per_mmbtu', 'heat_rate_mmbtu_mwh',
                      'fuel_cost_per_mwh', 'total_fuel_cost',
                      'total_mmbtu', 'net_generation_mwh', 'capacity_mw', ])
         counts.loc[counts.unit_id_pudl.isnull(),
-                   counts.filter(like='plant_unit_count_').columns] = pd.NA
-        counts.loc[:, counts.filter(like='_count_').columns] = (
-            counts.loc[:, counts.filter(like='_count_').columns]
+                   counts.filter(like='plant_unit_count_per_').columns] = pd.NA
+        counts.loc[:, counts.filter(like='_count_per_').columns] = (
+            counts.loc[:, counts.filter(like='_count_per_').columns]
             .astype(pd.Int64Dtype())
         )
 
         # convert the count columns to bool columns
-        for col in counts.filter(like='_count_').columns:
-            bool_col = col.replace("_count_", "_onlyhasone_")
+        for col in counts.filter(like='_count_per_').columns:
+            bool_col = col.replace("_count_per_", "_onlyhasone_")
             counts.loc[counts[col].notnull(), bool_col] = counts[col] > 1
         # force the nullable bool type for all our count cols
         counts.loc[:, counts.filter(like='_onlyhasone_').columns] = (
@@ -1279,8 +1279,15 @@ class CompilePlantParts(object):
 
         This method will generate a dataframe based on ``self.plant_gen_df``
         that has boolean columns for
+
+        There are three main steps in this process:
+          * Generate counts for each  Count the number of records from peer
+            parts. ``make_all_the_counts()``
+          * Convert those counts to boolean values.
+          * Using the boolean values label each
         """
-        self.part_bools = self.make_all_the_bools()
+        all_the_counts = self.make_all_the_counts()
+        self.part_bools = self.make_all_the_bools(all_the_counts)
         for part_name1 in self.plant_parts.keys():
             self.part_bools = self.label_true_id_by_part(part_name1,
                                                          self.part_bools)
