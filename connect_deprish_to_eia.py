@@ -22,6 +22,7 @@ from openpyxl import load_workbook
 from xlrd import XLRDError
 
 import make_plant_parts_eia
+import deprish
 import pudl
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,6 @@ STRINGS_TO_CLEAN = {
     "combined cycle": ["CC"],
     "combustion turbine": ["CT"],
 }
-
-INT_IDS = ['utility_id_ferc1', 'utility_id_pudl',
-           'plant_id_pudl', 'report_year']
 
 RESTRICT_MATCH_COLS = ['plant_id_pudl', 'utility_id_pudl', 'report_year']
 
@@ -67,31 +65,25 @@ DEPRISH_COLS = [
 ###############################################################################
 
 
-def prep_int_ids(int_ids):
-    """Prep dictionary of column names (key) with nullable int dype (value)."""
-    # prep dtype arg for integer columns for read_excel
-    return {i: pd.Int64Dtype() for i in int_ids}
-
-
 def prep_deprish(file_path_deprish, plant_parts_df,
                  sheet_name_deprish,  key_deprish):
     """
     Prep the depreciation dataframe for use in match_merge.
 
-    Grab the table from excel, grab only the records which can be associated
-    with EIA master unit list records by plant_id_pudl, and do some light
-    cleaning.
+    Grab only the records which can be associated with EIA master unit list
+    records by plant_id_pudl, and do some light cleaning.
     """
-    logger.info(f"Reading the depreciation data from {file_path_deprish}")
-    # read in the depreciation sheet, assign types when required
-    deprish_df = (pd.read_excel(
-        file_path_deprish, skiprows=0, sheet_name=sheet_name_deprish,
-        dtypes=prep_int_ids(INT_IDS))
-        .astype({'report_date': 'datetime64[ns]',
-                 'plant_id_pudl': pd.Int64Dtype()})
-        .assign(report_year=lambda x: x.report_date.dt.year)
+    deprish_df = (
+        deprish.Transformer(
+            deprish.Extractor(file_path=file_path_deprish,
+                              sheet_name=sheet_name_deprish).execute())
+        .execute()
         .dropna(subset=RESTRICT_MATCH_COLS)
     )
+
+    deprish_df.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
+        deprish_df.loc[:, key_deprish], str_map=STRINGS_TO_CLEAN)
+
     # because we are comparing to the EIA-based master unit list, we want to
     # only include records which are associated with plant_id_pudl's that are
     # in the master unit list.
@@ -107,8 +99,6 @@ def prep_deprish(file_path_deprish, plant_parts_df,
         # names.... so they've got to go
         .dropna(subset=['plant_name'])
     )
-    deprish_ids[key_deprish] = pudl.helpers.cleanstrings_series(
-        deprish_ids[key_deprish], str_map=STRINGS_TO_CLEAN)
     return deprish_ids
 
 
