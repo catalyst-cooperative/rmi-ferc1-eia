@@ -1069,10 +1069,10 @@ class CompilePlantParts(object):
 
         Returns:
             pandas.DataFrame: an agumented version of the ``plant_gen_df``
-                dataframe with new columns for each of the child and parent
-                plant-parts with counts of unique instances of those parts. The
-                columns will be named in the following format:
-                {child/parent_part_name}_count_per_{part_name}
+            dataframe with new columns for each of the child and parent
+            plant-parts with counts of unique instances of those parts. The
+            columns will be named in the following format:
+            {child/parent_part_name}_count_per_{part_name}
 
         """
         part_cols = self.plant_parts[part_name]['id_cols'] + ['report_date']
@@ -1102,10 +1102,10 @@ class CompilePlantParts(object):
 
         Returns:
             pandas.DataFrame: an agumented version of the ``plant_gen_df``
-                dataframe with new columns for each of the child and parent
-                plant-parts with counts of unique instances of those parts. The
-                columns will be named in the following format:
-                {child/parent_part_name}_count_per_{part_name}
+            dataframe with new columns for each of the child and parent
+            plant-parts with counts of unique instances of those parts. The
+            columns will be named in the following format:
+            {child/parent_part_name}_count_per_{part_name}
         """
         # grab the plant-part id columns from the generator table
         count_ids = (
@@ -1145,9 +1145,9 @@ class CompilePlantParts(object):
 
         Returns:
             pandas.DataFrame: a table with generator records where we have new
-                boolean columns which indicated whether or not the plant-part
-                has more than one child/parent-part. These columns are formated
-                as: {child/parent_part_name}_has_only_one_{part_name}
+            boolean columns which indicated whether or not the plant-part
+            has more than one child/parent-part. These columns are formated
+            as: {child/parent_part_name}_has_only_one_{part_name}
 
         """
         counts.loc[:, counts.filter(like='_count_per_').columns] = (
@@ -1169,19 +1169,36 @@ class CompilePlantParts(object):
         """
         Label the true/false granularies for each part/parent-part combo.
 
+        This method uses the indicator columns which let us know whether or not
+        there are more than one unique value for both the parent and child
+        plant-part ids to generate an additional indicator column that let's us
+        know whether the child plant-part is a true or false granularity when
+        compared to the parent plant-part. With all of the indicator columns
+        from each plant-part's parent plant-parts, if all of those determined
+        that the plant-part is a true granularity, then this method will label
+        the plant-part as being a true granulary and vice versa.
+
+        Because we have forced a hierarchy within the ``plant_parts_ordered``,
+        the process for labeling true or false granularities must investigate
+        bi-directionally. This is because all of the plant-parts besides
+        'plant' and 'plant_gen' are not necessarily bigger of smaller than
+        their parent plant-part and thus there is overlap. Because of this,
+        this method uses the checks in both directions (from partent to child
+        and from child to parent).
+
         Args:
             part_bools (pandas.DataFrame): result of ``make_all_the_bools()``
         """
         # assign a bool for the true gran only if all
         for part_name, parent_parts in self.parts_to_parent_parts.items():
             for parent_part_name in parent_parts:
-                # let's save the input boolean columns so we
-                cols_bool = [f'{part_name}_has_only_one_{parent_part_name}',
+                # let's save the input boolean columns
+                bool_cols = [f'{part_name}_has_only_one_{parent_part_name}',
                              f'{parent_part_name}_has_only_one_{part_name}']
                 false_gran_col = f'false_gran_{part_name}_v_{parent_part_name}'
                 # the long awaited ALL.. label them as
                 part_bools[false_gran_col] = (
-                    part_bools[cols_bool].all(axis='columns'))
+                    part_bools[bool_cols].all(axis='columns'))
                 part_bools = part_bools.astype(
                     {false_gran_col: pd.BooleanDtype()})
                 # create the inverse column as true_grans
