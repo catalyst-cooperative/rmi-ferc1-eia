@@ -125,7 +125,7 @@ class InputsCompiler():
                     + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']
                 ))],
                 how='left', on=['record_id_eia'])
-            .astype(connect_deprish_to_eia.prep_int_ids(id_cols))
+            .astype({i: pd.Int64Dtype() for i in id_cols})
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
             # we want the backbone of this table to be the steam records
             # so we have all possible steam records, even the unmapped ones
@@ -149,8 +149,9 @@ class InputsCompiler():
             self.connects_deprish_eia_raw[
                 self.connects_deprish_eia_raw.record_id_eia.notnull()]
             .pipe(pudl.helpers.convert_to_date)
-            .astype(connect_deprish_to_eia.prep_int_ids(
-                ['plant_id_pudl', 'utility_id_pudl', 'utility_id_ferc1']))
+            .astype({i: pd.Int64Dtype() for i in
+                     ['plant_id_pudl', 'utility_id_pudl', 'utility_id_ferc1']}
+                    )
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
         # we are going to merge the master unit list into this output,
@@ -286,7 +287,7 @@ class MatchMaker():
         # reorder cols so they are easier to see, maybe remove later
         first_cols = ['plant_part_deprish', 'plant_part_ferc1',
                       'record_id_eia_deprish', 'record_id_eia_ferc1',
-                      'plant_name', 'plant_name_match',
+                      'plant_part_name', 'plant_name_match',
                       'fraction_owned_deprish', 'fraction_owned_ferc1',
                       'record_count_deprish', 'record_count_ferc1'
                       ]
@@ -586,7 +587,9 @@ class Scaler(object):
         same_true = self.assign_ferc1_data_cols_same()
         same_smol = self.split_ferc1_data_cols()
         same_beeg = self.agg_ferc_data_cols()
-        # TODO: Add the remaining scaling methods
+        logger.info(f"Scaled via same/true: {len(same_true)}")
+        logger.info(f"Scaled via same/smol: {len(same_smol)}")
+        logger.info(f"Scaled via same/beeg: {len(same_beeg)}")
         scaled_df = pd.concat([same_true, same_smol, same_beeg])
 
         self.test_same_true_fraction_owned(same_true)

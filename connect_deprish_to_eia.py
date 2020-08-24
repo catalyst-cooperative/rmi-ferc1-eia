@@ -58,7 +58,7 @@ granualries."""
 
 DEPRISH_COLS = [
     'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1', 'state',
-    'plant_id_pudl', 'plant_name', 'report_year']
+    'plant_id_pudl', 'plant_part_name', 'report_year']
 
 ###############################################################################
 # Prep the inputs
@@ -94,10 +94,11 @@ def prep_deprish(file_path_deprish, plant_parts_df,
     )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == 'both']
-        .drop_duplicates(subset=['plant_name', 'report_date'])
+        .drop_duplicates(subset=['plant_part_name', 'report_date'])
         # there are some records in the depreciation df that have no
         # names.... so they've got to go
-        .dropna(subset=['plant_name'])
+        .dropna(subset=['plant_part_name'])
+        .pipe(pudl.helpers.convert_cols_dtypes, 'depreciation')
     )
     return deprish_ids
 
@@ -130,7 +131,7 @@ def get_plant_year_util_list(plant_name, deprish_df, mul_df, key_mul):
     """
     logger.debug(plant_name)
     options_index = (
-        deprish_df.loc[deprish_df.plant_name ==
+        deprish_df.loc[deprish_df.plant_part_name ==
                        plant_name, RESTRICT_MATCH_COLS]
         .drop_duplicates().set_index(RESTRICT_MATCH_COLS).index)
 
@@ -244,7 +245,7 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
 def match_deprish_eia(file_path_mul, file_path_deprish,
                       sheet_name_deprish, sheet_name_output):
     """Prepare the depreciation and master unit list and match on name cols."""
-    key_deprish = 'plant_name'
+    key_deprish = 'plant_part_name'
     key_mul = 'plant_name_new'
     logger.info('Grab or generate master unit list.')
     plant_parts_df = (
@@ -272,7 +273,7 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
     )
 
     first_cols = [
-        'plant_name', 'plant_name_match', 'record_id_eia',
+        'plant_part_name', 'plant_name_match', 'record_id_eia',
         'record_id_eia_name_match', 'record_id_eia_fuzzy',
         'record_id_eia_override', 'record_id_eia_override2',
         'record_id_eia_override3', 'record_id_eia_override4',
