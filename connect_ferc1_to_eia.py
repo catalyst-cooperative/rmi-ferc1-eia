@@ -86,6 +86,9 @@ class Inputs:
             self.plant_parts_df = (
                 make_plant_parts_eia.get_master_unit_list_eia(
                     self.file_path_mul)
+                .assign(plant_id_report_year_util_id=lambda x:
+                        x.plant_id_report_year + "_" +
+                        x.utility_id_pudl.map(str))
             )
         return self.plant_parts_df
 
@@ -204,7 +207,10 @@ class Inputs:
                     heat_rate_mmbtu_mwh=lambda x: (
                         x.total_mmbtu / x.net_generation_mwh),
                     plant_id_report_year=lambda x: x.plant_id_pudl.map(
-                        str) + "_" + x.report_year.map(str)
+                        str) + "_" + x.report_year.map(str),
+                    plant_id_report_year_util_id=lambda x:
+                        x.plant_id_report_year + "_" + \
+                    x.utility_id_pudl.map(str)
                 ))
             if 0.9 > (len(self.steam_df) /
                       len(self.steam_df.drop_duplicates(
@@ -354,8 +360,8 @@ class Features:
                   label='fuel_type_code_pudl'),
             Exact('installation_year', 'installation_year',
                   label='installation_year'),
-            Exact('utility_id_pudl', 'utility_id_pudl',
-                  label='utility_id_pudl'),
+            # Exact('utility_id_pudl', 'utility_id_pudl',
+            #      label='utility_id_pudl'),
         ])
 
         # generate the index of all candidate features
@@ -373,7 +379,7 @@ class Features:
             self.features_df = self.make_features(
                 ferc1_df=self.input_dict[self.feature_type]['ferc1_df'](),
                 eia_df=self.input_dict[self.feature_type]['eia_df'](),
-                block_col='plant_id_report_year')
+                block_col='plant_id_report_year_util_id')
             logger.info(
                 f"Generated {len(self.features_df)} {self.feature_type} "
                 "candidate features.")
@@ -691,8 +697,8 @@ class Matches:
                                               'count'),
                    how='left',)
             # calculate the iqr for each record_id_ferc1 group
-            .merge((gb.agg({'score': scipy.stats.iqr})
-                    .droplevel(0, axis=1)
+            .merge((gb.agg(scipy.stats.iqr)
+                    # .droplevel(0, axis=1)
                     .rename(columns={'score': 'iqr'})),
                    left_on=['record_id_ferc1'],
                    right_index=True))
@@ -751,7 +757,7 @@ class Matches:
                          | ((df['rank'] == 1) & (df['diffs'].isnull()))])
         # we want to know how many of the
         self.murk_df = self.calc_murk(df, iqr_perc_diff)
-        ties = df[df['rank'] == 1.5]
+        self.ties_df = df[df['rank'] == 1.5]
 
         logger.info(
             f"""Winning match stats:
@@ -759,7 +765,7 @@ class Matches:
         best match v ferc:    {len(best_match)/self.ferc1_options_len:.02%}
         best match vs matches:{len(best_match)/len(unique_f):.02%}
         murk vs matches:      {len(self.murk_df)/len(unique_f):.02%}
-        ties vs matches:      {len(ties)/2/len(unique_f):.02%}"""
+        ties vs matches:      {len(self.ties_df)/2/len(unique_f):.02%}"""
         )
         return best_match
 
@@ -911,7 +917,7 @@ class Matches:
             suffixes=("", "_all"))
         logger.info("Get the top scoring match for each FERC1 steam record.")
         matches_best_df = (
-            self.calc_best_matches(self.matches_model, .1)
+            self.calc_best_matches(self.matches_model, .05)
             .pipe(self.override_best_match_with_training_df, self.train_df)
         )
         return matches_best_df
