@@ -1034,9 +1034,8 @@ class CompilePlantParts(object):
 
         record_df = self.plant_gen_df.copy()
 
-        base_cols = id_cols
-        if 'report_date' in record_df.columns:
-            base_cols = base_cols + ['report_date']
+        # the base columns will be the id columns, plus the other two main ids
+        base_cols = id_cols + ['ownership', 'report_date']
 
         if record_name != 'operational_status':
             logger.debug(f'getting consistent {record_name}s')
@@ -1375,9 +1374,8 @@ class CompilePlantParts(object):
         logger.info('Generating the master generator table with ownership.')
         self.plant_gen_df = (
             self.aggregate_plant_part(self.plant_parts['plant_gen'])
-            .astype({'utility_id_eia': 'Int64'}).
-            pipe(self.slice_by_ownership)
-            .astype({'utility_id_eia': 'Int64'})
+            .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+            .pipe(self.slice_by_ownership)
         )
         self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
