@@ -1059,6 +1059,47 @@ class CompilePlantParts(object):
             f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
 
+    def label_true_granularities(self, drop_extra_cols=True):
+        """
+        Prep the part_bools df that denotes true_gran for all generators.
+
+        This method will generate a dataframe based on ``self.plant_gen_df``
+        that has boolean columns that denotes whether each plant-part is a true
+        or false granularity.
+
+        There are four main steps in this process:
+          * For every combinations of plant-parts, count the number of unique
+            types of peer plant-parts (see ``make_all_the_counts()`` for more
+            details).
+          * Convert those counts to boolean values if there is more or less
+            than one unique type parent or child plant-part (see
+            ``make_all_the_bools()`` for more details).
+          * Using the boolean values label each plant-part as a True or False
+            granularies if both the boolean for the parent-to-child and
+            child-to-parent (see ``label_true_grans_by_part()`` for more
+            details).
+          * For each plant-part, label it with its the appropriate plant-part
+            counterpart - if it is a True granularity, the appropriate label is
+            itself (see ``label_true_id_by_part()`` for more details).
+
+        Args:
+            drop_extra_cols (boolean): if True, the extra columns used to
+                generate the true_gran columns. Default is True.
+
+        """
+        part_bools = (
+            self.make_all_the_counts()
+            .pipe(self.make_all_the_bools)
+            .pipe(self.label_true_grans_by_part)
+            .pipe(self.label_true_id_by_part)
+        )
+
+        if drop_extra_cols:
+            for drop_cols in ['_v_', '_has_only_one_', 'count_per']:
+                part_bools = part_bools.drop(
+                    columns=part_bools.filter(like=drop_cols))
+        return part_bools
+
     def count_child_and_parent_parts(self, part_name, count_ids):
         """
         Count the child- and parent-parts contained within a plant-part.
@@ -1397,34 +1438,6 @@ class CompilePlantParts(object):
         self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
 
-    def prep_part_bools(self, drop_extra_cols=True):
-        """
-        Prep the part_bools df that denotes true_gran for all generators.
-
-        This method will generate a dataframe based on ``self.plant_gen_df``
-        that has boolean columns for
-
-        There are three main steps in this process:
-          * Generate counts for each  Count the number of records from peer
-            parts. ``make_all_the_counts()``
-          * Convert those counts to boolean values.
-          * Using the boolean values label each plant_part as a True or False
-            granularies
-
-        """
-        part_bools = (
-            self.make_all_the_counts()
-            .pipe(self.make_all_the_bools)
-            .pipe(self.label_true_grans_by_part)
-            .pipe(self.label_true_id_by_part)
-        )
-
-        if drop_extra_cols:
-            for drop_cols in ['_v_', '_has_only_one_', 'count_per']:
-                part_bools = part_bools.drop(
-                    columns=part_bools.filter(like=drop_cols))
-        return part_bools
-
     def generate_master_unit_list(self, qual_records=True):
         """
         Aggreate and slice data points by each plant part.
@@ -1447,7 +1460,7 @@ class CompilePlantParts(object):
         if self.plant_gen_df is None:
             self.plant_gen_df = self.prep_plant_gen_df(qual_records)
         if self.part_bools is None:
-            self.part_bools = self.prep_part_bools()
+            self.part_bools = self.label_true_granularities()
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
