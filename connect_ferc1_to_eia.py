@@ -48,7 +48,7 @@ import make_plant_parts_eia
 logger = logging.getLogger(__name__)
 
 
-class Inputs:
+class InputManager:
     """Class prepare inputs for linking FERC1 and EIA."""
 
     def __init__(self, file_path_training, file_path_mul, pudl_out):
@@ -66,17 +66,13 @@ class Inputs:
         self.file_path_training = file_path_training
         self.pudl_out = pudl_out
 
+        # generate empty versions of the inputs.. this let's this class check
+        # whether or not the compiled inputs exist before compilnig
         self.plant_parts_df = None
         self.plant_parts_true_df = None
         self.steam_df = None
-
-        # we want both the df version and just the index; skl uses just the
-        # index and we use the df in merges and such
-        self.train_df = None  # self.prep_train_connections()
-        self.train_index = None  # self.prep_train_connections().index
-
-        # generate the list of the records in the EIA and FERC records that
-        # exist in the training data
+        self.train_df = None
+        self.train_index = None
         self.plant_parts_train_df = None
         self.steam_train_df = None
 
@@ -114,14 +110,6 @@ class Inputs:
         indicate that a ferc1 steam record is reported at the same granularity
         as the connected master unit list record. These records to train a
         machine learning model.
-
-        This method relies on:
-        * training_file_path (path-like): path to the CSV of training data. The
-          training data needs to have at least two columns: record_id_eia and
-          record_id_ferc1.
-        * plant_parts_df (pandas.DataFrame): master unit list. generated from
-          `CompilePlantParts.generate_master_unit_list()` or
-          `get_master_unit_list_eia()`.
 
         Returns:
             pandas.DataFrame: training connections. A dataframe with has a
@@ -165,9 +153,6 @@ class Inputs:
         and `fuel_by_plant_ferc1`) and ensures that the columns the same as
         their EIA counterparts, because the output of this method will be used
         to link FERC and EIA.
-
-        This method relies on:
-        * pudl_out: an instance of `pudl.output.pudltabl.PudlTabl()`
 
         Returns:
             pandas.DataFrame: a cleaned table of FERC1 steam plant records with
@@ -229,10 +214,6 @@ class Inputs:
         This method grabs only the records from the the datasets (EIA or FERC)
         that we have in our training data.
 
-        This method relies on:
-        * train_df (pandas.DataFrame): training data/known matches between ferc
-          and the master unit list. Result of `prep_train_connections()`.
-
         Args:
             dataset_df (pandas.DataFrame): either FERC1 steam table (result of
                 `get_all_ferc1()`) or EIA master unit list (result of
@@ -272,6 +253,23 @@ class Inputs:
                 self.get_all_ferc1(),
                 dataset_id_col='record_id_ferc1')
         return self.steam_train_df
+
+    def execute(self, clobber=False):
+        """Compile all the inputs."""
+        # grab the main two data tables we are trying to connect
+        self.plant_parts_true_df = self.get_plant_parts_true(clobber=clobber)
+        self.steam_df = self.get_all_ferc1(clobber=clobber)
+
+        # we want both the df version and just the index; skl uses just the
+        # index and we use the df in merges and such
+        self.train_df = self.get_train_records(clobber=clobber)
+        self.train_index = self.get_train_index()
+
+        # generate the list of the records in the EIA and FERC records that
+        # exist in the training data
+        self.plant_parts_train_df = self.get_train_eia(clobber=clobber)
+        self.steam_train_df = self.get_train_ferc1(clobber=clobber)
+        return
 
 
 class Features:
@@ -620,7 +618,7 @@ class Matches:
             best (pandas.DataFrame): one row table with details about the
                 hyperparameters of best model option. Result of
                 ``ModelTuner.get_best_fit_model()``.
-            inputs (instance of ``Inputs``): instance of ``Inputs``.
+            inputs (instance of ``InputManager``): instance of ``InputManager``
         """
         self.best = best
         self.train_df = inputs.prep_train_connections()
@@ -930,7 +928,7 @@ def main(file_path_training, file_path_mul, pudl_out):
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
-    inputs = Inputs(file_path_training, file_path_mul, pudl_out)
+    inputs = InputManager(file_path_training, file_path_mul, pudl_out)
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
     features_train = (Features(feature_type='training', inputs=inputs)
