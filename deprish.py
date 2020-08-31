@@ -211,7 +211,7 @@ class Transformer:
                 unaccrued_balance=lambda x:
                     x.unaccrued_balance.fillna(
                         x.plant_balance_w_common - x.book_reserve
-                        + x.net_removal),
+                        - x.net_removal),
                 reserve_rate=lambda x: x.book_reserve /
                 x.plant_balance_w_common
             )
