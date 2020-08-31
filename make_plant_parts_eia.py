@@ -1033,7 +1033,7 @@ class CompilePlantParts(object):
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = self.prep_plant_gen_df()
+        record_df = self.prep_plant_gen_df().copy()
 
         # the base columns will be the id columns, plus the other two main ids
         id_cols = self.plant_parts[part_name]['id_cols']
@@ -1052,7 +1052,7 @@ class CompilePlantParts(object):
             record_df = record_df[base_cols + [record_name]]
             consistent_records = self.dedup_on_category(
                 record_df, base_cols, record_name, sorter
-            )[base_cols + [record_name]]
+            )
         non_nulls = consistent_records[consistent_records[record_name].notnull(
         )]
         logger.debug(
@@ -1088,7 +1088,7 @@ class CompilePlantParts(object):
             clobber (boolean)
 
         """
-        if not self.part_true_gran_labels or clobber:
+        if self.part_true_gran_labels is None or clobber:
             self.part_true_gran_labels = (
                 self.make_all_the_counts()
                 .pipe(self.make_all_the_bools)
@@ -1434,9 +1434,9 @@ class CompilePlantParts(object):
         """Merge the plant_gen_df with the ferc_acct map."""
         return pd.merge(plant_gen_df, get_eia_ferc_acct_map(), how='left')
 
-    def prep_plant_gen_df(self, qual_records, clobber=False):
+    def prep_plant_gen_df(self, qual_records=True, clobber=False):
         """Prepare plant gen dataframe."""
-        if not self.plant_gen_df or clobber:
+        if self.plant_gen_df is None or clobber:
             logger.info(
                 'Generating the master generator table with ownership.')
             self.plant_gen_df = (
