@@ -344,6 +344,11 @@ DTYPES_MUL = {
     "plant_name_new": "string"
 }
 
+FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
+              'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+              'technology_description', 'ferc_acct_name',
+              'utility_id_eia', 'true_gran', 'appro_part_label']
+
 
 class CompileTables(object):
     """Compile tables from sqlite db or pudl output object."""
@@ -515,7 +520,7 @@ class CompilePlantParts(object):
         self.freq = table_compiler.freq
         self.plant_parts = PLANT_PARTS
         self.plant_gen_df = None
-        self.part_bools = None
+        self.part_true_gran_labels = None
         self.plant_parts_df = None
         self.clobber = clobber
         self.plant_parts_ordered = ['plant', 'plant_unit',
@@ -815,9 +820,10 @@ class CompilePlantParts(object):
         wtavg_cols = plant_part['wtavg_cols']
         # split up the 'owned' slices from the 'total' slices.
         # this is because the aggregations are different
-        part_own = self.plant_gen_df[self.plant_gen_df.ownership == 'owned']
-        part_tot = self.plant_gen_df[self.plant_gen_df.ownership == 'total']
-        if len(self.plant_gen_df) != len(part_own) + len(part_tot):
+        plant_gen_df = self.prep_plant_gen_df()
+        part_own = plant_gen_df[plant_gen_df.ownership == 'owned']
+        part_tot = plant_gen_df[plant_gen_df.ownership == 'total']
+        if len(plant_gen_df) != len(part_own) + len(part_tot):
             raise AssertionError(
                 "Error occured in breaking apart ownership types."
                 "The total and owned slices should equal the total records."
@@ -835,16 +841,16 @@ class CompilePlantParts(object):
             wtavg_cols=wtavg_cols,
             df_in=part_own)
         # still need to re-calc the fraction owned for the part
-        part_tot = (self.table_compiler.agg_cols(
-            id_cols=id_cols,
-            ag_cols=ag_cols,
-            wtavg_cols=wtavg_cols,
-            df_in=part_tot).
-            merge(self.plant_gen_df[id_cols +
-                                    ['report_date', 'utility_id_eia']].
-                  dropna().
-                  drop_duplicates()).
-            assign(ownership='total')
+        part_tot = (
+            self.table_compiler.agg_cols(
+                id_cols=id_cols,
+                ag_cols=ag_cols,
+                wtavg_cols=wtavg_cols,
+                df_in=part_tot)
+            .merge(plant_gen_df[id_cols + ['report_date', 'utility_id_eia']]
+                   .dropna()
+                   .drop_duplicates())
+            .assign(ownership='total')
         )
         return part_own.append(part_tot, sort=False)
 
@@ -907,7 +913,7 @@ class CompilePlantParts(object):
         elif install_table == 'ferc_acct_rmi':
             part_install = (install[['plant_id_eia', 'generator_id',
                                      'installation_year']].
-                            merge(self.plant_gen_df)
+                            merge(self.prep_plant_gen_df())
                             [id_cols + ['installation_year']].
                             drop_duplicates(subset=id_cols, keep='first'))
         else:
@@ -981,10 +987,8 @@ class CompilePlantParts(object):
 
     def get_qualifiers(self,
                        part_df,
+                       part_name,
                        record_name,
-                       id_cols,
-                       denorm_table,
-                       denorm_cols
                        ):
         """
         Get qualifier records.
@@ -1022,19 +1026,17 @@ class CompilePlantParts(object):
         Args:
             part_df (pandas.DataFrame): dataframe containing records associated
                 with one plant part.
-            record_name (string) : name of qualitative record column
-            id_cols (list) : list of identifying columns
-            denorm_table (string) : name of table needed to denormalize
-            denorm_cols (list): list of columns to denormalize on
+            part_name (string): name of plant-part.
 
         """
         if record_name in part_df.columns:
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = self.plant_gen_df.copy()
+        record_df = self.prep_plant_gen_df().copy()
 
         # the base columns will be the id columns, plus the other two main ids
+        id_cols = self.plant_parts[part_name]['id_cols']
         base_cols = id_cols + ['ownership', 'report_date']
 
         if record_name != 'operational_status':
@@ -1047,9 +1049,7 @@ class CompilePlantParts(object):
             # restric the number of columns in here to only include the ones we
             # need, unlike get_consistent_qualifiers, dedup_on_category
             # preserves all of the columns from record_df
-            record_df = record_df[
-                [c for c in record_df.columns
-                 if c in base_cols + list(part_df.columns) + [record_name]]]
+            record_df = record_df[base_cols + [record_name]]
             consistent_records = self.dedup_on_category(
                 record_df, base_cols, record_name, sorter
             )
@@ -1059,9 +1059,9 @@ class CompilePlantParts(object):
             f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
 
-    def label_true_granularities(self, drop_extra_cols=True):
+    def label_true_granularities(self, drop_extra_cols=True, clobber=False):
         """
-        Prep the part_bools df that denotes true_gran for all generators.
+        Prep the table that denotes true_gran for all generators.
 
         This method will generate a dataframe based on ``self.plant_gen_df``
         that has boolean columns that denotes whether each plant-part is a true
@@ -1085,20 +1085,26 @@ class CompilePlantParts(object):
         Args:
             drop_extra_cols (boolean): if True, the extra columns used to
                 generate the true_gran columns. Default is True.
+            clobber (boolean)
 
         """
-        part_bools = (
-            self.make_all_the_counts()
-            .pipe(self.make_all_the_bools)
-            .pipe(self.label_true_grans_by_part)
-            .pipe(self.label_true_id_by_part)
-        )
+        if self.part_true_gran_labels is None or clobber:
+            self.part_true_gran_labels = (
+                self.make_all_the_counts()
+                .pipe(self.make_all_the_bools)
+                .pipe(self.label_true_grans_by_part)
+                .pipe(self.label_true_id_by_part)
+            )
 
-        if drop_extra_cols:
-            for drop_cols in ['_v_', '_has_only_one_', 'count_per']:
-                part_bools = part_bools.drop(
-                    columns=part_bools.filter(like=drop_cols))
-        return part_bools
+            if drop_extra_cols:
+                for drop_cols in ['_v_', '_has_only_one_', 'count_per']:
+                    self.part_true_gran_labels = (
+                        self.part_true_gran_labels.drop(
+                            columns=self.part_true_gran_labels
+                            .filter(like=drop_cols)
+                        )
+                    )
+        return self.part_true_gran_labels
 
     def count_child_and_parent_parts(self, part_name, count_ids):
         """
@@ -1150,11 +1156,12 @@ class CompilePlantParts(object):
         """
         # grab the plant-part id columns from the generator table
         count_ids = (
-            self.plant_gen_df.loc[:, self.id_cols_list + ['report_date']]
+            self.prep_plant_gen_df(
+            ).loc[:, self.id_cols_list + ['report_date']]
             .drop_duplicates()
         )
         # we want to compile the count results on a copy of the generator table
-        all_the_counts = self.plant_gen_df.copy()
+        all_the_counts = self.prep_plant_gen_df().copy()
         for part_name in self.plant_parts_ordered:
             logger.info(f"making the counts for: {part_name}")
             all_the_counts = all_the_counts.merge(
@@ -1164,7 +1171,7 @@ class CompilePlantParts(object):
         # check the expected # of columns
         pp_l = len(self.id_cols_list)
         expected_col_len = (
-            len(self.plant_gen_df.columns) +  # the plant_gen_df colums
+            len(self.prep_plant_gen_df().columns) +  # the plant_gen_df colums
             pp_l * (pp_l - 1) + 1  # the count columns (we add one bc we get a
             # stragger plant_count_per_plant column bc we make that
             # plant_id_eia_temp column)
@@ -1342,7 +1349,7 @@ class CompilePlantParts(object):
             part_name (string)
 
         """
-        bool_df = deepcopy(self.part_bools)
+        bool_df = self.label_true_granularities()
         # get only the columns you need for this part and drop duplicates
         bool_df = (bool_df[self.plant_parts[part_name]['id_cols'] +
                            ['report_date', f'true_gran_{part_name}',
@@ -1427,18 +1434,47 @@ class CompilePlantParts(object):
         """Merge the plant_gen_df with the ferc_acct map."""
         return pd.merge(plant_gen_df, get_eia_ferc_acct_map(), how='left')
 
-    def prep_plant_gen_df(self, qual_records):
+    def prep_plant_gen_df(self, qual_records=True, clobber=False):
         """Prepare plant gen dataframe."""
-        logger.info('Generating the master generator table with ownership.')
-        self.plant_gen_df = (
-            self.aggregate_plant_part(self.plant_parts['plant_gen'])
-            .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
-            .pipe(self.slice_by_ownership)
-        )
-        self.plant_gen_df = self.denorm_plant_gen(qual_records)
+        if self.plant_gen_df is None or clobber:
+            logger.info(
+                'Generating the master generator table with ownership.')
+            self.plant_gen_df = (
+                self.aggregate_plant_part(self.plant_parts['plant_gen'])
+                .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+                .pipe(self.slice_by_ownership)
+            )
+            self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
 
-    def generate_master_unit_list(self, qual_records=True):
+    def get_part_df(self, part_name):
+        """
+        Get a table of data aggregated by a specific plant-part.
+
+        This method will use ``plant_gen_df`` (or generate if it doesn't
+        exist yet) to aggregate the generator records to the level of the
+        plant-part. This is mostly done via ``ag_part_by_own_slice()``. Then
+        several additional columns are added and the records are labeled as
+        true or false granularities.
+
+        Args:
+            part_name (string): name of plant-part
+        """
+        plant_part = self.plant_parts[part_name]
+        id_cols = plant_part['id_cols']
+
+        part_df = (
+            self.ag_part_by_own_slice(part_name)
+            .assign(plant_part=part_name)
+            .pipe(self.add_install_year, id_cols, plant_part['install_table'])
+            .pipe(self.assign_true_gran, part_name)
+            .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
+            .pipe(self.add_new_plant_name, part_name)
+            .pipe(self.add_record_count)
+        )
+        return part_df
+
+    def generate_master_unit_list(self, qual_records=True, clobber=False):
         """
         Aggreate and slice data points by each plant part.
 
@@ -1451,75 +1487,48 @@ class CompilePlantParts(object):
                 generated with all consistent qualifer records in
                 `QUAL_RECORD_TABLES`. See `get_qualifiers()` for more details.
                 Default is True.
+            clobber (boolean):
 
         Returns:
             pandas.DataFrame
         """
-        if self.plant_parts_df is not None and self.clobber is False:
+        if self.plant_parts_df is not None and not clobber:
             return self.plant_parts_df
-        if self.plant_gen_df is None:
-            self.plant_gen_df = self.prep_plant_gen_df(qual_records)
-        if self.part_bools is None:
-            self.part_bools = self.label_true_granularities()
+        # make the master generator table
+        self.plant_gen_df = self.prep_plant_gen_df(qual_records)
+        # generate the true granularity labels
+        self.part_true_gran_labels = self.label_true_granularities()
 
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
-        plant_parts_ordered = [
-            'plant_ferc_acct', 'plant_prime_fuel', 'plant_technology',
-            'plant_prime_mover', 'plant_gen', 'plant_unit', 'plant']
-        # could use reversed(self.plant_parts_ordered)?
-        for part_name in plant_parts_ordered:
-            plant_part = self.plant_parts[part_name]
-            id_cols = plant_part['id_cols']
-
-            thing = (
-                self.ag_part_by_own_slice(part_name)
-                .pipe(self.add_install_year, id_cols,
-                      plant_part['install_table'])
-                .assign(plant_part=part_name)
-                .pipe(self.assign_true_gran, part_name)
-                .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
-                .pipe(self.add_new_plant_name, part_name)
-                .pipe(self.add_record_count)
-            )
+        for part_name in self.plant_parts_ordered:
+            part_df = self.get_part_df(part_name)
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
                     logger.debug(
                         f'get consistent {qual_record} for {part_name}')
-                    thing = self.get_qualifiers(
-                        thing,
-                        qual_record,
-                        id_cols,
-                        plant_part['denorm_table'],
-                        plant_part['denorm_cols'])
-            plant_parts_df = plant_parts_df.append(thing, sort=True)
-        # clean up, add additional columns
-        plant_parts_df = (
+                    part_df = self.get_qualifiers(
+                        part_df, part_name, qual_record
+                    )
+            plant_parts_df = plant_parts_df.append(part_df, sort=True)
+        # clean up, add additional columns, and drop duplicates
+        self.plant_parts_df = (
             self.add_additonal_cols(plant_parts_df)
-            .pipe(pudl.helpers.organize_cols,
-                  ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
-                   'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
-                   'technology_description', 'ferc_acct_name',
-                   'utility_id_eia', 'true_gran', 'appro_part_label'])
+            .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
-        )
-
-        self.plant_parts_full_df = plant_parts_df
-
-        self.plant_parts_df = self.dedup_on_category(
-            plant_parts_df,
-            category_name='ownership',
-            base_cols=[x for x in plant_parts_df.columns if x not in [
-                'record_id_eia', 'ownership', 'appro_record_id_eia', ]],
-            sorter=['owned', 'total']
+            .pipe(self.dedup_on_category,
+                  category_name='ownership',
+                  base_cols=[x for x in plant_parts_df.columns if x not in [
+                      'record_id_eia', 'ownership', 'appro_record_id_eia']],
+                  sorter=['owned', 'total'])
         )
         return self.plant_parts_df
 
     def _test_prep_merge(self, part_name):
         """Run the test groupby and merge with the aggregations."""
         id_cols = self.plant_parts[part_name]['id_cols']
-        plant_cap = (self.plant_gen_df.groupby(
+        plant_cap = (self.prep_plant_gen_df().groupby(
             by=id_cols + ['report_date', 'utility_id_eia', 'ownership'])
             .agg(self.plant_parts[part_name]['ag_cols'])
             .reset_index()
