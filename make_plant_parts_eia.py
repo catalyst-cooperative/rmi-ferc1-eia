@@ -1645,6 +1645,36 @@ def get_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
     return eia_ferc_acct_map
 
 
+def reassign_id_ownership_dupes(plant_parts_df):
+    """
+    Reassign the record_id for the records that are labeled ownership_dupe.
+
+    Args:
+        plant_parts_df (pandas.DataFrame): master unit list. Result of
+            ``generate_master_unit_list()`` or ``get_master_unit_list_eia()``.
+            Must have boolean column ``ownership_dupe`` and string column or
+            index of ``record_id_eia``.
+
+    """
+    # the record_id_eia's need to be a column to mess with it and record_id_eia
+    # is typically the index of plant_parts_df, so we are going to reset index
+    # if record_id_eia is the index
+    og_index = False
+    if plant_parts_df.index.name == "record_id_eia":
+        plant_parts_df = plant_parts_df.reset_index()
+        og_index = True
+
+    plant_parts_df = plant_parts_df.assign(record_id_eia=lambda x: np.where(
+        x.ownership_dupe,
+        x.record_id_eia.str.replace("owned", "total"),
+        x.record_id_eia))
+    # then we reset the index so we return the dataframe in the same structure
+    # as we got it.
+    if og_index:
+        plant_parts_df = plant_parts_df.set_index("record_id_eia")
+    return plant_parts_df
+
+
 def get_master_unit_list_eia(file_path_mul, clobber=False):
     """
     Get the master unit list; generate it or get if from a file.
