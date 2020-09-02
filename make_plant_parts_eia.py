@@ -734,7 +734,7 @@ class CompilePlantParts(object):
                                                axis='index'))
         if (len(plant_gen_df[plant_gen_df.ownership == 'owned']) >
                 len(plant_gen_df[plant_gen_df.ownership == 'total'])):
-            raise AssertionError(
+            warnings.warn(
                 'There should be more records labeled as total.')
         return plant_gen_df
 
@@ -861,13 +861,18 @@ class CompilePlantParts(object):
         capacity_factor +
         utility_id_pudl +
         plant_id_pudl +
-
+        ownership_dupe (boolean): indicates whether the "owned" record has a
+        corresponding "total" duplicate.
         """
         plant_parts_df = (
-            calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq).
-            merge(self.table_compiler.get_the_table('utilities_eia'),
-                  how='left').
-            merge(self.table_compiler.get_the_table('plants_eia'), how='left')
+            calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq)
+            .merge(self.table_compiler.get_the_table('utilities_eia'),
+                   how='left')
+            .merge(self.table_compiler.get_the_table('plants_eia'), how='left')
+            .assign(ownership_dupe=lambda x: np.where(
+                (x.ownership == 'owned') & (x.fraction_owned == 1),
+                True, False)
+            )
         )
         return plant_parts_df
 
@@ -1053,8 +1058,8 @@ class CompilePlantParts(object):
             consistent_records = self.dedup_on_category(
                 record_df, base_cols, record_name, sorter
             )
-        non_nulls = consistent_records[consistent_records[record_name].notnull(
-        )]
+        non_nulls = consistent_records[
+            consistent_records[record_name].notnull()]
         logger.debug(
             f'merging in consistent {record_name}: {len(non_nulls)}')
         return part_df.merge(consistent_records, how='left')
@@ -1512,16 +1517,11 @@ class CompilePlantParts(object):
                         part_df, part_name, qual_record
                     )
             plant_parts_df = plant_parts_df.append(part_df, sort=True)
-        # clean up, add additional columns, and drop duplicates
+        # clean up, add additional columns
         self.plant_parts_df = (
             self.add_additonal_cols(plant_parts_df)
             .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
-            .pipe(self.dedup_on_category,
-                  category_name='ownership',
-                  base_cols=[x for x in plant_parts_df.columns if x not in [
-                      'record_id_eia', 'ownership', 'appro_record_id_eia']],
-                  sorter=['owned', 'total'])
         )
         return self.plant_parts_df
 
@@ -1663,7 +1663,7 @@ def get_master_unit_list_eia(file_path_mul, clobber=False):
         table_compiler = CompileTables(
             pudl_engine=sa.create_engine(
                 pudl.workspace.setup.get_defaults()["pudl_db"]),
-            freq='AS', rolling=True)
+            freq='AS', roll=True, fill=True)
         parts_compilers = CompilePlantParts(table_compiler)
         plant_parts_df = parts_compilers.generate_master_unit_list()
         plant_parts_df.to_csv(file_path_mul, compression='gzip')

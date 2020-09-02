@@ -109,13 +109,16 @@ class InputManager:
 
     def get_plant_parts_true(self, clobber=False):
         """Get the master unit list."""
-        # We want only the "true granularies" of the master unit list so the
-        # model doesn't get confused as to which option to pick if there are
-        # many records with duplicate data
+        # We want only the records of the master unit list that are "true
+        # granularies" and those which are not duplicates based on their
+        # ownership  so the model doesn't get confused as to which option to
+        # pick if there are many records with duplicate data
         if clobber or self.plant_parts_true_df is None:
             plant_parts_df = self.get_plant_parts_full()
             self.plant_parts_true_df = (
-                plant_parts_df[plant_parts_df['true_gran']]
+                plant_parts_df[(plant_parts_df['true_gran'])
+                               & (~plant_parts_df['ownership_dupe'])
+                               ]
             )
         return self.plant_parts_true_df
 
@@ -136,12 +139,15 @@ class InputManager:
         """
         if clobber or self.train_df is None:
             mul_cols = ['true_gran', 'appro_part_label',
-                        'appro_record_id_eia', 'plant_part']
+                        'appro_record_id_eia', 'plant_part', 'ownership_dupe']
             self.train_df = (
                 # we want to ensure that the records are associated with a
                 # "true granularity" - which is a way we filter out whether or
                 # not each record in the master unit list is actually a
                 # new/unique collection of plant parts
+                # once the true_gran is dealt with, we also need to convert the
+                # records which are ownership dupes to reflect their "total"
+                # ownership counterparts
                 pd.read_csv(self.file_path_training,)
                 .merge(
                     self.get_plant_parts_full().reset_index(
@@ -150,6 +156,10 @@ class InputManager:
                 )
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
+                .assign(record_id_eia=lambda x: np.where(
+                        x.ownership_dupe,
+                        x.record_id_eia.str.replace("owned", "total"),
+                        x.record_id_eia))
                 # light cleaning
                 .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
@@ -281,7 +291,7 @@ class InputManager:
 
         # we want both the df version and just the index; skl uses just the
         # index and we use the df in merges and such
-        self.train_df = self.get_train_records(clobber=clobber)
+        self.train_df = self.prep_train_connections(clobber=clobber)
         self.train_index = self.get_train_index()
 
         # generate the list of the records in the EIA and FERC records that
