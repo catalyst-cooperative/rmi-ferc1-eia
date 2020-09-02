@@ -150,16 +150,13 @@ class InputManager:
                 # ownership counterparts
                 pd.read_csv(self.file_path_training,)
                 .merge(
-                    self.get_plant_parts_full().reset_index(
-                    )[['record_id_eia'] + mul_cols],
+                    self.get_plant_parts_full().reset_index()
+                    [['record_id_eia'] + mul_cols],
                     how='left', on=['record_id_eia'],
                 )
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
-                .assign(record_id_eia=lambda x: np.where(
-                        x.ownership_dupe,
-                        x.record_id_eia.str.replace("owned", "total"),
-                        x.record_id_eia))
+                .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
                 # light cleaning
                 .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
@@ -322,7 +319,9 @@ class Features:
                 f"feature_type {feature_type} not allowable. Must be either "
                 "'all' or 'training'")
         self.feature_type = feature_type
-
+        # the input_dict is going to help in standardizing how we generate
+        # features. Based on the feature_type (keys), the latter methods will
+        # know which dataframes to use as inputs for ``make_features()``
         self.input_dict = {
             'all': {
                 'ferc1_df': self.inputs.get_all_ferc1,

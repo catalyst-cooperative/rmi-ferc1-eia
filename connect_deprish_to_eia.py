@@ -42,7 +42,7 @@ MUL_COLS = [
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned'
+    'record_count', 'fraction_owned', 'ownership_dupe'
 ]
 
 MUL_RENAME = {
@@ -264,6 +264,7 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
                     key_deprish=key_deprish, key_mul=key_mul)
         .pipe(add_overrides, file_path_deprish=file_path_deprish,
               sheet_name_output=sheet_name_output)
+        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
         .pipe(pudl.helpers.organize_cols,
               # we want to pull the used columns to the front, but there is
               # some overlap in columns from these two datasets. And we have
