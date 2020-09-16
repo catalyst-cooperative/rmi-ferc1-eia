@@ -87,7 +87,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_gen': {
@@ -107,7 +106,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
         'ag_tables': {
             'generation_eia923': {
@@ -159,7 +157,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_technology': {
@@ -179,7 +176,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_fuel': {
@@ -199,7 +195,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_mover': {
@@ -218,7 +213,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_ferc_acct': {
@@ -238,7 +232,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
 }
@@ -289,8 +282,6 @@ FREQ_AG_COLS = {
     'utilities_eia': None,
     'plants_eia': None,
     'energy_source_eia923': None,
-
-
 }
 
 
@@ -691,58 +682,6 @@ class CompilePlantParts(object):
         )
         return owner_count
 
-    def fake_zero_fraction_owners(self, plant_gen_df):
-        """
-        Fake generator records for all plant owners.
-
-        Ensure all owners of a plant are represented for every generator.
-        Any utility owner that owns part of any generator in a plant
-        will also have their ownership listed for all generators in
-        the plant (with many of them being zero ownership).
-
-        Args:
-            plant_gen_df (pandas.DataFrame)
-        """
-        # make a unique list of all owners by plant
-        all_owners = (
-            plant_gen_df
-            [['plant_id_eia', 'owner_utility_id_eia', 'report_date']]
-            .drop_duplicates()
-        )
-
-        # split the gens based on whether the generators have all owners
-        owner_count = self._get_owner_count_per_plant_and_gen(plant_gen_df)
-        own_missing = owner_count[owner_count.owner_utility_id_eia_count !=
-                                  owner_count.owner_utility_id_eia_count_gen]
-        own_complete = owner_count[owner_count.owner_utility_id_eia_count ==
-                                   owner_count.owner_utility_id_eia_count_gen]
-
-        # cast all owners on the generators which have missing owners,
-        # but leave out the fraction_owned because we need to make the
-        # missing owners fraction_owned 0.
-        fake_all_owners = (
-            pd.merge(
-                own_missing.drop(
-                    columns=['owner_utility_id_eia', 'fraction_owned']),
-                all_owners,
-                on=['plant_id_eia', 'report_date', ],
-                how='left',
-            )
-            .merge(  # now merge in the fraction_owned
-                own_missing,
-                how='outer'
-            )
-            .assign(fraction_owned=lambda x: x.fraction_owned.fillna(0))
-            .drop(columns=['owner_utility_id_eia_count',
-                           'owner_utility_id_eia_count_gen'])
-        )
-
-        logger.info(
-            f"{len(fake_all_owners[fake_all_owners.fraction_owned == 0])}"
-            " generator records faked w/ 0% fraction owned."
-        )
-        return pd.concat([own_complete, fake_all_owners])
-
     def make_fake_totals(self, plant_gen_df):
         """Generate total versions of generation-owner records."""
         # make new records for generators to replicate the total generator
@@ -789,7 +728,6 @@ class CompilePlantParts(object):
             ownership='owned'
         )
 
-        plant_gen_df = self.fake_zero_fraction_owners(plant_gen_df)
         fake_totals = self.make_fake_totals(plant_gen_df)
 
         plant_gen_df = plant_gen_df.append(fake_totals, sort=False)
@@ -864,6 +802,53 @@ class CompilePlantParts(object):
             )
         return plant_gen_df
 
+    def _ag_fraction_owned(self, part_ag, id_cols):
+        """
+        Calculate the fraction owned for a plant-part df.
+
+        This method takes a dataframe of records that are aggregated to the
+        level of a plant-part (with certain `id_cols`) and appends a
+        fraction_owned column, which indicates the % ownership that a
+        particular utility owner has for each aggreated plant-part record.
+
+        For partial owner records (ownership == "owned"), fraction_owned is
+        calcuated based on the portion of the capacity and the total capacity
+        of the plant. For total owner records (ownership == "total"), the
+        fraction_owned is always 1.
+
+        This method is meant to be run within `ag_part_by_own_slice()`.
+
+        Args:
+            part_ag (pandas.DataFrame):
+            id_cols (list): list of identifying columns
+                (stored as: `self.plant_parts[part_name]['id_cols']`)
+        """
+        # we must first get the total capacity of the full plant
+        # Note: we could simply not include the ownership == "total" records
+        # We are automatically assign fraction_owned == 1 to them, but it seems
+        # cleaner to run the full df through this same grouby
+        frac_owned = (
+            part_ag.groupby(by=id_cols + ['ownership', 'report_date'])
+            [['capacity_mw']].sum()
+        )
+        # then merge the total capacity with the plant-part capacity to use to
+        # calculate the fraction_owned
+        part_frac = (
+            pd.merge(part_ag,
+                     frac_owned,
+                     right_index=True,
+                     left_on=frac_owned.index.names,
+                     suffixes=("", "_total")
+                     )
+            .assign(fraction_owned=lambda x:
+                    np.where(x.ownership == 'owned',
+                             x.capacity_mw / x.capacity_mw_total,
+                             1
+                             ))
+            .drop(columns=['capacity_mw_total'])
+        )
+        return part_frac
+
     def ag_part_by_own_slice(self, part_name):
         """
         Aggregate the plant part by seperating ownership types.
@@ -925,8 +910,9 @@ class CompilePlantParts(object):
         )
         part_ag = (
             part_own.append(part_tot, sort=False)
-            .assign(fraction_owned=lambda x: x.fraction_owned.fillna(0))
+            .pipe(self._ag_fraction_owned, id_cols=id_cols)
         )
+
         return part_ag
 
     def add_additonal_cols(self, plant_parts_df):
@@ -1577,15 +1563,12 @@ class CompilePlantParts(object):
             return self.plant_parts_df
         # make the master generator table
         self.plant_gen_df = self.prep_plant_gen_df(qual_records)
-        self._find_it(self.plant_gen_df)
         # generate the true granularity labels
         self.part_true_gran_labels = self.label_true_granularities()
-        self._find_it(self.part_true_gran_labels)
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
         for part_name in self.plant_parts_ordered:
             part_df = self.get_part_df(part_name)
-            self._find_it(part_df)
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
@@ -1604,16 +1587,6 @@ class CompilePlantParts(object):
         self.test_ownership_for_owned_records(self.plant_parts_df)
         return self.plant_parts_df
 
-    def _find_it(self, df):
-        if 'fraction_owned' not in df.columns:
-            pass
-        if not df[df.fraction_owned.isnull()].empty:
-            self.dumb_df = df[df.fraction_owned.isnull()]
-
-            raise AssertionError(
-                "ahhhhhhhhh! Ooo0o0ooO check cached `dumb_df`"
-            )
-
     def test_ownership_for_owned_records(self, plant_parts_df):
         """Test ownership - fraction owned for owned records."""
         test_own_df = (
@@ -1625,6 +1598,7 @@ class CompilePlantParts(object):
 
         owned_one_frac = test_own_df[
             (~np.isclose(test_own_df.fraction_owned, 1))
+            & (test_own_df.capacity_mw != 0)
             & (test_own_df.ownership == 'owned')]
 
         if not owned_one_frac.empty:
@@ -1635,6 +1609,18 @@ class CompilePlantParts(object):
                 "fraction_owned col/slice_by_ownership(). There are "
                 f"{len(owned_one_frac)} rows where fraction_owned != 1 for "
                 "owned records. Check cached `owned_one_frac` & `test_own_df`"
+            )
+
+        no_frac_n_cap = test_own_df[
+            (test_own_df.capacity_mw == 0)
+            & (test_own_df.fraction_owned == 0)
+        ]
+        if len(no_frac_n_cap) > 60:
+            raise AssertionError(
+                f"""Too many nothings, you nothing. There shouldn't been much
+                more than 60 instances of records with zero capacity_mw (and
+                therefor zero fraction_owned) and you got {len(no_frac_n_cap)}.
+                """
             )
 
     def _test_prep_merge(self, part_name):
