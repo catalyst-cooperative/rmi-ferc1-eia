@@ -664,24 +664,6 @@ class CompilePlantParts(object):
         plant_part_df = plant_part_df.dropna(subset=['utility_id_eia'])
         return plant_part_df
 
-    def _get_owner_count_per_plant_and_gen(self, plant_gen_df):
-        """Generate a count of owners by plants and generators."""
-        idx_plant = ['plant_id_eia', 'report_date']
-        idx_gen = idx_plant + ['generator_id']
-        owner_count = (
-            pd.merge(
-                plant_gen_df.groupby(by=idx_gen)[
-                    ['owner_utility_id_eia']].nunique(),
-                plant_gen_df.groupby(by=idx_plant)[
-                    ['owner_utility_id_eia']].nunique(),
-                suffixes=('_count_gen', '_count'),
-                right_index=True, left_index=True
-            )
-            .reset_index()
-            .merge(plant_gen_df, on=idx_gen, how='outer')
-        )
-        return owner_count
-
     def make_fake_totals(self, plant_gen_df):
         """Generate total versions of generation-owner records."""
         # make new records for generators to replicate the total generator
@@ -748,7 +730,15 @@ class CompilePlantParts(object):
         return plant_gen_df
 
     def denorm_plant_gen(self, plant_gen_df, qual_records):
-        """Denromalize the plant_gen_df."""
+        """
+        Denromalize the plant_gen_df.
+
+        This method is meant to be run inside of `prep_plant_gen_df()`.
+
+        Args:
+            plant_gen_df (pandas.DataFrame): generator record table, which has
+                been augmented via 'slice_by_ownership()'
+        """
         og_len = len(plant_gen_df)
         # compile all of the denorm table info in one place
         denorm_tables = {}
@@ -1509,7 +1499,6 @@ class CompilePlantParts(object):
                 self.aggregate_plant_part(self.plant_parts['plant_gen'])
                 .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
                 .pipe(self.slice_by_ownership)
-                .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
                 .pipe(self.denorm_plant_gen, qual_records)
             )
         return self.plant_gen_df
@@ -1588,7 +1577,13 @@ class CompilePlantParts(object):
         return self.plant_parts_df
 
     def test_ownership_for_owned_records(self, plant_parts_df):
-        """Test ownership - fraction owned for owned records."""
+        """
+        Test ownership - fraction owned for owned records.
+
+        This test can be run at the end of or with the result of
+        `generate_master_unit_list()`. It tests a few aspects of the the
+        fraction_owned column and raises assertions if the tests fail.
+        """
         test_own_df = (
             plant_parts_df.groupby(by=self.id_cols_list +
                                    ['plant_part', 'report_date', 'ownership'],
