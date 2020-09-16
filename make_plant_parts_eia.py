@@ -673,6 +673,76 @@ class CompilePlantParts(object):
         plant_part_df = plant_part_df.dropna(subset=['utility_id_eia'])
         return plant_part_df
 
+    def _get_owner_count_per_plant_and_gen(self, plant_gen_df):
+        """Generate a count of owners by plants and generators."""
+        idx_plant = ['plant_id_eia', 'report_date']
+        idx_gen = idx_plant + ['generator_id']
+        owner_count = (
+            pd.merge(
+                plant_gen_df.groupby(by=idx_gen)[
+                    ['owner_utility_id_eia']].nunique(),
+                plant_gen_df.groupby(by=idx_plant)[
+                    ['owner_utility_id_eia']].nunique(),
+                suffixes=('_count_gen', '_count'),
+                right_index=True, left_index=True
+            )
+            .reset_index()
+            .merge(plant_gen_df, on=idx_gen, how='outer')
+        )
+        return owner_count
+
+    def fake_zero_fraction_owners(self, plant_gen_df):
+        """
+        Fake generator records for all plant owners.
+
+        Ensure all owners of a plant are represented for every generator.
+        Any utility owner that owns part of any generator in a plant
+        will also have their ownership listed for all generators in
+        the plant (with many of them being zero ownership).
+
+        Args:
+            plant_gen_df (pandas.DataFrame)
+        """
+        # make a unique list of all owners by plant
+        all_owners = (
+            plant_gen_df
+            [['plant_id_eia', 'owner_utility_id_eia', 'report_date']]
+            .drop_duplicates()
+        )
+
+        # split the gens based on whether the generators have all owners
+        owner_count = self._get_owner_count_per_plant_and_gen(plant_gen_df)
+        own_missing = owner_count[owner_count.owner_utility_id_eia_count !=
+                                  owner_count.owner_utility_id_eia_count_gen]
+        own_complete = owner_count[owner_count.owner_utility_id_eia_count ==
+                                   owner_count.owner_utility_id_eia_count_gen]
+
+        # cast all owners on the generators which have missing owners,
+        # but leave out the fraction_owned because we need to make the
+        # missing owners fraction_owned 0.
+        fake_all_owners = (
+            pd.merge(
+                own_missing.drop(
+                    columns=['owner_utility_id_eia', 'fraction_owned']),
+                all_owners,
+                on=['plant_id_eia', 'report_date', ],
+                how='left',
+            )
+            .merge(  # now merge in the fraction_owned
+                own_missing,
+                how='outer'
+            )
+            .assign(fraction_owned=lambda x: x.fraction_owned.fillna(0))
+            .drop(columns=['owner_utility_id_eia_count',
+                           'owner_utility_id_eia_count_gen'])
+        )
+
+        logger.info(
+            f"{len(fake_all_owners[fake_all_owners.fraction_owned == 0])}"
+            " generator records faked w/ 0% fraction owned."
+        )
+        return pd.concat([own_complete, fake_all_owners])
+
     def make_fake_totals(self, plant_gen_df):
         """Generate total versions of generation-owner records."""
         # make new records for generators to replicate the total generator
@@ -719,6 +789,7 @@ class CompilePlantParts(object):
             ownership='owned'
         )
 
+        plant_gen_df = self.fake_zero_fraction_owners(plant_gen_df)
         fake_totals = self.make_fake_totals(plant_gen_df)
 
         plant_gen_df = plant_gen_df.append(fake_totals, sort=False)
@@ -738,9 +809,9 @@ class CompilePlantParts(object):
                 'There should be more records labeled as total.')
         return plant_gen_df
 
-    def denorm_plant_gen(self, qual_records):
+    def denorm_plant_gen(self, plant_gen_df, qual_records):
         """Denromalize the plant_gen_df."""
-        og_len = len(self.plant_gen_df)
+        og_len = len(plant_gen_df)
         # compile all of the denorm table info in one place
         denorm_tables = {}
         for part in self.plant_parts:
@@ -760,38 +831,38 @@ class CompilePlantParts(object):
                     }
         # get the demorn tables and squish the id cols in with the gens
         for k, v in denorm_tables.items():
-            if not set(v['id_cols']).issubset(set(self.plant_gen_df.columns)):
+            if not set(v['id_cols']).issubset(set(plant_gen_df.columns)):
                 logger.debug(f'no id cols from {k}')
                 denorm_df = self.table_compiler.get_the_table(
                     k)[list(set(v['id_cols']
                                 + v['denorm_cols']))].drop_duplicates()
-                self.plant_gen_df = self.plant_gen_df.merge(
+                plant_gen_df = plant_gen_df.merge(
                     denorm_df, how='left')
         if 'plant_ferc_acct' in self.plant_parts.keys():
-            self.plant_gen_df = self.add_ferc_acct(self.plant_gen_df)
+            plant_gen_df = self.add_ferc_acct(plant_gen_df)
         # if
         if qual_records:
             # add all the missing qualifiers
             qual_records_missing = [
                 x for x in QUAL_RECORD_TABLES.keys()
-                if x not in self.plant_gen_df.columns
+                if x not in plant_gen_df.columns
             ]
             idx_cols_gen = ['plant_id_eia', 'generator_id', 'report_date']
-            self.plant_gen_df = pd.merge(
-                self.plant_gen_df,
+            plant_gen_df = pd.merge(
+                plant_gen_df,
                 self.table_compiler.get_the_table('generators_eia860')[
                     idx_cols_gen + qual_records_missing],
                 on=idx_cols_gen,
                 how='left'
             )
-        if og_len != len(self.plant_gen_df):
+        if og_len != len(plant_gen_df):
             warnings.warn(
                 'ahh merge error! when adding denorm colunms to '
                 'plant_gen_df we must get the same number of records'
                 f'og # of records: {og_len} vs  end state #: '
-                f'{len(self.plant_gen_df)}'
+                f'{len(plant_gen_df)}'
             )
-        return self.plant_gen_df
+        return plant_gen_df
 
     def ag_part_by_own_slice(self, part_name):
         """
@@ -852,7 +923,11 @@ class CompilePlantParts(object):
                    .drop_duplicates())
             .assign(ownership='total')
         )
-        return part_own.append(part_tot, sort=False)
+        part_ag = (
+            part_own.append(part_tot, sort=False)
+            .assign(fraction_owned=lambda x: x.fraction_owned.fillna(0))
+        )
+        return part_ag
 
     def add_additonal_cols(self, plant_parts_df):
         """
@@ -1168,7 +1243,7 @@ class CompilePlantParts(object):
         # we want to compile the count results on a copy of the generator table
         all_the_counts = self.prep_plant_gen_df().copy()
         for part_name in self.plant_parts_ordered:
-            logger.info(f"making the counts for: {part_name}")
+            logger.debug(f"making the counts for: {part_name}")
             all_the_counts = all_the_counts.merge(
                 self.count_child_and_parent_parts(part_name, count_ids),
                 how='left')
@@ -1448,8 +1523,9 @@ class CompilePlantParts(object):
                 self.aggregate_plant_part(self.plant_parts['plant_gen'])
                 .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
                 .pipe(self.slice_by_ownership)
+                .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+                .pipe(self.denorm_plant_gen, qual_records)
             )
-            self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
 
     def get_part_df(self, part_name):
@@ -1501,13 +1577,15 @@ class CompilePlantParts(object):
             return self.plant_parts_df
         # make the master generator table
         self.plant_gen_df = self.prep_plant_gen_df(qual_records)
+        self._find_it(self.plant_gen_df)
         # generate the true granularity labels
         self.part_true_gran_labels = self.label_true_granularities()
-
+        self._find_it(self.part_true_gran_labels)
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
         for part_name in self.plant_parts_ordered:
             part_df = self.get_part_df(part_name)
+            self._find_it(part_df)
             if qual_records:
                 # add in the qualifier records
                 for qual_record in QUAL_RECORD_TABLES:
@@ -1523,7 +1601,41 @@ class CompilePlantParts(object):
             .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
         )
+        self.test_ownership_for_owned_records(self.plant_parts_df)
         return self.plant_parts_df
+
+    def _find_it(self, df):
+        if 'fraction_owned' not in df.columns:
+            pass
+        if not df[df.fraction_owned.isnull()].empty:
+            self.dumb_df = df[df.fraction_owned.isnull()]
+
+            raise AssertionError(
+                "ahhhhhhhhh! Ooo0o0ooO check cached `dumb_df`"
+            )
+
+    def test_ownership_for_owned_records(self, plant_parts_df):
+        """Test ownership - fraction owned for owned records."""
+        test_own_df = (
+            plant_parts_df.groupby(by=self.id_cols_list +
+                                   ['plant_part', 'report_date', 'ownership'],
+                                   dropna=False
+                                   )
+            [['fraction_owned', 'capacity_mw']].sum().reset_index())
+
+        owned_one_frac = test_own_df[
+            (~np.isclose(test_own_df.fraction_owned, 1))
+            & (test_own_df.ownership == 'owned')]
+
+        if not owned_one_frac.empty:
+            self.test_own_df = test_own_df
+            self.owned_one_frac = owned_one_frac
+            raise AssertionError(
+                "Hello friend, you did bad. It happens... Error with the "
+                "fraction_owned col/slice_by_ownership(). There are "
+                f"{len(owned_one_frac)} rows where fraction_owned != 1 for "
+                "owned records. Check cached `owned_one_frac` & `test_own_df`"
+            )
 
     def _test_prep_merge(self, part_name):
         """Run the test groupby and merge with the aggregations."""
