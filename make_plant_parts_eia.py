@@ -1525,6 +1525,49 @@ class CompilePlantParts(object):
         )
         return self.plant_parts_df
 
+    def test_ownership_for_owned_records(self, plant_parts_df):
+        """
+        Test ownership - fraction owned for owned records.
+
+        This test can be run at the end of or with the result of
+        `generate_master_unit_list()`. It tests a few aspects of the the
+        fraction_owned column and raises assertions if the tests fail.
+        """
+        test_own_df = (
+            plant_parts_df.groupby(by=self.id_cols_list +
+                                   ['plant_part', 'report_date', 'ownership'],
+                                   dropna=False
+                                   )
+            [['fraction_owned', 'capacity_mw']].sum().reset_index())
+
+        owned_one_frac = test_own_df[
+            (~np.isclose(test_own_df.fraction_owned, 1))
+            & (test_own_df.capacity_mw != 0)
+            & (test_own_df.ownership == 'owned')]
+
+        if not owned_one_frac.empty:
+            self.test_own_df = test_own_df
+            self.owned_one_frac = owned_one_frac
+            raise AssertionError(
+                "Hello friend, you did bad. It happens... Error with the "
+                "fraction_owned col/slice_by_ownership(). There are "
+                f"{len(owned_one_frac)} rows where fraction_owned != 1 for "
+                "owned records. Check cached `owned_one_frac` & `test_own_df`"
+            )
+
+        no_frac_n_cap = test_own_df[
+            (test_own_df.capacity_mw == 0)
+            & (test_own_df.fraction_owned == 0)
+        ]
+        if len(no_frac_n_cap) > 60:
+            self.no_frac_n_cap = no_frac_n_cap
+            warnings.warn(
+                f"""Too many nothings, you nothing. There shouldn't been much
+                more than 60 instances of records with zero capacity_mw (and
+                therefor zero fraction_owned) and you got {len(no_frac_n_cap)}.
+                """
+            )
+
     def _test_prep_merge(self, part_name):
         """Run the test groupby and merge with the aggregations."""
         id_cols = self.plant_parts[part_name]['id_cols']
