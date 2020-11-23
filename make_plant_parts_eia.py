@@ -87,7 +87,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_gen': {
@@ -107,7 +106,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
         'ag_tables': {
             'generation_eia923': {
@@ -159,7 +157,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_technology': {
@@ -179,7 +176,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_fuel': {
@@ -199,7 +195,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_prime_mover': {
@@ -218,7 +213,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
     'plant_ferc_acct': {
@@ -238,7 +232,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mwh': 'capacity_mw',
             'heat_rate_mmbtu_mwh': 'capacity_mw',
             'fuel_cost_per_mmbtu': 'capacity_mw',
-            'fraction_owned': 'capacity_mw',
         },
     },
 }
@@ -289,8 +282,6 @@ FREQ_AG_COLS = {
     'utilities_eia': None,
     'plants_eia': None,
     'energy_source_eia923': None,
-
-
 }
 
 
@@ -738,9 +729,17 @@ class CompilePlantParts(object):
                 'There should be more records labeled as total.')
         return plant_gen_df
 
-    def denorm_plant_gen(self, qual_records):
-        """Denromalize the plant_gen_df."""
-        og_len = len(self.plant_gen_df)
+    def denorm_plant_gen(self, plant_gen_df, qual_records):
+        """
+        Denromalize the plant_gen_df.
+
+        This method is meant to be run inside of `prep_plant_gen_df()`.
+
+        Args:
+            plant_gen_df (pandas.DataFrame): generator record table, which has
+                been augmented via 'slice_by_ownership()'
+        """
+        og_len = len(plant_gen_df)
         # compile all of the denorm table info in one place
         denorm_tables = {}
         for part in self.plant_parts:
@@ -760,38 +759,85 @@ class CompilePlantParts(object):
                     }
         # get the demorn tables and squish the id cols in with the gens
         for k, v in denorm_tables.items():
-            if not set(v['id_cols']).issubset(set(self.plant_gen_df.columns)):
+            if not set(v['id_cols']).issubset(set(plant_gen_df.columns)):
                 logger.debug(f'no id cols from {k}')
                 denorm_df = self.table_compiler.get_the_table(
                     k)[list(set(v['id_cols']
                                 + v['denorm_cols']))].drop_duplicates()
-                self.plant_gen_df = self.plant_gen_df.merge(
+                plant_gen_df = plant_gen_df.merge(
                     denorm_df, how='left')
         if 'plant_ferc_acct' in self.plant_parts.keys():
-            self.plant_gen_df = self.add_ferc_acct(self.plant_gen_df)
+            plant_gen_df = self.add_ferc_acct(plant_gen_df)
         # if
         if qual_records:
             # add all the missing qualifiers
             qual_records_missing = [
                 x for x in QUAL_RECORD_TABLES.keys()
-                if x not in self.plant_gen_df.columns
+                if x not in plant_gen_df.columns
             ]
             idx_cols_gen = ['plant_id_eia', 'generator_id', 'report_date']
-            self.plant_gen_df = pd.merge(
-                self.plant_gen_df,
+            plant_gen_df = pd.merge(
+                plant_gen_df,
                 self.table_compiler.get_the_table('generators_eia860')[
                     idx_cols_gen + qual_records_missing],
                 on=idx_cols_gen,
                 how='left'
             )
-        if og_len != len(self.plant_gen_df):
+        if og_len != len(plant_gen_df):
             warnings.warn(
                 'ahh merge error! when adding denorm colunms to '
                 'plant_gen_df we must get the same number of records'
                 f'og # of records: {og_len} vs  end state #: '
-                f'{len(self.plant_gen_df)}'
+                f'{len(plant_gen_df)}'
             )
-        return self.plant_gen_df
+        return plant_gen_df
+
+    def _ag_fraction_owned(self, part_ag, id_cols):
+        """
+        Calculate the fraction owned for a plant-part df.
+
+        This method takes a dataframe of records that are aggregated to the
+        level of a plant-part (with certain `id_cols`) and appends a
+        fraction_owned column, which indicates the % ownership that a
+        particular utility owner has for each aggreated plant-part record.
+
+        For partial owner records (ownership == "owned"), fraction_owned is
+        calcuated based on the portion of the capacity and the total capacity
+        of the plant. For total owner records (ownership == "total"), the
+        fraction_owned is always 1.
+
+        This method is meant to be run within `ag_part_by_own_slice()`.
+
+        Args:
+            part_ag (pandas.DataFrame):
+            id_cols (list): list of identifying columns
+                (stored as: `self.plant_parts[part_name]['id_cols']`)
+        """
+        # we must first get the total capacity of the full plant
+        # Note: we could simply not include the ownership == "total" records
+        # We are automatically assign fraction_owned == 1 to them, but it seems
+        # cleaner to run the full df through this same grouby
+        frac_owned = (
+            part_ag.groupby(by=id_cols + ['ownership', 'report_date'])
+            [['capacity_mw']].sum()
+        )
+        # then merge the total capacity with the plant-part capacity to use to
+        # calculate the fraction_owned
+        part_frac = (
+            pd.merge(part_ag,
+                     frac_owned,
+                     right_index=True,
+                     left_on=frac_owned.index.names,
+                     suffixes=("", "_total")
+                     )
+            .assign(fraction_owned=lambda x:
+                    np.where(x.ownership == 'owned',
+                             x.capacity_mw / x.capacity_mw_total,
+                             1
+                             ))
+            .drop(columns=['capacity_mw_total'])
+        )
+        return part_frac
 
     def ag_part_by_own_slice(self, part_name):
         """
@@ -852,7 +898,12 @@ class CompilePlantParts(object):
                    .drop_duplicates())
             .assign(ownership='total')
         )
-        return part_own.append(part_tot, sort=False)
+        part_ag = (
+            part_own.append(part_tot, sort=False)
+            .pipe(self._ag_fraction_owned, id_cols=id_cols)
+        )
+
+        return part_ag
 
     def add_additonal_cols(self, plant_parts_df):
         """
@@ -1168,7 +1219,7 @@ class CompilePlantParts(object):
         # we want to compile the count results on a copy of the generator table
         all_the_counts = self.prep_plant_gen_df().copy()
         for part_name in self.plant_parts_ordered:
-            logger.info(f"making the counts for: {part_name}")
+            logger.debug(f"making the counts for: {part_name}")
             all_the_counts = all_the_counts.merge(
                 self.count_child_and_parent_parts(part_name, count_ids),
                 how='left')
@@ -1448,8 +1499,8 @@ class CompilePlantParts(object):
                 self.aggregate_plant_part(self.plant_parts['plant_gen'])
                 .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
                 .pipe(self.slice_by_ownership)
+                .pipe(self.denorm_plant_gen, qual_records)
             )
-            self.plant_gen_df = self.denorm_plant_gen(qual_records)
         return self.plant_gen_df
 
     def get_part_df(self, part_name):
@@ -1503,7 +1554,6 @@ class CompilePlantParts(object):
         self.plant_gen_df = self.prep_plant_gen_df(qual_records)
         # generate the true granularity labels
         self.part_true_gran_labels = self.label_true_granularities()
-
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
         for part_name in self.plant_parts_ordered:
@@ -1523,6 +1573,7 @@ class CompilePlantParts(object):
             .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
         )
+        self.test_ownership_for_owned_records(self.plant_parts_df)
         return self.plant_parts_df
 
     def test_ownership_for_owned_records(self, plant_parts_df):
