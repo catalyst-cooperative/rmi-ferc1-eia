@@ -19,6 +19,7 @@ deprish_df = transformer.execute(clobber=True)
 
 import logging
 from copy import deepcopy
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 INT_IDS = ['utility_id_ferc1', 'utility_id_pudl',
            'plant_id_pudl', 'report_year']
 
-NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•"]
+NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
 
 IDX_COLS_DEPRISH = [
     'report_date',
@@ -39,6 +40,7 @@ IDX_COLS_DEPRISH = [
     'plant_part_name',
     'ferc_acct',
     'note',
+    'utility_id_pudl'
 ]
 
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
@@ -201,20 +203,33 @@ class Transformer:
             filled_df = filled_df.drop(
                 columns=filled_df.filter(like='num'))
 
-            # then we need to do the actuall filling in
-            self.filled_df = filled_df.assign(
-                net_salvage_rate=lambda x:
-                    # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_rate.fillna(x.net_removal / x.book_reserve),
-                net_removal=lambda x:
-                    x.net_removal.fillna(x.net_salvage_rate * x.book_reserve),
-                unaccrued_balance=lambda x:
-                    x.unaccrued_balance.fillna(
-                        x.plant_balance_w_common - x.book_reserve
-                        - x.net_removal),
-                reserve_rate=lambda x: x.book_reserve /
-                x.plant_balance_w_common
+            filled_df['net_salvage_rate'] = (
+                - filled_df['net_salvage_rate'].abs()
             )
+            filled_df['net_salvage'] = - filled_df['net_salvage'].abs()
+
+            # then we need to do the actuall filling in
+            def _fill_in_assign(filled_df):
+                return filled_df.assign(
+                    net_salvage_rate=lambda x:
+                        # first clean % v num, then net_salvage/book_value
+                        x.net_salvage_rate.fillna(
+                            x.net_salvage / x.book_reserve),
+                    net_salvage=lambda x:
+                        x.net_salvage.fillna(
+                            x.net_salvage_rate * x.book_reserve),
+                    book_reserve=lambda x: x.book_reserve.fillna(
+                        x.plant_balance_w_common -
+                        (x.depreciation_annual_epxns * x.remaining_life_avg)),
+                    unaccrued_balance=lambda x:
+                        x.unaccrued_balance.fillna(
+                            x.plant_balance_w_common - x.book_reserve
+                            - x.net_salvage),  # ??
+                    reserve_rate=lambda x: x.book_reserve /
+                    x.plant_balance_w_common,
+                )
+            # we want to do this filling in twice because the order matters.
+            filled_df = _fill_in_assign(filled_df).pipe(_fill_in_assign)
 
         return self.filled_df
 
@@ -278,7 +293,7 @@ class Transformer:
         deprish_c_df = (
             deprish_c_df
             .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [addtl_cols].sum().reset_index()
+            [addtl_cols].sum(min_count=1).reset_index()
             .pipe(pudl.helpers.convert_cols_dtypes,
                   'depreciation', name='depreciation')
         )
@@ -294,13 +309,14 @@ class Transformer:
                 suffixes=('', common_suffix)
             )
         )
+        # if len(df_w_c[df_w_c._merge != 'right_only']) - len(deprish_df) != 0:
         if len(df_w_c) - len(deprish_df) != 0:
             raise AssertionError(
                 f"whyyyy are there this many more records "
                 f"{len(df_w_c) - len(deprish_df)} after we merge in the common"
                 " records."
             )
-        return df_w_c
+        return df_w_c  # .drop(columns=['_merge'])
 
     def split_allocate_common(self,
                               split_col='plant_balance',
@@ -350,7 +366,7 @@ class Transformer:
                 f"original records ({len(deprish_w_c)})... "
                 "so something went wrong here."
             )
-        self._check_common_allocation(
+        _ = self._check_common_allocation(
             deprish_w_common_allocated, split_col, new_data_col, common_suffix)
 
         return deprish_w_common_allocated
@@ -384,7 +400,7 @@ class Transformer:
         gb_df = (
             simple_case_df
             .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [[split_col]].sum().reset_index()
+            [[split_col]].sum(min_count=1).reset_index()
         )
 
         df_w_tots = (
@@ -484,12 +500,12 @@ class Transformer:
             df_w_tots
             .groupby(by=IDX_COLS_DEPRISH, dropna=False)
             [[f"{split_col}_ratio", f"{split_col}_common_portion"]]
-            .sum()
+            .sum(min_count=1)
             .add_suffix("_check")
             .reset_index()
         )
         df_w_tots = pd.merge(
-            df_w_tots, calc_check, on=IDX_COLS_DEPRISH, how='left'
+            df_w_tots, calc_check, on=IDX_COLS_DEPRISH, how='outer'
         )
 
         df_w_tots[f"{split_col}_common_portion_check"] = np.where(
@@ -502,7 +518,9 @@ class Transformer:
 
         # sum up all of the slices of the plant balance column.. these will be
         # used in the logs/asserts below
-        plant_balance_og = self.tidy_df[split_col].sum()
+        plant_balance_og = (
+            self.tidy_df[self.tidy_df.plant_part_name.notnull()][
+                split_col].sum())
         plant_balance = df_w_tots[split_col].sum()
         plant_balance_w_common = df_w_tots[new_data_col].sum()
         plant_balance_c = (
@@ -516,7 +534,7 @@ class Transformer:
             f"{plant_balance_w_common / plant_balance_og:.02%} of the original"
         )
         if plant_balance_w_common / plant_balance_og < .99:
-            raise AssertionError(
+            warnings.warn(
                 f"ahhh the {split_col} allocation is off. The resulting "
                 f"{split_col} is "
                 f"{plant_balance_w_common/plant_balance_og:.02%} of the "
@@ -525,23 +543,23 @@ class Transformer:
             )
 
         if (plant_balance + plant_balance_c) / plant_balance_og < .99:
-            raise AssertionError(
+            warnings.warn(
                 "well something went wrong here. even before proportionally "
                 "assigning the common plant balance, the plant balance + "
                 "common doesn't add up."
             )
 
         if len(df_w_tots) + self.common_len != len(self.early_tidy()):
-            raise AssertionError(
+            warnings.warn(
                 'ahhh we have a problem here with the number of records being '
                 'generated here'
             )
 
-        bab_ratio_check = (df_w_tots[~df_w_tots['plant_balance_ratio_check']
+        bad_ratio_check = (df_w_tots[~df_w_tots['plant_balance_ratio_check']
                                      .round(0).isin([1, 0])])
-        if not bab_ratio_check.empty:
-            raise AssertionError(
-                f"why would you do this?!?! there are {len(bab_ratio_check)} "
+        if not bad_ratio_check.empty:
+            warnings.warn(
+                f"why would you do this?!?! there are {len(bad_ratio_check)} "
                 f"records that are not passing our {split_col} check. "
                 "The common records are being split and assigned incorrectly. "
             )
@@ -552,8 +570,9 @@ class Transformer:
             & (df_w_tots.plant_balance != df_w_tots.plant_balance_w_common)
         ]
         if not no_common.empty:
-            raise AssertionError(
+            warnings.warn(
                 f"Ack! We have {len(no_common)} records that have no common "
                 f"{split_col} but the og {split_col} is different than "
                 f"the {new_data_col}"
             )
+        return df_w_tots

@@ -1611,7 +1611,8 @@ class CompilePlantParts(object):
             & (test_own_df.fraction_owned == 0)
         ]
         if len(no_frac_n_cap) > 60:
-            raise AssertionError(
+            self.no_frac_n_cap = no_frac_n_cap
+            warnings.warn(
                 f"""Too many nothings, you nothing. There shouldn't been much
                 more than 60 instances of records with zero capacity_mw (and
                 therefor zero fraction_owned) and you got {len(no_frac_n_cap)}.
