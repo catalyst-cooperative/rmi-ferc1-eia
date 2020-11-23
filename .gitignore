@@ -2,3 +2,5 @@ __pycache__/*
 */.DS_Store*
 notebooks/.ipynb*
 *.pkl.gz
+*.csv.gz
+outputs/*

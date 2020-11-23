@@ -232,7 +232,7 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
         logger.info(f"Adding overrides from {sheet_name_output}.")
         # concat, sort so the True overrides are at the top and drop dupes
         deprish_match_full = (
-            pd.merge(deprish_match, overrides_df, on=DEPRISH_COLS, how='left')
+            pd.merge(deprish_match, overrides_df, on=DEPRISH_COLS, how='outer')
             .assign(record_id_eia=lambda x:
                     x.record_id_eia_override.fillna(x.record_id_eia_fuzzy))
         )
