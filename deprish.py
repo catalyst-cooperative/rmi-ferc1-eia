@@ -19,11 +19,13 @@ deprish_df = transformer.execute(clobber=True)
 
 import logging
 from copy import deepcopy
+import warnings
 
 import pandas as pd
 import numpy as np
 
 import pudl
+import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,8 @@ IDX_COLS_DEPRISH = [
     'plant_part_name',
     'ferc_acct',
     'note',
+    'utility_id_pudl',
+    'data_source'
 ]
 
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
@@ -121,10 +125,10 @@ class Transformer:
             and nulls have been filled in.
         """
         self.tidy_df = self.early_tidy(clobber=clobber)
-        self.reshaped_df = self.reshape(clobber=clobber)
         # value transform
         self.filled_df = self.fill_in(clobber=clobber)
-        return self.filled_df
+        self.reshaped_df = self.reshape(clobber=clobber)
+        return self.reshaped_df
 
     def early_tidy(self, clobber=False):
         """Early transform type assignments and column assignments."""
@@ -138,8 +142,9 @@ class Transformer:
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
                 .assign(report_year=lambda x: x.report_date.dt.year)
-                .pipe(pudl.helpers.strip_lower, ['plant_part_name'])
+                .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
             )
+            # TODO: convert data_source='ferc' $1000s to $s
         return self.tidy_df
 
     def reshape(self, clobber=False):
@@ -171,7 +176,7 @@ class Transformer:
             and nulls have been filled in.
         """
         if clobber or self.filled_df is None:
-            filled_df = deepcopy(self.reshape())
+            filled_df = deepcopy(self.early_tidy())
             # convert % columns - which originally are a combination of whole
             # numbers of decimals (e.g. 88.2% would either be represented as
             # 88.2 or .882). Some % columns have boolean columns (ending in
@@ -181,7 +186,7 @@ class Transformer:
             filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
                           'net_salvage_rate'] = (
                 filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
-                              'net_salvage_rate'] * 100
+                              'net_salvage_rate'] / 100
             )
             filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
                           'depreciation_annual_rate'] = (
@@ -202,19 +207,31 @@ class Transformer:
                 columns=filled_df.filter(like='num'))
 
             # then we need to do the actuall filling in
-            self.filled_df = filled_df.assign(
-                net_salvage_rate=lambda x:
-                    # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_rate.fillna(x.net_removal / x.book_reserve),
-                net_removal=lambda x:
-                    x.net_removal.fillna(x.net_salvage_rate * x.book_reserve),
-                unaccrued_balance=lambda x:
-                    x.unaccrued_balance.fillna(
-                        x.plant_balance_w_common - x.book_reserve
-                        - x.net_removal),
-                reserve_rate=lambda x: x.book_reserve /
-                x.plant_balance_w_common
-            )
+            def _fill_in_assign(filled_df):
+                return filled_df.assign(
+                    net_salvage_rate=lambda x:
+                        # first clean % v num, then net_salvage/book_value
+                        x.net_salvage_rate.fillna(
+                            x.net_salvage / x.plant_balance),
+                    net_salvage=lambda x:
+                        x.net_salvage.fillna(
+                            x.net_salvage_rate * x.plant_balance),
+                    book_reserve=lambda x:
+                        # step one, fill in w/ reserve_rate.
+                        x.book_reserve.fillna(
+                            (x.plant_balance * x.reserve_rate)
+                            - x.net_salvage)
+                        .fillna(x.plant_balance - x.net_salvage
+                                - (x.depreciation_annual_epxns
+                                   * x.remaining_life_avg)),
+                    unaccrued_balance=lambda x:
+                        x.unaccrued_balance.fillna(
+                            x.plant_balance - x.book_reserve),
+                    reserve_rate=lambda x: x.reserve_rate.fillna(
+                        x.book_reserve / x.plant_balance),
+                )
+            # we want to do this filling in twice because the order matters.
+            self.filled_df = _fill_in_assign(filled_df).pipe(_fill_in_assign)
 
         return self.filled_df
 
@@ -248,9 +265,11 @@ class Transformer:
         # common records if they don't actually have 'common' in the plant name
         # so we are grabbing common records based on that bool column as well
         # as a string search of the plant name
-        deprish_df = self.early_tidy().assign(
+        deprish_df = self.fill_in().assign(
             common=lambda x: x.common.fillna(
-                x.plant_part_name.str.contains('common')))
+                x.plant_part_name.fillna('fake name so the col wont be null')
+                .str.contains('common'))
+        )
 
         deprish_c_df = deprish_df.loc[deprish_df.common]
         deprish_df = deprish_df.loc[~deprish_df.common]
@@ -531,17 +550,20 @@ class Transformer:
                 "common doesn't add up."
             )
 
-        if len(df_w_tots) + self.common_len != len(self.early_tidy()):
-            raise AssertionError(
+        if len(df_w_tots) + self.common_len != len(self.fill_in()):
+            warnings.warn(
                 'ahhh we have a problem here with the number of records being '
                 'generated here'
             )
 
-        bab_ratio_check = (df_w_tots[~df_w_tots['plant_balance_ratio_check']
-                                     .round(0).isin([1, 0])])
-        if not bab_ratio_check.empty:
-            raise AssertionError(
-                f"why would you do this?!?! there are {len(bab_ratio_check)} "
+        bad_ratio_check = (
+            df_w_tots[~df_w_tots['plant_balance_ratio_check']
+                      .round(0).isin([1, 0, np.nan])]
+        )
+        if not bad_ratio_check.empty:
+            self.bad_ratio_check = bad_ratio_check
+            warnings.warn(
+                f"why would you do this?!?! there are {len(bad_ratio_check)} "
                 f"records that are not passing our {split_col} check. "
                 "The common records are being split and assigned incorrectly. "
             )
@@ -557,3 +579,107 @@ class Transformer:
                 f"{split_col} but the og {split_col} is different than "
                 f"the {new_data_col}"
             )
+        return df_w_tots
+
+
+def agg_to_asset(deprish_df):
+    """
+    Aggregate the depreciation data to the asset level.
+
+    Args:
+        deprish_df (pandas.DataFrame): table of depreciation data at the
+            plant_part_name/ferc_acct level. Result of
+            `Transformer().execute()`.
+
+    Returns:
+        pandas.DataFrame: table of depreciation data scaled down to the asset
+        level. This functionally removes the granularity of the FERC account #.
+
+    """
+    idx_asset = [x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']]
+
+    # prep for the groupby
+    sum_cols = [
+        'plant_balance_w_common', 'plant_balance', 'book_reserve',
+        'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
+    avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
+        [x for x in deprish_df.columns
+         if '_rate' in x and 'rate_type_pct' not in x]
+
+    wtavg_cols = {}
+    for col in avg_cols:
+        wtavg_cols[col] = 'unaccrued_balance'
+
+    deprish_asset = deprish_df.groupby(by=idx_asset)[sum_cols].sum(min_count=1)
+
+    deprish_asset = deprish_asset.assign(
+        remaining_life_avg=lambda x:
+            x.unaccrued_balance / x.depreciation_annual_epxns
+    )
+
+    for data_col, weight_col in wtavg_cols.items():
+        deprish_asset = (
+            deprish_asset.merge(
+                make_plant_parts_eia.weighted_average(
+                    deprish_df,
+                    data_col=data_col,
+                    weight_col=weight_col,
+                    by_col=idx_asset)
+                .rename(columns={data_col: f"{data_col}_wt"}),
+                how='outer', on=idx_asset))
+
+    deprish_asset = deprish_asset.assign(
+        plant_balance_w_common_check=lambda x:
+            x.book_reserve + x.unaccrued_balance,
+        plant_balance_diff_check=lambda x:
+            x.plant_balance_w_common_check / x.plant_balance_w_common,
+    )
+
+    return deprish_asset
+
+
+def fill_in_tech_type(gens):
+    """
+    Fill in the generators' tech type based on energy source and prime mover.
+
+    Args:
+        gens (pandas.DataFrame): generators_eia860 table
+    """
+    # back fill the technology type
+    idx_es_pm_tech = [
+        'energy_source_code_1', 'prime_mover_code', 'technology_description'
+    ]
+    es_pm = ['energy_source_code_1', 'prime_mover_code']
+    gens_f_pm_t = (
+        gens.groupby(idx_es_pm_tech)
+        [['plant_id_eia']].count().add_suffix('_count').reset_index()
+    )
+
+    logger.info(
+        f"{len(gens_f_pm_t[gens_f_pm_t.duplicated(subset=es_pm)])} "
+        "duplicate tech type mappings")
+    tech_type_map = (
+        gens_f_pm_t.sort_values('plant_id_eia_count', ascending=False)
+        .drop_duplicates(subset=es_pm)
+        .drop(columns=['plant_id_eia_count']))
+
+    gens = (
+        pd.merge(
+            gens,
+            tech_type_map,
+            on=es_pm,
+            how='left',
+            suffixes=("", "_map"),
+            validate="m:1"
+        )
+        .assign(technology_description=lambda x:
+                x.technology_description.fillna(x.technology_description_map))
+        .drop(columns=['technology_description_map'])
+    )
+
+    no_tech_type = gens[gens.technology_description.isnull()]
+    logger.info(
+        f"{len(no_tech_type)/len(gens):.01%} of generators don't map to tech "
+        "types"
+    )
+    return gens
