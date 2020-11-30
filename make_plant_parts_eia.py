@@ -1720,7 +1720,7 @@ def weighted_average(df, data_col, weight_col, by_col):
     """Generate a weighted average."""
     df['_data_times_weight'] = df[data_col] * df[weight_col]
     df['_weight_where_notnull'] = df[weight_col] * pd.notnull(df[data_col])
-    g = df.groupby(by_col)
+    g = df.groupby(by_col, dropna=False)
     result = g['_data_times_weight'].sum() / g['_weight_where_notnull'].sum()
     del df['_data_times_weight'], df['_weight_where_notnull']
     return result.to_frame(name=data_col).reset_index()
