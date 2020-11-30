@@ -5,7 +5,8 @@ Catalyst has compiled depreciation studies for a project with the Rocky
 Mountain Institue. These studies were compiled from Public Utility Commission
 proceedings as well as the FERC Form 1 table.
 
-how to run this module:
+how to run this module with the PUDL compiled studies:
+
 file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
 sheet_name_deprish='Depreciation Studies Raw'
 transformer = deprish.Transformer(
@@ -15,6 +16,18 @@ transformer = deprish.Transformer(
     ).execute())
 deprish_df = transformer.execute()
 deprish_asset_df = agg_to_asset(deprish_df)
+
+how to run this module with the raw FERC1 depreciation studies:
+
+pudl_settings = pudl.workspace.setup.get_defaults()
+ferc1_engine = sa.create_engine(pudl_settings["ferc1_db"])
+pudl_engine = sa.create_engine(pudl_settings["pudl_db"])
+
+inputs = InputsCompiler(ferc1_engine, pudl_engine)
+deprish_df = TransformerF1(
+    inputs,
+    extract_df=inputs.get_deprish_f1_raw()
+).execute()
 
 """
 
@@ -53,7 +66,7 @@ IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
 # extract
 
 
-class ExtractorPUDL:
+class Extractor:
     """
     Extractor for turning excel based depreciation data into a dataframe.
 
@@ -745,7 +758,6 @@ class InputsCompiler:
             pudl_engine (sqlalchemy.engine.Engine): SQLAlchemy connection
                 engine for the PUDL DB.
         """
-        print('hello')
         self.ferc1_engine = ferc1_engine
         self.pudl_engine = pudl_engine
 
