@@ -283,7 +283,7 @@ class Transformer:
         deprish_df = self.fill_in().assign(
             common=lambda x: x.common.fillna(
                 x.plant_part_name.fillna('fake name so the col wont be null')
-                .str.contains('common'))
+                .str.contains('common|comm'))
         )
 
         # if there is no plant_id_pudl, there will be no plant for the common
@@ -423,14 +423,17 @@ class Transformer:
             f"We are calculating the common portion for {len(simple_case_df)} "
             f"records w/ {split_col}")
 
+        simple_case_df[f"{split_col}_abs"] = abs(
+            simple_case_df[f"{split_col}"])
         # we want to know the sum of the potential split_cols for each ferc1
         # option
         gb_df = (
             simple_case_df
             .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [[split_col]].sum(min_count=1).reset_index()
+            [[f"{split_col}_abs"]].sum(min_count=1).reset_index()
             .pipe(pudl.helpers.convert_cols_dtypes,
                   'depreciation', name='depreciation')
+            .rename(columns={f"{split_col}_abs": f"{split_col}_sum"})
         )
 
         df_w_tots = (
@@ -438,12 +441,11 @@ class Transformer:
                 simple_case_df,
                 gb_df,
                 on=IDX_COLS_COMMON,
-                how='left',
-                suffixes=("", "_sum"))
+                how='left')
         )
 
         df_w_tots[f"{split_col}_ratio"] = (
-            df_w_tots[split_col] / df_w_tots[f"{split_col}_sum"]
+            df_w_tots[f"{split_col}_abs"] / df_w_tots[f"{split_col}_sum"]
         )
 
         # the default way to calculate each plant sub-part's common plant
@@ -792,7 +794,6 @@ class TransformerF1(Transformer):
                     net_salvage_rate_type_pct=True,
                     depreciation_annual_rate_type_pct=True,
                     # add in missing columns
-                    common=pd.NA,
                     reserve_rate=np.nan,
                     book_reserve=np.nan,
                     unaccrued_balance=np.nan,
@@ -819,6 +820,7 @@ class TransformerF1(Transformer):
         future transformations, we need to aggreate the records on
         IDX_COLS_DEPRISH.
         """
+        idx_cols = IDX_COLS_DEPRISH + ['common']
         # we need to sum the plant_balance, but everything else should get a
         # weighted average.
         sum_cols = ['plant_balance']
@@ -826,7 +828,7 @@ class TransformerF1(Transformer):
                     'depreciation_annual_rate', 'remaining_life_avg']
 
         # aggregate..
-        deprish_agg = deprish_f1_et.groupby(by=IDX_COLS_DEPRISH, dropna=False)[
+        deprish_agg = deprish_f1_et.groupby(by=idx_cols, dropna=False)[
             sum_cols].sum(min_count=1)
 
         # prep dict with col to average (key) and col to weight on (value)
@@ -842,7 +844,7 @@ class TransformerF1(Transformer):
                         deprish_f1_et,
                         data_col=data_col,
                         weight_col=weight_col,
-                        by_col=IDX_COLS_DEPRISH),
-                    how='outer', on=IDX_COLS_DEPRISH)
+                        by_col=idx_cols),
+                    how='outer', on=idx_cols)
             )
         return deprish_agg
