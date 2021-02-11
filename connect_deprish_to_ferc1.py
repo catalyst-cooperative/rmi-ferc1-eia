@@ -17,6 +17,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 import sqlalchemy as sa
+import pathlib
 
 import connect_deprish_to_eia
 import make_plant_parts_eia
@@ -711,9 +712,8 @@ class Scaler(object):
         # option
         df_fgb = (
             same_smol.loc[:, idx_cols_ferc1 + split_cols]
-            .fillna(0)  # remove w/ pandas 1.1
-            .groupby(by=idx_cols_ferc1)  # add dropna=False w/ pandas 1.1
-            .sum()
+            .groupby(by=idx_cols_ferc1, dropna=False)
+            .sum(min_count=1)
             .reset_index()
         )
         df_w_tots = (
@@ -810,3 +810,33 @@ class Scaler(object):
                 logger.debug(
                     f"testing the same_true match method passed for {data_col}"
                 )
+
+
+def rmi_output_ify(scaled_df, deprish_df):
+    """Generate the output in RMI's desired format."""
+    add_suffix = ['utility_name_ferc1',
+                  'utility_id_ferc1',
+                  'report_year']
+    deprish_idx_new = [
+        x if x not in add_suffix else x + '_deprish'
+        for x in connect_deprish_to_eia.DEPRISH_COLS]
+    scaled_df2 = pd.merge(
+        scaled_df,
+        deprish_df,
+        left_on=deprish_idx_new,
+        right_on=connect_deprish_to_eia.DEPRISH_COLS,
+    )
+    # get the rename dict.. once this is stable, convert/store this as an dict
+    rename = pd.read_excel(
+        pathlib.Path().cwd().parent / 'rmi_output_formt.xlsx')
+    rename_dict = (
+        rename[rename.pudl_name.notnull()]
+        .set_index('pudl_name').to_dict()['rmi_name']
+    )
+    if [x for x in rename_dict.keys() if x not in scaled_df2]:
+        raise AssertionError('')
+    connected_deprish = (
+        scaled_df2.rename(columns=rename_dict)
+        [rename_dict.values()]
+    )
+    return connected_deprish
