@@ -357,7 +357,9 @@ class CompileTables(object):
         if start_date is None:
             self.start_date = \
                 pd.to_datetime(
-                    '{}-01-01'.format(min(pc.working_years['eia923'])))
+                    '{}-01-01'.format(
+                        min(pc.working_partitions['eia923']['years'])))
+            # min(pc.working_partitions['eia923']['years'])))
         else:
             # Make sure it's a date... and not a string.
             self.start_date = pd.to_datetime(start_date)
@@ -365,7 +367,8 @@ class CompileTables(object):
         if end_date is None:
             self.end_date = \
                 pd.to_datetime(
-                    '{}-12-31'.format(max(pc.working_years['eia923'])))
+                    '{}-12-31'.format(max(pc.working_partitions['eia923']['years'])))
+            # max(pc.working_partitions['eia860m']['year_month'])))
         else:
             # Make sure it's a date... and not a string.
             self.end_date = pd.to_datetime(end_date)
