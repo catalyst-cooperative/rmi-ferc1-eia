@@ -14,7 +14,9 @@ transformer = deprish.Transformer(
         sheet_name=sheet_name_deprish
     ).execute())
 deprish_df = transformer.execute()
-deprish_asset_df = agg_to_asset(deprish_df)
+deprish_asset_df = agg_to_idx(
+    deprish_df,
+    idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']])
 """
 
 import logging
@@ -247,88 +249,84 @@ class Transformer:
             tidy_df[col] = pd.to_numeric(tidy_df[col])
         return tidy_df
 
-    def get_ferc_acct_type_map(self, file_path):
-        """Grab the mapping of the FERC Account numbers to names."""
-        ferc_acct_map = (
-            pd.read_csv(file_path, dtype={'ferc_acct': pd.StringDtype()})
-        )
-        return ferc_acct_map
-
-    def split_merge_common_records(self,
-                                   common_suffix='_common',
-                                   addtl_cols=['plant_balance']):
+    def split_merge_common_records(self, split_col):
         """
         Split apart common records and merge back specific columns.
 
-        The depreciation studies
-        Label and split the common records from the rest of the depreication
-        records.
-
         Args:
-            common_suffix (string): suffix that will be assigned to the common
-                records ``addtl_cols`` when merging.
-            addtl_cols (list of strings): list of columns that will be included
-                with the common records when they are merged into the plant
-                records that the commond records are assocaited with.
+            split_col (string): name of column
+
+        Returns:
+            pandas.DataFrame: the depreciation data with plant_balance_common,
+                a count of instances of the common records and main records.
+
         """
-        # there is a boolean column that is mostly nulls that let us flag
-        # common records if they don't actually have 'common' in the plant name
-        # so we are grabbing common records based on that bool column as well
-        # as a string search of the plant name
-        deprish_df = self.early_tidy().assign(
-            common=lambda x: x.common.fillna(
-                x.plant_part_name.str.contains('common')))
-
-        deprish_c_df = deprish_df.loc[deprish_df.common]
-        deprish_df = deprish_df.loc[~deprish_df.common]
-
-        # we're going to capture the # of common records so we can check if we
-        # get the right # of records in the end of the common munging
-        self.common_len = len(deprish_c_df)
-        self.plant_balance_c_og = deprish_c_df['plant_balance'].sum()
-        logger.info(
-            f"Common record rate: {self.common_len/len(deprish_df):.02%}")
-
-        dupes = deprish_df[(deprish_df.duplicated(subset=IDX_COLS_DEPRISH))
-                           & (deprish_df.plant_id_pudl.notnull())]
-        if not dupes.empty:
-            # save it so we can see the dupes
-            self.dupes = dupes
-            raise ValueError(
-                f"There are {len(dupes)} duplicate records of the depreciation"
-                f" records. Check if there are duplicate with idx columns: "
-                f"{IDX_COLS_DEPRISH}"
-            )
-        # there are some plants with mulitple common lines... bc utilities are
-        # weird so we need to squish those together so we don't get a bunch of
-        # duplicate records
-        deprish_c_df = (
-            deprish_c_df
-            .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [addtl_cols].sum(min_count=1).reset_index()
-            .pipe(pudl.helpers.convert_cols_dtypes,
-                  'depreciation', name='depreciation')
-        )
-
-        # merge the common records in with the non-common records and merge the
-        # counts/anys
-        df_w_c = (
+        common_assn = get_common_assn()
+        self.common_len = len(common_assn.line_id_common.unique())
+        # merge back in the ferc acct #
+        common_assn_acct = (
             pd.merge(
-                deprish_df,
-                deprish_c_df[IDX_COLS_COMMON + addtl_cols],
-                on=IDX_COLS_COMMON,
+                common_assn,
+                self.early_tidy()[['line_id', 'ferc_acct']],
+                left_on=['line_id_common'],
+                right_on=['line_id'],
+            )
+            .drop(columns=['line_id'])
+        )
+
+        common_pb = (
+            pd.merge(
+                common_assn_acct,
+                self.early_tidy()[['line_id', 'ferc_acct', split_col]],
+                left_on=['line_id_common', 'ferc_acct'],
+                right_on=['line_id', 'ferc_acct'],
+                how='left'
+            )
+            .drop(columns=['line_id'])
+            .drop_duplicates()
+            .pipe(self._count_common_assn)
+        )
+
+        deprish_w_c = (
+            pd.merge(
+                self.early_tidy(),
+                common_pb,
+                left_on=['line_id', 'ferc_acct'],
+                right_on=['line_id_main', 'ferc_acct'],
                 how='left',
-                suffixes=('', common_suffix)
+                suffixes=('', '_common')
+            )
+            .drop(columns=['line_id_main'])
+        )
+        # at this stage we have merged in the plant_balance of the common
+        # records with their associated main depreciation records, so we can
+        # remove the common records from the main depreciation table.
+        deprish_w_c = deprish_w_c.loc[
+            ~deprish_w_c.line_id.isin(common_assn.line_id_common.unique())]
+
+        return deprish_w_c
+
+    def _count_common_assn(self, common_pb):
+        common_pb_w_counts = (
+            common_pb
+            .merge(
+                (
+                    common_pb.assign(count_common=1)
+                    .groupby(['line_id_common', 'ferc_acct'])
+                    [['count_common']].sum().reset_index()
+                ),
+                on=['line_id_common', 'ferc_acct']
+            )
+            .merge(
+                (
+                    common_pb.assign(count_main=1)
+                    .groupby(['line_id_main', 'ferc_acct'])
+                    [['count_main']].sum().reset_index()
+                ),
+                on=['line_id_main', 'ferc_acct']
             )
         )
-        # if len(df_w_c[df_w_c._merge != 'right_only']) - len(deprish_df) != 0:
-        if len(df_w_c) - len(deprish_df) != 0:
-            raise AssertionError(
-                f"whyyyy are there this many more records "
-                f"{len(df_w_c) - len(deprish_df)} after we merge in the common"
-                " records."
-            )
-        return df_w_c  # .drop(columns=['_merge'])
+        return common_pb_w_counts
 
     def split_allocate_common(self,
                               split_col='plant_balance',
@@ -355,8 +353,7 @@ class Transformer:
         # the new  data col we are trying to generate
         new_data_col = f'{split_col}_w{common_suffix}'
 
-        deprish_w_c = self.split_merge_common_records(
-            common_suffix=common_suffix, addtl_cols=[split_col])
+        deprish_w_c = self.split_merge_common_records(split_col=split_col)
 
         simple_case_df = self.calc_common_portion_simple(
             deprish_w_c, split_col, common_suffix, new_data_col)
@@ -592,7 +589,7 @@ class Transformer:
         return df_w_tots
 
 
-def agg_to_asset(deprish_df):
+def agg_to_idx(deprish_df, idx_cols):
     """
     Aggregate the depreciation data to the asset level.
 
@@ -608,9 +605,6 @@ def agg_to_asset(deprish_df):
         level. This functionally removes the granularity of the FERC account #.
 
     """
-    # the unquie ids for the asset level are a subset of the IDX_COLS_DEPRISH
-    idx_asset = [x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']]
-
     # prep for the groupby:
     # we have to break out the columns that need to be summed and the columns
     # which needs to be run through a weighted average aggregation for two
@@ -622,10 +616,13 @@ def agg_to_asset(deprish_df):
     # sum agg section
     # enumerate sum cols
     sum_cols = [
-        'plant_balance_w_common', 'plant_balance', 'book_reserve',
+        'plant_balance', 'book_reserve',
         'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
+    if 'plant_balance_w_common' in deprish_df.columns:
+        sum_cols.append(['plant_balance_w_common'])
     # aggregate..
-    deprish_asset = deprish_df.groupby(by=idx_asset)[sum_cols].sum(min_count=1)
+    deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
+        sum_cols].sum(min_count=1)
 
     # weighted average agg section
     # enumerate wtavg cols
@@ -645,18 +642,19 @@ def agg_to_asset(deprish_df):
                     deprish_df,
                     data_col=data_col,
                     weight_col=weight_col,
-                    by_col=idx_asset)
+                    by_col=idx_cols)
                 .rename(columns={data_col: f"{data_col}_wt"}),
-                how='outer', on=idx_asset))
+                how='outer', on=idx_cols))
 
-    deprish_asset = deprish_asset.assign(
-        remaining_life_avg=lambda x:
-            x.unaccrued_balance / x.depreciation_annual_epxns,
-        plant_balance_w_common_check=lambda x:
-            x.book_reserve + x.unaccrued_balance,
-        plant_balance_diff_check=lambda x:
-            x.plant_balance_w_common_check / x.plant_balance_w_common,
-    )
+    if 'plant_balance_w_common' in deprish_df.columns:
+        deprish_asset = deprish_asset.assign(
+            remaining_life_avg=lambda x:
+                x.unaccrued_balance / x.depreciation_annual_epxns,
+            plant_balance_w_common_check=lambda x:
+                x.book_reserve + x.unaccrued_balance,
+            plant_balance_diff_check=lambda x:
+                x.plant_balance_w_common_check / x.plant_balance_w_common,
+        )
 
     return deprish_asset
 
@@ -707,16 +705,24 @@ def fill_in_tech_type(gens):
     )
     return gens
 
-###########
-# Helpers #
-###########
+######################
+# Line ID Generation #
+######################
 
 
-def add_ferc_acct_name(self, tidy_df):
+def get_ferc_acct_type_map(file_path):
+    """Grab the mapping of the FERC Account numbers to names."""
+    ferc_acct_map = (
+        pd.read_csv(file_path, dtype={'ferc_acct': pd.StringDtype()})
+    )
+    return ferc_acct_map
+
+
+def add_ferc_acct_name(tidy_df):
     """Add the FERC Account name into the tidied deprecation table."""
     file_path_ferc_acct_names = (
         pathlib.Path().cwd().parent / 'ferc_acct_names.csv')
-    ferc_acct_names = self.get_ferc_acct_type_map(
+    ferc_acct_names = get_ferc_acct_type_map(
         file_path_ferc_acct_names)
 
     # break out the float-y decimals in the ferc acct col into a sub column
@@ -753,19 +759,29 @@ def assign_line_id(df):
 #################################
 
 
+def get_common_assn():
+    """Get stored common plant assocations."""
+    path_common_assn = pathlib.Path().cwd().parent / 'outputs/common_assn.csv'
+    common_assn = pd.read_csv(path_common_assn)
+    return common_assn
+
+
 def make_common_assn_for_labeling(common_assn, pudl_out, transformer):
     """Make."""
     common_assn_wide = transform_common_assn_for_labeling(common_assn)
     plants_pudl = get_plant_pudl_info(pudl_out)
     common_labeling = (
         pd.merge(
-            transformer.early_tidy().assign(common=pd.NA),
+            agg_to_idx(transformer.early_tidy(),
+                       idx_cols=['line_id', 'plant_id_pudl', 'report_date']),
             plants_pudl,
             on=['plant_id_pudl', 'report_date'],
             how='left',
-            validate='m:1'
+            validate='m:1',
+            suffixes=('', '_eia')
         )
         .set_index(['line_id'])
+        .assign(common=pd.NA)
         .merge(
             common_assn_wide,
             right_index=True,

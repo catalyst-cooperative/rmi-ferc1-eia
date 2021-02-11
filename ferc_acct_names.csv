@@ -1,0 +1,81 @@
+ferc_acct,ferc_acct_description,ferc_acct_category,ferc_acct_name
+301,Organization.,Intangible Plant,
+302,Franchises and consents.,Intangible Plant,
+303,Miscellaneous intangible plant.,Intangible Plant,
+310,Land and land rights.,Production Plant,steam
+311,Structures and improvements.,Production Plant,steam
+312,Boiler plant equipment.,Production Plant,steam
+313,Engines and engine-driven generators.,Production Plant,steam
+314,Turbogenerator units.,Production Plant,steam
+315,Accessory electric equipment.,Production Plant,steam
+316,Miscellaneous power plant equipment,Production Plant,steam
+317,Asset retirement costs for steam production plant.,Production Plant,steam
+320,Land and land rights (Major only).,Production Plant,nuclear
+321,Structures and improvements (Major only).,Production Plant,nuclear
+322,Reactor plant equipment (Major only).,Production Plant,nuclear
+323,Turbogenerator units (Major only).,Production Plant,nuclear
+324,Accessory electric equipment (Major only).,Production Plant,nuclear
+325,Miscellaneous power plant equipment (Major only).,Production Plant,nuclear
+326,Asset retirement costs for nuclear production plant (Major only).,Production Plant,nuclear
+330,Land and land rights.,Production Plant,hydraulic
+331,Structures and improvements.,Production Plant,hydraulic
+332,"Reservoirs, dams, and waterways.",Production Plant,hydraulic
+333,"Water wheels, turbines and generators.",Production Plant,hydraulic
+334,Accessory electric equipment.,Production Plant,hydraulic
+335,Miscellaneous power plant equipment.,Production Plant,hydraulic
+336,"Roads, railroads and bridges.",Production Plant,hydraulic
+337,Asset retirement costs for hydraulic production plant.,Production Plant,hydraulic
+340,Land and land rights.,Production Plant,other
+341,Structures and improvements.,Production Plant,other
+342,"Fuel holders, producers, and accessories.",Production Plant,other
+343,Prime movers.,Production Plant,other
+344,Generators.,Production Plant,other
+345,Accessory electric equipment.,Production Plant,other
+346,Miscellaneous power plant equipment.,Production Plant,other
+347,Asset retirement costs for other production plant.,Production Plant,other
+348,Energy Storage Equipment & Production,Production Plant,other
+350,Land and land rights.,Transmission Plant,transmission
+351,[Reserved],Transmission Plant,transmission
+352,Structures and improvements.,Transmission Plant,transmission
+353,Station equipment.,Transmission Plant,transmission
+354,Towers and fixtures.,Transmission Plant,transmission
+355,Poles and fixtures.,Transmission Plant,transmission
+356,Overhead conductors and devices.,Transmission Plant,transmission
+357,Underground conduit.,Transmission Plant,transmission
+358,Underground conductors and devices.,Transmission Plant,transmission
+359,Roads and trails.,Transmission Plant,transmission
+359.1,Asset retirement costs for transmission plant.,Transmission Plant,transmission
+360,Land and land rights.,Distribution Plant,distribution
+361,Structures and improvements.,Distribution Plant,distribution
+362,Station equipment.,Distribution Plant,distribution
+363,Storage battery equipment.,Distribution Plant,distribution
+364,"Poles, towers and fixtures.",Distribution Plant,distribution
+365,Overhead conductors and devices,Distribution Plant,distribution
+366,Underground conduit.,Distribution Plant,distribution
+367,Underground conductors and devices,Distribution Plant,distribution
+368,Line transformers.,Distribution Plant,distribution
+369,Services.,Distribution Plant,distribution
+370,Meters.,Distribution Plant,distribution
+371,Installations on customers' premises,Distribution Plant,distribution
+372,Leased property on customers' premises.,Distribution Plant,distribution
+373,Street lighting and signal systems.,Distribution Plant,distribution
+374,Asset retirement costs for distribution plant.,Distribution Plant,distribution
+380,Land and land rights.,Regional Transmission and Market Operation Plant,market
+381,Structures and improvements.,Regional Transmission and Market Operation Plant,market
+382,Computer hardware.,Regional Transmission and Market Operation Plant,market
+383,Computer software.,Regional Transmission and Market Operation Plant,market
+384,Communication Equipment.,Regional Transmission and Market Operation Plant,market
+385,Miscellaneous Regional Transmission and Market Operation Plant.,Regional Transmission and Market Operation Plant,market
+386,Asset Retirement Costs for Regional Transmission and Market Operation Plant.,Regional Transmission and Market Operation Plant,market
+389,Land and land rights.,General Plant,general
+390,Structures and improvements.,General Plant,general
+391,Office furniture and equipment.,General Plant,general
+392,Transportation equipment.,General Plant,general
+393,Stores equipment.,General Plant,general
+394,"Tools, shop and garage equipment.",General Plant,general
+395,Laboratory equipment.,General Plant,general
+396,Power operated equipment.,General Plant,general
+397,Communication equipment.,General Plant,general
+398,Miscellaneous equipment.,General Plant,general
+399,Other tangible property.,General Plant,general
+399.1,Asset retirement costs for general plant.,General Plant,general
