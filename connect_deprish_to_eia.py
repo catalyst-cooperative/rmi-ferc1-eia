@@ -15,7 +15,6 @@ import logging
 import pathlib
 import sys
 
-import coloredlogs
 import pandas as pd
 from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
@@ -26,8 +25,6 @@ import deprish
 import pudl
 
 logger = logging.getLogger(__name__)
-log_format = '%(asctime)s [%(levelname)8s] %(name)s:%(lineno)s %(message)s'
-coloredlogs.install(fmt=log_format, level='INFO', logger=logger)
 
 STRINGS_TO_CLEAN = {
     "combined cycle": ["CC"],
@@ -275,7 +272,7 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
 
     first_cols = [
         'plant_part_name', 'plant_name_match', 'record_id_eia',
-        'record_id_eia_name_match', 'record_id_eia_fuzzy',
+        'record_id_eia_fuzzy',
         'record_id_eia_override', 'record_id_eia_override2',
         'record_id_eia_override3', 'record_id_eia_override4',
         'record_id_eia_override5', 'record_id_eia_override6',
