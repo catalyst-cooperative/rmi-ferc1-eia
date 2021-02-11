@@ -15,15 +15,6 @@ transformer = deprish.Transformer(
     ).execute())
 deprish_df = transformer.execute()
 deprish_asset_df = agg_to_asset(deprish_df)
-
-how to run this module with the raw FERC1 depreciation studies:
-file_path_deprish_f1 = pathlib.Path().cwd().parent/'depreciation_ferc1.csv'
-transformer_f1 = deprish.TransformerF1(
-    extract_df=deprish.ExtractorF1(
-        file_path=file_path_deprish_f1
-    ).execute()
-)
-deprish_df = transformer_f1.execute()
 """
 
 import logging
@@ -35,6 +26,7 @@ import pandas as pd
 import numpy as np
 
 import pudl
+import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -714,121 +706,10 @@ def fill_in_tech_type(gens):
         "types"
     )
     return gens
-###########################################
-# Grab and clean ferc1 depreciation table
-###########################################
 
-
-class ExtractorF1:
-    """Simple extractor saved portion of the FERC1 depreciation table."""
-
-    def __init__(self, file_path):
-        """Initialize extractor for saved FERC1 depreciation table portion."""
-        self.file_path = file_path
-
-    def execute(self):
-        """Grab the saved portion of the FERC1 depreciation table."""
-        deprish_f1_rmi = pd.read_csv(
-            self.file_path,
-            dtype={i: pd.Int64Dtype() for i in INT_IDS},
-        )
-        return deprish_f1_rmi
-
-
-class TransformerF1(Transformer):
-    """
-    Transformer for FERC1 deprecation table.
-
-    This class enables the raw FERC1 deprceciation studies with the same
-    methods as the PUDL compiled depreciation studies.
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        """Initialize the transformer for the FERC Form1 depreication table."""
-        super().__init__(*args, **kwargs)
-
-    def early_tidy(self, clobber=False):
-        """Override early_tidy method for the oddities of the FERC1 studies."""
-        if clobber or self.tidy_df is None:
-            self.tidy_df = (
-                self.extract_df
-                .assign(
-                    # null out non-numeric data in numeric columns
-                    net_salvage_rate=lambda x:
-                        pd.to_numeric(x.net_salvage_rate, errors='coerce'),
-                    depreciation_annual_rate=lambda x:
-                        pd.to_numeric(x.depreciation_annual_rate,
-                                      errors='coerce'),
-                    remaining_life_avg=lambda x:
-                        pd.to_numeric(x.remaining_life_avg, errors='coerce'),
-                    plant_balance=lambda x:
-                        pd.to_numeric(x.plant_balance, errors='coerce'),
-                    report_date=lambda x: pd.to_datetime(
-                        x.report_year, format='%Y'),
-                    note=np.nan,
-                    data_source='FERC',
-                )
-                .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
-                .pipe(self.agg_missing_ferc_acct)
-                .assign(
-                    net_salvage_rate_type_pct=True,
-                    depreciation_annual_rate_type_pct=True,
-                    # add in missing columns
-                    reserve_rate=np.nan,
-                    book_reserve=np.nan,
-                    unaccrued_balance=np.nan,
-                    net_salvage=np.nan,
-                    depreciation_annual_epxns=np.nan,
-                )
-                # replicate the functionality in the overriden method
-                .pipe(self._convert_rate_cols)
-                .pipe(pudl.helpers.convert_cols_dtypes,
-                      'depreciation', name='depreciation')
-            )
-        return self.tidy_df
-
-    def agg_missing_ferc_acct(self, deprish_f1_et):
-        """
-        Aggregate depreication records to IDX_COLS_DEPRISH.
-
-        There are a ton of depreication records that have duplicate names in
-        the raw FERC1 table. Many of these records appear to correspond to
-        different FERC accounts. There are 8-10 records per plant per year
-        which is consistent with other plants that have assocaited FERC
-        accounts. Nonetheless, there is no way for us to really know which FERC
-        account each record is associated. In order to use these records in
-        future transformations, we need to aggreate the records on
-        IDX_COLS_DEPRISH.
-        """
-        idx_cols = IDX_COLS_DEPRISH + ['common']
-        # we need to sum the plant_balance, but everything else should get a
-        # weighted average.
-        sum_cols = ['plant_balance']
-        avg_cols = ['total_life_avg', 'net_salvage_rate',
-                    'depreciation_annual_rate', 'remaining_life_avg']
-
-        # aggregate..
-        deprish_agg = deprish_f1_et.groupby(by=idx_cols, dropna=False)[
-            sum_cols].sum(min_count=1)
-
-        # prep dict with col to average (key) and col to weight on (value)
-        # in this case we always want to weight based on unaccrued_balance
-        wtavg_cols = {}
-        for col in avg_cols:
-            wtavg_cols[col] = 'plant_balance'
-        # aggregate..
-        for data_col, weight_col in wtavg_cols.items():
-            deprish_agg = (
-                deprish_agg.merge(
-                    make_plant_parts_eia.weighted_average(
-                        deprish_f1_et,
-                        data_col=data_col,
-                        weight_col=weight_col,
-                        by_col=idx_cols),
-                    how='outer', on=idx_cols)
-            )
-        return deprish_agg
+###########
+# Helpers #
+###########
 
 
 def add_ferc_acct_name(self, tidy_df):
@@ -866,6 +747,10 @@ def assign_line_id(df):
         x.data_source.fillna("")
     )
     return df
+
+#################################
+# Common Association & Labeling #
+#################################
 
 
 def make_common_assn_for_labeling(common_assn, pudl_out, transformer):
