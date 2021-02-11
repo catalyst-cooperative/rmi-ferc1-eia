@@ -649,7 +649,13 @@ class MatchManager:
         """
         self.best = best
         self.train_df = inputs.prep_train_connections()
-        self.ferc1_options_len = len(inputs.get_all_ferc1())
+        # get the # of ferc options within the available eia years.
+        self.ferc1_options_len = len(
+            inputs.get_all_ferc1()[
+                inputs.get_all_ferc1().report_year.isin(
+                    inputs.get_plant_parts_true().report_date.dt.year.unique())
+            ]
+        )
 
     def _apply_weights(self, features, coefs):
         """
@@ -840,7 +846,9 @@ class MatchManager:
                matches_best_df.record_id_eia_rl)
         ]
         logger.info(
-            f"Overridden records: {len(overridden)/len(train_df):.01%}")
+            f"""Overridden records: {len(overridden)/len(train_df):.01%}
+New best match v ferc:    {len(matches_best_df)/self.ferc1_options_len:.02%}"""
+        )
         # we don't need these cols anymore...
         matches_best_df = matches_best_df.drop(
             columns=['record_id_eia_trn', 'record_id_eia_rl'])
@@ -934,7 +942,7 @@ class MatchManager:
             suffixes=("", "_all"))
         logger.info("Get the top scoring match for each FERC1 steam record.")
         matches_best_df = (
-            self.calc_best_matches(self.matches_model, .05)
+            self.calc_best_matches(self.matches_model, .02)
             .pipe(self.override_best_match_with_training_df, self.train_df)
         )
         return matches_best_df
