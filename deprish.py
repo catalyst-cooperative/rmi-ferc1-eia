@@ -5,7 +5,8 @@ Catalyst has compiled depreciation studies for a project with the Rocky
 Mountain Institue. These studies were compiled from Public Utility Commission
 proceedings as well as the FERC Form 1 table.
 
-how to run this module:
+how to run this module with the PUDL compiled studies:
+
 file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
 sheet_name_deprish='Depreciation Studies Raw'
 transformer = deprish.Transformer(
@@ -13,8 +14,17 @@ transformer = deprish.Transformer(
         file_path=file_path_deprish,
         sheet_name=sheet_name_deprish
     ).execute())
-deprish_df = transformer.execute(clobber=True)
+deprish_df = transformer.execute()
+deprish_asset_df = agg_to_asset(deprish_df)
 
+how to run this module with the raw FERC1 depreciation studies:
+file_path_deprish_f1 = pathlib.Path().cwd().parent/'depreciation_ferc1.csv'
+transformer_f1 = depirsh.TransformerF1(
+    extract_df=depirsh.ExtractorF1(
+        file_path=file_path_deprish_f1
+    ).execute()
+)
+deprish_df = transformer_f1.execute()
 """
 
 import logging
@@ -183,9 +193,9 @@ class Transformer:
             # type_pct) that we fleshed out to know wether the values were
             # reported as numbers or %s. There is one column that was easy to
             # clean by checking whether or not the value is greater than 1.
-            filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+            filled_df.loc[filled_df['net_salvage_rate_type_pct'],
                           'net_salvage_rate'] = (
-                filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+                filled_df.loc[filled_df['net_salvage_rate_type_pct'],
                               'net_salvage_rate'] / 100
             )
             filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
@@ -273,11 +283,17 @@ class Transformer:
         deprish_df = self.fill_in().assign(
             common=lambda x: x.common.fillna(
                 x.plant_part_name.fillna('fake name so the col wont be null')
-                .str.contains('common'))
+                .str.contains('common|comm'))
         )
 
-        deprish_c_df = deprish_df.loc[deprish_df.common]
-        deprish_df = deprish_df.loc[~deprish_df.common]
+        # if there is no plant_id_pudl, there will be no plant for the common
+        # record to be allocated across, so for now we need to assume these
+        # records are not common
+        deprish_c_df = deprish_df.loc[
+            deprish_df.common & deprish_df.plant_id_pudl.notnull()
+        ]
+        deprish_df = deprish_df.loc[
+            ~deprish_df.common | deprish_df.plant_id_pudl.isnull()]
 
         # we're going to capture the # of common records so we can check if we
         # get the right # of records in the end of the common munging
@@ -286,8 +302,8 @@ class Transformer:
         logger.info(
             f"Common record rate: {self.common_len/len(deprish_df):.02%}")
 
-        dupes = deprish_df[(deprish_df.duplicated(subset=IDX_COLS_DEPRISH))
-                           & (deprish_df.plant_id_pudl.notnull())]
+        dupes = deprish_df.loc[(deprish_df.duplicated(subset=IDX_COLS_DEPRISH))
+                               & (deprish_df.plant_id_pudl.notnull())]
         if not dupes.empty:
             # save it so we can see the dupes
             self.dupes = dupes
@@ -318,14 +334,13 @@ class Transformer:
                 suffixes=('', common_suffix)
             )
         )
-        # if len(df_w_c[df_w_c._merge != 'right_only']) - len(deprish_df) != 0:
         if len(df_w_c) - len(deprish_df) != 0:
             raise AssertionError(
                 f"whyyyy are there this many more records "
                 f"{len(df_w_c) - len(deprish_df)} after we merge in the common"
                 " records."
             )
-        return df_w_c  # .drop(columns=['_merge'])
+        return df_w_c
 
     def split_allocate_common(self,
                               split_col='plant_balance',
@@ -397,19 +412,28 @@ class Transformer:
         plant/ferc_acct plant balance.
         """
         # exclude the nulls and the 0's
-        simple_case_df = deprish_w_c[
-            (deprish_w_c[split_col].notnull()) & (deprish_w_c[split_col] != 0)
-        ]
+        simple_case_df = (
+            deprish_w_c[
+                (deprish_w_c[split_col].notnull())
+                & (deprish_w_c[split_col] != 0)
+            ]
+            .pipe(pudl.helpers.convert_cols_dtypes,
+                  'depreciation', name='depreciation'))
         logger.info(
             f"We are calculating the common portion for {len(simple_case_df)} "
             f"records w/ {split_col}")
 
+        simple_case_df[f"{split_col}_abs"] = abs(
+            simple_case_df[f"{split_col}"])
         # we want to know the sum of the potential split_cols for each ferc1
         # option
         gb_df = (
             simple_case_df
             .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [[split_col]].sum(min_count=1).reset_index()
+            [[f"{split_col}_abs"]].sum(min_count=1).reset_index()
+            .pipe(pudl.helpers.convert_cols_dtypes,
+                  'depreciation', name='depreciation')
+            .rename(columns={f"{split_col}_abs": f"{split_col}_sum"})
         )
 
         df_w_tots = (
@@ -417,12 +441,11 @@ class Transformer:
                 simple_case_df,
                 gb_df,
                 on=IDX_COLS_COMMON,
-                how='left',
-                suffixes=("", "_sum"))
+                how='left')
         )
 
         df_w_tots[f"{split_col}_ratio"] = (
-            df_w_tots[split_col] / df_w_tots[f"{split_col}_sum"]
+            df_w_tots[f"{split_col}_abs"] / df_w_tots[f"{split_col}_sum"]
         )
 
         # the default way to calculate each plant sub-part's common plant
@@ -456,7 +479,7 @@ class Transformer:
         """
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
-        edge_case_df = deprish_w_c[
+        edge_case_df = deprish_w_c.loc[
             (deprish_w_c[split_col].isnull()) | (deprish_w_c[split_col] == 0)
         ]
 
@@ -478,10 +501,13 @@ class Transformer:
             .groupby(by=IDX_COLS_COMMON, dropna=False)
             .agg({'plant_bal_count': 'count',
                   'plant_bal_any': 'any'})
+            .reset_index()
+            .pipe(pudl.helpers.convert_cols_dtypes,
+                  'depreciation', name='depreciation')
         )
         edge_case_df = pd.merge(
             edge_case_df,
-            edge_case_count.reset_index(),
+            edge_case_count,
             on=IDX_COLS_COMMON,
             how='left'
         )
@@ -501,9 +527,10 @@ class Transformer:
 
     def _check_common_allocation(self,
                                  df_w_tots,
-                                 split_col,
-                                 new_data_col,
-                                 common_suffix):
+                                 split_col='plant_balance',
+                                 new_data_col='plant_balance_w_common',
+                                 common_suffix='_common'
+                                 ):
         """Check to see if the common plant allocation was effective."""
         calc_check = (
             df_w_tots
@@ -512,6 +539,8 @@ class Transformer:
             .sum(min_count=1)
             .add_suffix("_check")
             .reset_index()
+            .pipe(pudl.helpers.convert_cols_dtypes,
+                  'depreciation', name='depreciation')
         )
         df_w_tots = pd.merge(
             df_w_tots, calc_check, on=IDX_COLS_DEPRISH, how='outer'
@@ -594,6 +623,8 @@ def agg_to_asset(deprish_df):
     """
     Aggregate the depreciation data to the asset level.
 
+    The depreciation data is reported at the plant-part and ferc_acct level.
+
     Args:
         deprish_df (pandas.DataFrame): table of depreciation data at the
             plant_part_name/ferc_acct level. Result of
@@ -604,27 +635,36 @@ def agg_to_asset(deprish_df):
         level. This functionally removes the granularity of the FERC account #.
 
     """
+    # the unquie ids for the asset level are a subset of the IDX_COLS_DEPRISH
     idx_asset = [x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']]
 
-    # prep for the groupby
+    # prep for the groupby:
+    # we have to break out the columns that need to be summed and the columns
+    # which needs to be run through a weighted average aggregation for two
+    # reasons. we need to insert the min_count=1 for the summed columns so we
+    # don't end up with a bunch of 0's when it should be nulls. and because
+    # there isn't a built in weighted average gb.agg function, so we need to
+    # run it through our own.
+
+    # sum agg section
+    # enumerate sum cols
     sum_cols = [
         'plant_balance_w_common', 'plant_balance', 'book_reserve',
         'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
+    # aggregate..
+    deprish_asset = deprish_df.groupby(by=idx_asset)[sum_cols].sum(min_count=1)
+
+    # weighted average agg section
+    # enumerate wtavg cols
     avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
         [x for x in deprish_df.columns
          if '_rate' in x and 'rate_type_pct' not in x]
-
+    # prep dict with col to average (key) and col to weight on (value)
+    # in this case we always want to weight based on unaccrued_balance
     wtavg_cols = {}
     for col in avg_cols:
         wtavg_cols[col] = 'unaccrued_balance'
-
-    deprish_asset = deprish_df.groupby(by=idx_asset)[sum_cols].sum(min_count=1)
-
-    deprish_asset = deprish_asset.assign(
-        remaining_life_avg=lambda x:
-            x.unaccrued_balance / x.depreciation_annual_epxns
-    )
-
+    # aggregate..
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
             deprish_asset.merge(
@@ -637,6 +677,8 @@ def agg_to_asset(deprish_df):
                 how='outer', on=idx_asset))
 
     deprish_asset = deprish_asset.assign(
+        remaining_life_avg=lambda x:
+            x.unaccrued_balance / x.depreciation_annual_epxns,
         plant_balance_w_common_check=lambda x:
             x.book_reserve + x.unaccrued_balance,
         plant_balance_diff_check=lambda x:
@@ -691,3 +733,118 @@ def fill_in_tech_type(gens):
         "types"
     )
     return gens
+###########################################
+# Grab and clean ferc1 depreciation table
+###########################################
+
+
+class ExtractorF1:
+    """Simple extractor saved portion of the FERC1 depreciation table."""
+
+    def __init__(self, file_path):
+        """Initialize extractor for saved FERC1 depreciation table portion."""
+        self.file_path = file_path
+
+    def execute(self):
+        """Grab the saved portion of the FERC1 depreciation table."""
+        deprish_f1_rmi = pd.read_csv(
+            self.file_path,
+            dtype={i: pd.Int64Dtype() for i in INT_IDS},
+        )
+        return deprish_f1_rmi
+
+
+class TransformerF1(Transformer):
+    """
+    Transformer for FERC1 deprecation table.
+
+    This class enables the raw FERC1 deprceciation studies with the same
+    methods as the PUDL compiled depreciation studies.
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the transformer for the FERC Form1 depreication table."""
+        super().__init__(*args, **kwargs)
+
+    def early_tidy(self, clobber=False):
+        """Override early_tidy method for the oddities of the FERC1 studies."""
+        if clobber or self.tidy_df is None:
+            self.tidy_df = (
+                self.extract_df
+                .assign(
+                    # null out non-numeric data in numeric columns
+                    net_salvage_rate=lambda x:
+                        pd.to_numeric(x.net_salvage_rate, errors='coerce'),
+                    depreciation_annual_rate=lambda x:
+                        pd.to_numeric(x.depreciation_annual_rate,
+                                      errors='coerce'),
+                    remaining_life_avg=lambda x:
+                        pd.to_numeric(x.remaining_life_avg, errors='coerce'),
+                    plant_balance=lambda x:
+                        pd.to_numeric(x.plant_balance, errors='coerce'),
+                    report_date=lambda x: pd.to_datetime(
+                        x.report_year, format='%Y'),
+                    note=np.nan,
+                    data_source='FERC',
+                )
+                .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
+                .pipe(self.agg_missing_ferc_acct)
+                .assign(
+                    net_salvage_rate_type_pct=True,
+                    depreciation_annual_rate_type_pct=True,
+                    # add in missing columns
+                    reserve_rate=np.nan,
+                    book_reserve=np.nan,
+                    unaccrued_balance=np.nan,
+                    net_salvage=np.nan,
+                    depreciation_annual_epxns=np.nan,
+                )
+                # replicate the functionality in the overriden method
+                .pipe(self._convert_rate_cols)
+                .pipe(pudl.helpers.convert_cols_dtypes,
+                      'depreciation', name='depreciation')
+            )
+        return self.tidy_df
+
+    def agg_missing_ferc_acct(self, deprish_f1_et):
+        """
+        Aggregate depreication records to IDX_COLS_DEPRISH.
+
+        There are a ton of depreication records that have duplicate names in
+        the raw FERC1 table. Many of these records appear to correspond to
+        different FERC accounts. There are 8-10 records per plant per year
+        which is consistent with other plants that have assocaited FERC
+        accounts. Nonetheless, there is no way for us to really know which FERC
+        account each record is associated. In order to use these records in
+        future transformations, we need to aggreate the records on
+        IDX_COLS_DEPRISH.
+        """
+        idx_cols = IDX_COLS_DEPRISH + ['common']
+        # we need to sum the plant_balance, but everything else should get a
+        # weighted average.
+        sum_cols = ['plant_balance']
+        avg_cols = ['total_life_avg', 'net_salvage_rate',
+                    'depreciation_annual_rate', 'remaining_life_avg']
+
+        # aggregate..
+        deprish_agg = deprish_f1_et.groupby(by=idx_cols, dropna=False)[
+            sum_cols].sum(min_count=1)
+
+        # prep dict with col to average (key) and col to weight on (value)
+        # in this case we always want to weight based on unaccrued_balance
+        wtavg_cols = {}
+        for col in avg_cols:
+            wtavg_cols[col] = 'plant_balance'
+        # aggregate..
+        for data_col, weight_col in wtavg_cols.items():
+            deprish_agg = (
+                deprish_agg.merge(
+                    make_plant_parts_eia.weighted_average(
+                        deprish_f1_et,
+                        data_col=data_col,
+                        weight_col=weight_col,
+                        by_col=idx_cols),
+                    how='outer', on=idx_cols)
+            )
+        return deprish_agg
