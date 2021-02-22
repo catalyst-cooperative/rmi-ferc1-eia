@@ -19,8 +19,8 @@ import pandas as pd
 import sqlalchemy as sa
 import pathlib
 
-import rmi_pudl.connect_deprish_to_eia as connect_deprish_to_eia
-import rmi_pudl.make_plant_parts_eia as make_plant_parts_eia
+import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
+import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 import pudl
 
 logger = logging.getLogger(__name__)

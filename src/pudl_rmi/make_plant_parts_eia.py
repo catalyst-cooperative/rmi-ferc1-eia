@@ -345,7 +345,7 @@ class CompileTables(object):
     """Compile tables from sqlite db or pudl output object."""
 
     def __init__(self, pudl_engine, freq=None, start_date=None, end_date=None,
-                 roll=True, fill=True):
+                 roll_fuel_cost=True, fill_fuel_cost=True):
         """
         Initialize a table compiler.
 
@@ -359,16 +359,15 @@ class CompileTables(object):
                 pd.to_datetime(
                     '{}-01-01'.format(
                         min(pc.working_partitions['eia923']['years'])))
-            # min(pc.working_partitions['eia923']['years'])))
         else:
             # Make sure it's a date... and not a string.
             self.start_date = pd.to_datetime(start_date)
 
         if end_date is None:
             self.end_date = \
-                pd.to_datetime(
-                    '{}-12-31'.format(max(pc.working_partitions['eia923']['years'])))
-            # max(pc.working_partitions['eia860m']['year_month'])))
+                pd.to_datetime('{}-12-31'.format(
+                    max(pc.working_partitions['eia923']['years'])))
+
         else:
             # Make sure it's a date... and not a string.
             self.end_date = pd.to_datetime(end_date)
@@ -381,7 +380,8 @@ class CompileTables(object):
         self.pt = pudl.output.pudltabl.get_table_meta(self.pudl_engine)
 
         self.pudl_out = pudl.output.pudltabl.PudlTabl(
-            pudl_engine=pudl_engine, freq=self.freq, roll=roll, fill=fill)
+            pudl_engine=pudl_engine, freq=self.freq,
+            roll_fuel_cost=roll_fuel_cost, fill_fuel_cost=fill_fuel_cost)
 
         self._dfs = {
             # pudl sqlite tables

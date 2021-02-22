@@ -4,5 +4,5 @@ notebooks/*.ipynb*
 *.pkl.gz
 .ipynb_checkpoints*
 *egg-info*
-src/rmi_pudl/__pycache__*
+src/pudl_rmi/__pycache__*
 .DS_Store

@@ -28,7 +28,7 @@ import pandas as pd
 import numpy as np
 
 import pudl
-import rmi_pudl.make_plant_parts_eia as make_plant_parts_eia
+import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
