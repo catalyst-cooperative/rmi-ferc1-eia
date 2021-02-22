@@ -1,5 +1,8 @@
 __pycache__/*
 */.DS_Store*
 notebooks/*.ipynb*
-outputs/*
 *.pkl.gz
+.ipynb_checkpoints*
+*egg-info*
+src/rmi_pudl/__pycache__*
+.DS_Store

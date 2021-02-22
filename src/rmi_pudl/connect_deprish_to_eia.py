@@ -20,8 +20,8 @@ from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
 from xlrd import XLRDError
 
-import make_plant_parts_eia
-import deprish
+import rmi_pudl.make_plant_parts_eia as make_plant_parts_eia
+import rmi_pudl.deprish as deprish
 import pudl
 
 logger = logging.getLogger(__name__)

@@ -28,7 +28,7 @@ import pandas as pd
 import numpy as np
 
 import pudl
-import make_plant_parts_eia
+import rmi_pudl.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +90,10 @@ class Extractor:
                 self.file_path,
                 skiprows=self.skiprows,
                 sheet_name=self.sheet_name,
-                engine="xlrd",
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},
-                na_values=NA_VALUES)
+                na_values=NA_VALUES
+            )
+            .dropna(axis='columns', how='all')
         )
 
 
@@ -237,6 +238,7 @@ class Transformer:
                 )
             # we want to do this filling in twice because the order matters.
             filled_df = _fill_in_assign(filled_df).pipe(_fill_in_assign)
+            self.filled_df = filled_df
 
         return self.filled_df
 
@@ -261,8 +263,31 @@ class Transformer:
                 a count of instances of the common records and main records.
 
         """
+        common_pb = self.get_common_plant_bal(split_col=split_col)
+
+        deprish_w_c = (
+            pd.merge(
+                self.early_tidy(),
+                common_pb,
+                left_on=['line_id', 'ferc_acct'],
+                right_on=['line_id_main', 'ferc_acct'],
+                how='left',
+                suffixes=('', '_common')
+            )
+            .drop(columns=['line_id_main'])
+        )
+        # at this stage we have merged in the plant_balance of the common
+        # records with their associated main depreciation records, so we can
+        # remove the common records from the main depreciation table.
+        deprish_w_c = deprish_w_c.loc[
+            ~deprish_w_c.line_id.isin(common_pb.line_id_common.unique())]
+
+        return deprish_w_c
+
+    def get_common_plant_bal(self, split_col='plant_balance'):
+        """Get."""
         common_assn = get_common_assn()
-        self.common_len = len(common_assn.line_id_common.unique())
+        self.common_len = len(common_assn.line_id_common)
         # merge back in the ferc acct #
         common_assn_acct = (
             pd.merge(
@@ -284,27 +309,10 @@ class Transformer:
             )
             .drop(columns=['line_id'])
             .drop_duplicates()
+            .dropna(subset=['line_id_common', 'line_id_main', split_col])
             .pipe(self._count_common_assn)
         )
-
-        deprish_w_c = (
-            pd.merge(
-                self.early_tidy(),
-                common_pb,
-                left_on=['line_id', 'ferc_acct'],
-                right_on=['line_id_main', 'ferc_acct'],
-                how='left',
-                suffixes=('', '_common')
-            )
-            .drop(columns=['line_id_main'])
-        )
-        # at this stage we have merged in the plant_balance of the common
-        # records with their associated main depreciation records, so we can
-        # remove the common records from the main depreciation table.
-        deprish_w_c = deprish_w_c.loc[
-            ~deprish_w_c.line_id.isin(common_assn.line_id_common.unique())]
-
-        return deprish_w_c
+        return common_pb
 
     def _count_common_assn(self, common_pb):
         common_pb_w_counts = (
@@ -642,8 +650,8 @@ def agg_to_idx(deprish_df, idx_cols):
                     deprish_df,
                     data_col=data_col,
                     weight_col=weight_col,
-                    by_col=idx_cols)
-                .rename(columns={data_col: f"{data_col}_wt"}),
+                    by_col=idx_cols),
+                # .rename(columns={data_col: f"{data_col}_wt"})
                 how='outer', on=idx_cols))
 
     if 'plant_balance_w_common' in deprish_df.columns:
@@ -721,7 +729,7 @@ def get_ferc_acct_type_map(file_path):
 def add_ferc_acct_name(tidy_df):
     """Add the FERC Account name into the tidied deprecation table."""
     file_path_ferc_acct_names = (
-        pathlib.Path().cwd().parent / 'ferc_acct_names.csv')
+        pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
     ferc_acct_names = get_ferc_acct_type_map(
         file_path_ferc_acct_names)
 

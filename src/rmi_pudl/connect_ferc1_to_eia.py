@@ -43,7 +43,7 @@ from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
-import make_plant_parts_eia
+import rmi_pudl.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
