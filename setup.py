@@ -18,7 +18,8 @@ setup(
     version='0.0.1',
     install_requires=[
         "catalystcoop.pudl>0.3.2",
-        "fuzzywuzzy",
+        "fuzzywuzzy~=0.18.0",
+        "recordlinkage~=0.14.0",
     ],
     python_requires=">=3.8",
     classifiers=[

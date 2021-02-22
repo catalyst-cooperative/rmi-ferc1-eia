@@ -1,6 +1,6 @@
 version: "3"
 services:
-  pudl-rmi:
+  jupyterlab:
     image: catalystcoop/pudl-rmi:latest
     volumes:
       - type: bind
@@ -16,10 +16,14 @@ services:
         source: ./outputs
         target: /home/jovyan/outputs
         consistency: delegated
+      - type: bind
+        source: ./src
+        target: /home/jovyan/src
+        consistency: delegated
     environment:
       - API_KEY_EIA
     ports:
       - published: 8888
         target: 8888
-    container_name: pudl_jupyterlab
+    container_name: pudl_rmi
     command: jupyter lab --ip 0.0.0.0 --no-browser
