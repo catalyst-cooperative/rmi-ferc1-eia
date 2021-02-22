@@ -1,6 +1,6 @@
 version: "3"
 services:
-  pudl-jupyterlab:
+  pudl-rmi:
     image: catalystcoop/pudl-rmi:latest
     volumes:
       - type: bind
