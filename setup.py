@@ -20,8 +20,9 @@ setup(
         "catalystcoop.pudl>0.3.2",
         "fuzzywuzzy~=0.18.0",
         "recordlinkage~=0.14.0",
+        "python-levenshtein~=0.12.2",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.8,<3.9",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
