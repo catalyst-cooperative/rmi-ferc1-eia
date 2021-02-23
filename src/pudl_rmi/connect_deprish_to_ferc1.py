@@ -828,7 +828,7 @@ def rmi_output_ify(scaled_df, deprish_df):
     )
     # get the rename dict.. once this is stable, convert/store this as an dict
     rename = pd.read_excel(
-        pathlib.Path().cwd().parent / 'rmi_output_formt.xlsx')
+        pathlib.Path().cwd().parent / 'inputs' / 'rmi_output_formt.xlsx')
     rename_dict = (
         rename[rename.pudl_name.notnull()]
         .set_index('pudl_name').to_dict()['rmi_name']

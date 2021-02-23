@@ -93,6 +93,8 @@ class Extractor:
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},
                 na_values=NA_VALUES
             )
+            # for some reason the read_excel is grabbing ALL OF THE COLUMNS
+            # .... in the whole dang sheet
             .dropna(axis='columns', how='all')
         )
 
@@ -607,6 +609,7 @@ def agg_to_idx(deprish_df, idx_cols):
         deprish_df (pandas.DataFrame): table of depreciation data at the
             plant_part_name/ferc_acct level. Result of
             `Transformer().execute()`.
+        idx_cols (iterable): list of column names to aggregate on.
 
     Returns:
         pandas.DataFrame: table of depreciation data scaled down to the asset
@@ -627,7 +630,7 @@ def agg_to_idx(deprish_df, idx_cols):
         'plant_balance', 'book_reserve',
         'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
     if 'plant_balance_w_common' in deprish_df.columns:
-        sum_cols.append(['plant_balance_w_common'])
+        sum_cols.append('plant_balance_w_common')
     # aggregate..
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
@@ -774,14 +777,42 @@ def get_common_assn():
     return common_assn
 
 
-def make_common_assn_for_labeling(common_assn, pudl_out, transformer):
-    """Make."""
+def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
+    """
+    Grab the tidy common plant assn and convert into a human-readable version.
+
+    Args:
+        pudl_out (pudl.output.pudltabl.PudlTabl): A PUDL output object that
+            will be used to generate a aggregated table with plant records.
+        file_path_deprish (path-like): path to the compiled depreciation
+            studies. If transformer is passed, file_path_deprish can be None.
+            Typically stored in: {repo_directory}/inputs/depreciation_rmi.xlsx
+        transformer (deprish.Transformer): depreciation transformer for
+            Default is None. If None, the transfomer will be generated with
+            file_path_deprish.
+
+    Returns:
+        pandas.DataFrame: table mirroring RMI depreciation modeling spreadsheet
+            section for generating mannual overrides for common plant
+            associations.
+    """
+    common_assn = get_common_assn()
     common_assn_wide = transform_common_assn_for_labeling(common_assn)
+    if transformer is None:
+        # create a transformer object to process the extracted data
+        transformer = Transformer(
+            extract_df=Extractor(
+                file_path=file_path_deprish,
+                sheet_name=0).execute()
+        )
+
     plants_pudl = get_plant_pudl_info(pudl_out)
     common_labeling = (
         pd.merge(
-            agg_to_idx(transformer.early_tidy(),
-                       idx_cols=['line_id', 'plant_id_pudl', 'report_date']),
+            agg_to_idx(
+                transformer.early_tidy(),
+                idx_cols=['line_id', 'utility_name_ferc1'] +
+                [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']),
             plants_pudl,
             on=['plant_id_pudl', 'report_date'],
             how='left',
@@ -811,7 +842,13 @@ def make_common_assn_for_labeling(common_assn, pudl_out, transformer):
 
 
 def get_plant_pudl_info(pudl_out):
-    """Grab info about plants, aggregated to plant_id_pudl/report_date."""
+    """
+    Grab info about plants, aggregated to plant_id_pudl/report_date.
+
+    Args:
+        pudl_out (pudl.output.pudltabl.PudlTabl): A PUDL output object that
+            will be used to generate a aggregated table with plant records.
+    """
     plants_pudl = (
         pudl_out.gens_eia860()
         .assign(count='place_holder')

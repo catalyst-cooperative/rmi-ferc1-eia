@@ -1733,7 +1733,7 @@ def get_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
     We must refactor this with a better path dependency. Or just store this
     map as a dataframe or dictionary.
     """
-    file_path = pathlib.Path.cwd().parent / file_name
+    file_path = pathlib.Path.cwd().parent / 'inputs' / file_name
     eia_ferc_acct_map = (
         pd.read_excel(file_path, skiprows=0, sheet_name=3)
         [['technology_description', 'prime_mover_code', 'ferc_acct_name']]
