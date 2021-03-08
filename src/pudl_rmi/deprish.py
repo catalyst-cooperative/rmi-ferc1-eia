@@ -196,7 +196,17 @@ class Transformer:
         Fill in depreciaion data of a specific dataframe.
 
         This method will enable filling in data earlier in the transform
-        process, as well as at the standard 'fill_in' step.
+        process, as well as at the standard 'fill_in' step. This enables
+        filling in during the common plant allocation to use a more fleshed out
+        unaccrued_balance, and then
+
+        Args:
+            df_to_fill (pandas.DataFrame): depreciation table to fill in.
+            which_plant_balance (string): Which plant balance column to be used
+                during the filling in. Either 'plant_balance' or
+                'plant_balance_w_common'. If this method is being run before
+                the common plant allocation use 'plant_balance'. Default is
+                'plant_balance_w_common'.
         """
         filled_df = deepcopy(df_to_fill)
         # convert % columns - which originally are a combination of whole
@@ -234,38 +244,51 @@ class Transformer:
         filled_df['net_salvage'] = - filled_df['net_salvage'].abs()
 
         # then we need to do the actuall filling in
-        # we want to do this filling in twice because the order matters.
-        filled_df = (
-            self._fill_in_assign(
-                filled_df, which_plant_balance=which_plant_balance)
-            .pipe(
-                self._fill_in_assign,
-                which_plant_balance=which_plant_balance)
-        )
+        filled_df = self._fill_in_assign(
+            filled_df, which_plant_balance=which_plant_balance)
         return filled_df
 
     def _fill_in_assign(self, filled_df, which_plant_balance):
-        return filled_df.assign(
-            depreciation_annual_epxns=lambda x:
-            # is this correct? should it be unaccrued_balance
-            x.depreciation_annual_epxns.fillna(
-                x.depreciation_annual_rate * x[which_plant_balance]),
-            net_salvage_rate=lambda x:
-                # first clean % v num, then net_salvage/book_value
-                x.net_salvage_rate.fillna(
-                    x.net_salvage / x.book_reserve),
-            net_salvage=lambda x:
-                x.net_salvage.fillna(
-                    x.net_salvage_rate * x.book_reserve),
-            book_reserve=lambda x: x.book_reserve.fillna(
-                x[which_plant_balance] -
-                (x.depreciation_annual_epxns * x.remaining_life_avg)),
-            unaccrued_balance=lambda x:  # is this correct?
-                x.unaccrued_balance.fillna(
-                    x[which_plant_balance] - x.book_reserve - x.net_salvage),
-            reserve_rate=lambda x: x.book_reserve /
-                x[which_plant_balance],
-        )
+        """
+        Calculate missing values in the depreciaion studies.
+
+        This method does the filling in twice because these variables are
+        related.
+
+        Args:
+            df_to_fill (pandas.DataFrame): depreciation table to fill in. This
+                table should have cleaned rate columns (they should all be
+                rates, not percentages) because we will use them.
+            which_plant_balance (string): Which plant balance column to be used
+                during the filling in. Either 'plant_balance' or
+                'plant_balance_w_common'. If this method is being run before
+                the common plant allocation use 'plant_balance'. Default is
+                'plant_balance_w_common'.
+        """
+        for _ in range(2):
+            filled_df = filled_df.assign(
+                depreciation_annual_epxns=lambda x:
+                # is this correct? should it be unaccrued_balance?
+                x.depreciation_annual_epxns.fillna(
+                    x.depreciation_annual_rate * x[which_plant_balance]),
+                net_salvage_rate=lambda x:
+                    # first clean % v num, then net_salvage/book_value
+                    x.net_salvage_rate.fillna(
+                        x.net_salvage / x.book_reserve),
+                net_salvage=lambda x:
+                    x.net_salvage.fillna(
+                        x.net_salvage_rate * x.book_reserve),
+                book_reserve=lambda x: x.book_reserve.fillna(
+                    x[which_plant_balance] -
+                    (x.depreciation_annual_epxns * x.remaining_life_avg)),
+                unaccrued_balance=lambda x:  # is this correct?
+                    x.unaccrued_balance.fillna(
+                        x[which_plant_balance] - x.book_reserve
+                        - x.net_salvage),
+                reserve_rate=lambda x: x.book_reserve /
+                    x[which_plant_balance],
+            )
+        return filled_df
 
     def _convert_rate_cols(self, tidy_df):
         """Convert percent columns to numeric."""
