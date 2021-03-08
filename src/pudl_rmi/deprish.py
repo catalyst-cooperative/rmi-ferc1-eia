@@ -43,7 +43,7 @@ IDX_COLS_DEPRISH = [
     'plant_id_pudl',
     'plant_part_name',
     'ferc_acct',
-    'note',
+    # 'note',
     'utility_id_pudl'
 ]
 
@@ -96,6 +96,7 @@ class Extractor:
             # for some reason the read_excel is grabbing ALL OF THE COLUMNS
             # .... in the whole dang sheet
             .dropna(axis='columns', how='all')
+            .dropna(axis='rows', how='all')
         )
 
 
@@ -183,66 +184,88 @@ class Transformer:
             and nulls have been filled in.
         """
         if clobber or self.filled_df is None:
-            filled_df = deepcopy(self.reshape())
-            # convert % columns - which originally are a combination of whole
-            # numbers of decimals (e.g. 88.2% would either be represented as
-            # 88.2 or .882). Some % columns have boolean columns (ending in
-            # type_pct) that we fleshed out to know wether the values were
-            # reported as numbers or %s. There is one column that was easy to
-            # clean by checking whether or not the value is greater than 1.
-            filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
-                          'net_salvage_rate'] = (
-                filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
-                              'net_salvage_rate'] * 100
+            filled_df = self.fill_in_df(
+                deepcopy(self.reshape()),
+                which_plant_balance='plant_balance_w_common'
             )
-            filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
-                          'depreciation_annual_rate'] = (
-                filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
-                              'depreciation_annual_rate'] / 100
-            )
-            filled_df.loc[abs(filled_df.reserve_rate) >= 1,
-                          'reserve_rate'] = filled_df.loc[
-                abs(filled_df.reserve_rate) >= 1, 'reserve_rate'] / 100
-            logger.info(
-                f"# of reserve_rate over 1 (100%): "
-                f"{len(filled_df.loc[abs(filled_df.reserve_rate) >= 1])} "
-                "Higher #s here may indicate an issue with the original data "
-                "or the fill_in method"
-            )
-            # get rid of the bool columns we used to clean % columns
-            filled_df = filled_df.drop(
-                columns=filled_df.filter(like='num'))
-
-            filled_df['net_salvage_rate'] = (
-                - filled_df['net_salvage_rate'].abs()
-            )
-            filled_df['net_salvage'] = - filled_df['net_salvage'].abs()
-
-            # then we need to do the actuall filling in
-            def _fill_in_assign(filled_df):
-                return filled_df.assign(
-                    net_salvage_rate=lambda x:
-                        # first clean % v num, then net_salvage/book_value
-                        x.net_salvage_rate.fillna(
-                            x.net_salvage / x.book_reserve),
-                    net_salvage=lambda x:
-                        x.net_salvage.fillna(
-                            x.net_salvage_rate * x.book_reserve),
-                    book_reserve=lambda x: x.book_reserve.fillna(
-                        x.plant_balance_w_common -
-                        (x.depreciation_annual_epxns * x.remaining_life_avg)),
-                    unaccrued_balance=lambda x:
-                        x.unaccrued_balance.fillna(
-                            x.plant_balance_w_common - x.book_reserve
-                            - x.net_salvage),  # ??
-                    reserve_rate=lambda x: x.book_reserve /
-                    x.plant_balance_w_common,
-                )
-            # we want to do this filling in twice because the order matters.
-            filled_df = _fill_in_assign(filled_df).pipe(_fill_in_assign)
             self.filled_df = filled_df
-
         return self.filled_df
+
+    def fill_in_df(self, df_to_fill, which_plant_balance='plant_balance_w_common'):
+        """
+        Fill in depreciaion data of a specific dataframe.
+
+        This method will enable filling in data earlier in the transform
+        process, as well as at the standard 'fill_in' step.
+        """
+        filled_df = deepcopy(df_to_fill)
+        # convert % columns - which originally are a combination of whole
+        # numbers of decimals (e.g. 88.2% would either be represented as
+        # 88.2 or .882). Some % columns have boolean columns (ending in
+        # type_pct) that we fleshed out to know wether the values were
+        # reported as numbers or %s. There is one column that was easy to
+        # clean by checking whether or not the value is greater than 1.
+        filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+                      'net_salvage_rate'] = (
+            filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
+                          'net_salvage_rate'] * 100
+        )
+        filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
+                      'depreciation_annual_rate'] = (
+            filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
+                          'depreciation_annual_rate'] / 100
+        )
+        filled_df.loc[abs(filled_df.reserve_rate) >= 1,
+                      'reserve_rate'] = filled_df.loc[
+            abs(filled_df.reserve_rate) >= 1, 'reserve_rate'] / 100
+        logger.info(
+            f"# of reserve_rate over 1 (100%): "
+            f"{len(filled_df.loc[abs(filled_df.reserve_rate) >= 1])} "
+            "Higher #s here may indicate an issue with the original data "
+            "or the fill_in method"
+        )
+        # get rid of the bool columns we used to clean % columns
+        filled_df = filled_df.drop(
+            columns=filled_df.filter(like='num'))
+
+        filled_df['net_salvage_rate'] = (
+            - filled_df['net_salvage_rate'].abs()
+        )
+        filled_df['net_salvage'] = - filled_df['net_salvage'].abs()
+
+        # then we need to do the actuall filling in
+        # we want to do this filling in twice because the order matters.
+        filled_df = (
+            self._fill_in_assign(
+                filled_df, which_plant_balance=which_plant_balance)
+            .pipe(
+                self._fill_in_assign,
+                which_plant_balance=which_plant_balance)
+        )
+        return filled_df
+
+    def _fill_in_assign(self, filled_df, which_plant_balance):
+        return filled_df.assign(
+            depreciation_annual_epxns=lambda x:
+            # is this correct? should it be unaccrued_balance
+            x.depreciation_annual_epxns.fillna(
+                x.depreciation_annual_rate * x[which_plant_balance]),
+            net_salvage_rate=lambda x:
+                # first clean % v num, then net_salvage/book_value
+                x.net_salvage_rate.fillna(
+                    x.net_salvage / x.book_reserve),
+            net_salvage=lambda x:
+                x.net_salvage.fillna(
+                    x.net_salvage_rate * x.book_reserve),
+            book_reserve=lambda x: x.book_reserve.fillna(
+                x[which_plant_balance] -
+                (x.depreciation_annual_epxns * x.remaining_life_avg)),
+            unaccrued_balance=lambda x:  # is this correct?
+                x.unaccrued_balance.fillna(
+                    x[which_plant_balance] - x.book_reserve - x.net_salvage),
+            reserve_rate=lambda x: x.book_reserve /
+                x[which_plant_balance],
+        )
 
     def _convert_rate_cols(self, tidy_df):
         """Convert percent columns to numeric."""
@@ -406,20 +429,24 @@ class Transformer:
         ratio of each records' plant balance compared to the total
         plant/ferc_acct plant balance.
         """
+        weight_col = 'unaccrued_balance'
+        filled_df = self.fill_in_df(
+            deprish_w_c, which_plant_balance='plant_balance')
         # exclude the nulls and the 0's
-        simple_case_df = deprish_w_c[
-            (deprish_w_c[split_col].notnull()) & (deprish_w_c[split_col] != 0)
+        simple_case_df = filled_df[
+            (filled_df[weight_col].notnull()) & (
+                filled_df[weight_col] != 0)
         ]
         logger.info(
             f"We are calculating the common portion for {len(simple_case_df)} "
-            f"records w/ {split_col}")
+            f"records w/ {weight_col}")
 
         # we want to know the sum of the potential split_cols for each ferc1
         # option
         gb_df = (
             simple_case_df
             .groupby(by=IDX_COLS_COMMON, dropna=False)
-            [[split_col]].sum(min_count=1).reset_index()
+            [[weight_col]].sum(min_count=1).reset_index()
         )
 
         df_w_tots = (
@@ -431,8 +458,8 @@ class Transformer:
                 suffixes=("", "_sum"))
         )
 
-        df_w_tots[f"{split_col}_ratio"] = (
-            df_w_tots[split_col] / df_w_tots[f"{split_col}_sum"]
+        df_w_tots[f"{weight_col}_ratio"] = (
+            df_w_tots[weight_col] / df_w_tots[f"{weight_col}_sum"]
         )
 
         # the default way to calculate each plant sub-part's common plant
@@ -440,7 +467,7 @@ class Transformer:
         # common plant balance for the plant/ferc_acct group.
         df_w_tots[f"{split_col}_common_portion"] = (
             df_w_tots[f'{split_col}{common_suffix}']
-            * df_w_tots[f"{split_col}_ratio"])
+            * df_w_tots[f"{weight_col}_ratio"])
 
         return df_w_tots
 
@@ -464,10 +491,13 @@ class Transformer:
         assigned the full common porportion in the
         ``calc_common_portion_simple()``.
         """
+        weight_col = 'unaccrued_balance'
+        filled_df = self.fill_in_df(
+            deprish_w_c, which_plant_balance='plant_balance')
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
-        edge_case_df = deprish_w_c[
-            (deprish_w_c[split_col].isnull()) | (deprish_w_c[split_col] == 0)
+        edge_case_df = filled_df[
+            (filled_df[weight_col].isnull()) | (filled_df[weight_col] == 0)
         ]
 
         logger.info(
@@ -515,10 +545,11 @@ class Transformer:
                                  new_data_col,
                                  common_suffix):
         """Check to see if the common plant allocation was effective."""
+        weight_col = 'unaccrued_balance'
         calc_check = (
             df_w_tots
             .groupby(by=IDX_COLS_DEPRISH, dropna=False)
-            [[f"{split_col}_ratio", f"{split_col}_common_portion"]]
+            [[f"{weight_col}_ratio", f"{split_col}_common_portion"]]
             .sum(min_count=1)
             .add_suffix("_check")
             .reset_index()
@@ -576,7 +607,7 @@ class Transformer:
                 'generated here'
             )
 
-        bad_ratio_check = (df_w_tots[~df_w_tots['plant_balance_ratio_check']
+        bad_ratio_check = (df_w_tots[~df_w_tots[f'{weight_col}_ratio_check']
                                      .round(0).isin([1, 0])])
         if not bad_ratio_check.empty:
             warnings.warn(
@@ -759,7 +790,7 @@ def assign_line_id(df):
         x.plant_id_pudl.map(str) + "_" +
         x.plant_part_name.map(str).str.lower() + "_" +
         x.ferc_acct_name.fillna("").str.lower() + "_" +
-        x.note.fillna("") + "_" +
+        # x.note.fillna("") + "_" +
         x.utility_id_pudl.map(str) + "_" +
         x.data_source.fillna("")
     )
@@ -836,6 +867,17 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
         )
         .drop(columns=['_merge'])
     )
+    common_labeling = (
+        common_labeling.assign(
+            line_id_main_all=lambda l: np.where(
+                l.line_id_main_1.notnull(), l.line_id_main_1, ""))
+    )
+    for col in [x for x in common_labeling.filter(like='line_id_main')
+                if x != 'line_id_main_all' and x != 'line_id_main_1']:
+        common_labeling = common_labeling.assign(
+            line_id_main_all=lambda l: np.where(
+                l[col].notnull(),
+                l.line_id_main_all + "; " + l[col], l.line_id_main_all))
 
     common_labeling.index.name = 'line_id'
     return common_labeling

@@ -517,11 +517,10 @@ class CompilePlantParts(object):
         self.part_true_gran_labels = None
         self.plant_parts_df = None
         self.clobber = clobber
-        self.plant_parts_ordered = ['plant', 'plant_unit',
-                                    'plant_prime_mover', 'plant_technology',
-                                    'plant_prime_fuel', 'plant_ferc_acct',
-                                    'plant_gen',
-                                    ]
+        self.plant_parts_ordered = [
+            'plant', 'plant_unit', 'plant_prime_mover', 'plant_technology',
+            'plant_prime_fuel', 'plant_ferc_acct', 'plant_gen'
+        ]
         self.parts_to_parent_parts = self.get_parts_to_parent_parts()
         self.gen_util_ids = ['plant_id_eia', 'generator_id',
                              'report_date', 'utility_id_eia']
