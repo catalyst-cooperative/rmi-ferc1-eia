@@ -1725,14 +1725,13 @@ def weighted_average(df, data_col, weight_col, by_col):
     return result.to_frame(name=data_col).reset_index()
 
 
-def get_eia_ferc_acct_map(file_name='depreciation_rmi.xlsx'):
+def get_eia_ferc_acct_map(file_path=pathlib.Path.cwd().parent / 'inputs/depreciation_rmi.xlsx'):
     """
     Get map of EIA technology_description/pm codes <> ferc accounts.
 
     We must refactor this with a better path dependency. Or just store this
     map as a dataframe or dictionary.
     """
-    file_path = pathlib.Path.cwd().parent / 'inputs' / file_name
     eia_ferc_acct_map = (
         pd.read_excel(file_path, skiprows=0, sheet_name=3)
         [['technology_description', 'prime_mover_code', 'ferc_acct_name']]

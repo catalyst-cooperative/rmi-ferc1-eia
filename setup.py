@@ -22,7 +22,7 @@ setup(
         "recordlinkage~=0.14.0",
         "python-levenshtein~=0.12.2",
     ],
-    python_requires=">=3.8,<3.9",
+    python_requires=">=3.8,<3.10",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

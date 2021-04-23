@@ -44,7 +44,8 @@ IDX_COLS_DEPRISH = [
     'plant_part_name',
     'ferc_acct',
     # 'note',
-    'utility_id_pudl'
+    'utility_id_pudl',
+    'data_source'
 ]
 
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
@@ -135,7 +136,11 @@ class Transformer:
         self.reshaped_df = self.reshape(clobber=clobber)
         # value transform
         self.filled_df = self.fill_in(clobber=clobber)
-        return self.filled_df
+        self.agg_by_plant_df = agg_to_idx(
+            self.filled_df,
+            idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
+            + ['line_id', 'common', 'utility_name_ferc1'])
+        return self.agg_by_plant_df
 
     def early_tidy(self, clobber=False):
         """Early transform type assignments and column assignments."""
@@ -145,9 +150,9 @@ class Transformer:
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
                 self.extract_df
-                .pipe(self._convert_rate_cols)
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
+                .pipe(self._convert_rate_cols)
                 .assign(report_year=lambda x: x.report_date.dt.year)
                 .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
                 .pipe(add_ferc_acct_name)
@@ -191,7 +196,9 @@ class Transformer:
             self.filled_df = filled_df
         return self.filled_df
 
-    def fill_in_df(self, df_to_fill, which_plant_balance='plant_balance_w_common'):
+    def fill_in_df(self,
+                   df_to_fill,
+                   which_plant_balance='plant_balance_w_common'):
         """
         Fill in depreciaion data of a specific dataframe.
 
@@ -209,39 +216,6 @@ class Transformer:
                 'plant_balance_w_common'.
         """
         filled_df = deepcopy(df_to_fill)
-        # convert % columns - which originally are a combination of whole
-        # numbers of decimals (e.g. 88.2% would either be represented as
-        # 88.2 or .882). Some % columns have boolean columns (ending in
-        # type_pct) that we fleshed out to know wether the values were
-        # reported as numbers or %s. There is one column that was easy to
-        # clean by checking whether or not the value is greater than 1.
-        filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
-                      'net_salvage_rate'] = (
-            filled_df.loc[~filled_df['net_salvage_rate_type_pct'],
-                          'net_salvage_rate'] * 100
-        )
-        filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
-                      'depreciation_annual_rate'] = (
-            filled_df.loc[filled_df['depreciation_annual_rate_type_pct'],
-                          'depreciation_annual_rate'] / 100
-        )
-        filled_df.loc[abs(filled_df.reserve_rate) >= 1,
-                      'reserve_rate'] = filled_df.loc[
-            abs(filled_df.reserve_rate) >= 1, 'reserve_rate'] / 100
-        logger.info(
-            f"# of reserve_rate over 1 (100%): "
-            f"{len(filled_df.loc[abs(filled_df.reserve_rate) >= 1])} "
-            "Higher #s here may indicate an issue with the original data "
-            "or the fill_in method"
-        )
-        # get rid of the bool columns we used to clean % columns
-        filled_df = filled_df.drop(
-            columns=filled_df.filter(like='num'))
-
-        filled_df['net_salvage_rate'] = (
-            - filled_df['net_salvage_rate'].abs()
-        )
-        filled_df['net_salvage'] = - filled_df['net_salvage'].abs()
 
         # then we need to do the actuall filling in
         filled_df = self._fill_in_assign(
@@ -285,8 +259,17 @@ class Transformer:
                     x.unaccrued_balance.fillna(
                         x[which_plant_balance] - x.book_reserve
                         - x.net_salvage),
-                reserve_rate=lambda x: x.book_reserve /
-                    x[which_plant_balance],
+                reserve_rate=lambda x: x.reserve_rate.fillna(
+                    x.book_reserve / x[which_plant_balance]),
+            )
+            filled_df = filled_df.assign(
+                book_reserve=lambda x: x.book_reserve.fillna(
+                    x.net_salvage_rate * x.unaccrued_balance
+                    - x.book_reserve,),
+                unaccrued_balance=lambda x: x.unaccrued_balance.fillna(
+                    x[which_plant_balance] * x.depreciation_annual_rate
+                    * x.remaining_life_avg),
+
             )
         return filled_df
 
@@ -297,6 +280,49 @@ class Transformer:
                        'depreciation_annual_rate']
         for col in to_num_cols:
             tidy_df[col] = pd.to_numeric(tidy_df[col])
+
+        # FERC data is reported in $1,000s. we want to convert everyting to $s
+        cols_dollar = ['plant_balance', 'book_reserve',
+                       'unaccrued_balance', 'net_salvage',
+                       'depreciation_annual_epxns']
+
+        tidy_df.loc[tidy_df.data_source == "FERC", cols_dollar] = (
+            tidy_df.loc[tidy_df.data_source == "FERC", cols_dollar] * 1000)
+
+        # convert % columns - which originally are a combination of whole
+        # numbers of decimals (e.g. 88.2% would either be represented as
+        # 88.2 or .882). Some % columns have boolean columns (ending in
+        # type_pct) that we fleshed out to know wether the values were
+        # reported as numbers or %s. There is one column that was easy to
+        # clean by checking whether or not the value is greater than 1.
+        tidy_df.loc[~tidy_df['net_salvage_rate_type_pct'],
+                    'net_salvage_rate'] = (
+            tidy_df.loc[~tidy_df['net_salvage_rate_type_pct'],
+                        'net_salvage_rate'] * 100
+        )
+        tidy_df.loc[tidy_df['depreciation_annual_rate_type_pct'],
+                    'depreciation_annual_rate'] = (
+            tidy_df.loc[tidy_df['depreciation_annual_rate_type_pct'],
+                        'depreciation_annual_rate'] / 100
+        )
+        tidy_df.loc[abs(tidy_df.reserve_rate) >= 1,
+                    'reserve_rate'] = tidy_df.loc[
+            abs(tidy_df.reserve_rate) >= 1, 'reserve_rate'] / 100
+        logger.info(
+            f"# of reserve_rate over 1 (100%): "
+            f"{len(tidy_df.loc[abs(tidy_df.reserve_rate) >= 1])}. "
+            "Higher #s here may indicate an issue with the original data "
+            "or the fill_in method"
+        )
+        # get rid of the bool columns we used to clean % columns
+        tidy_df = tidy_df.drop(
+            columns=tidy_df.filter(like='num'))
+
+        tidy_df['net_salvage_rate'] = (
+            - tidy_df['net_salvage_rate'].abs()
+        )
+        tidy_df['net_salvage'] = - tidy_df['net_salvage'].abs()
+
         return tidy_df
 
     def split_merge_common_records(self, split_col):
@@ -312,6 +338,7 @@ class Transformer:
 
         """
         common_pb = self.get_common_plant_bal(split_col=split_col)
+        # test_yucca_line_id(common_pb, 'common_pb')
 
         deprish_w_c = (
             pd.merge(
@@ -320,26 +347,28 @@ class Transformer:
                 left_on=['line_id', 'ferc_acct'],
                 right_on=['line_id_main', 'ferc_acct'],
                 how='left',
-                suffixes=('', '_common')
+                suffixes=('', '_common'),
+                # validate='1:1'
             )
             .drop(columns=['line_id_main'])
         )
         # at this stage we have merged in the plant_balance of the common
         # records with their associated main depreciation records, so we can
         # remove the common records from the main depreciation table.
-        deprish_w_c = deprish_w_c.loc[
-            ~deprish_w_c.line_id.isin(common_pb.line_id_common.unique())]
+        # update: we're going to keep the common records in for RMI
+        # deprish_w_c = deprish_w_c.loc[
+        #    ~deprish_w_c.line_id.isin(common_pb.line_id_common.unique())]
 
         return deprish_w_c
 
     def get_common_plant_bal(self, split_col='plant_balance'):
-        """Get."""
-        common_assn = get_common_assn()
-        self.common_len = len(common_assn.line_id_common)
+        """Get common plant records and their associated plant balance."""
+        # common assn's: common id's w/ main id's
+        self.common_assn = get_common_assn()
         # merge back in the ferc acct #
         common_assn_acct = (
             pd.merge(
-                common_assn,
+                self.common_assn,
                 self.early_tidy()[['line_id', 'ferc_acct']],
                 left_on=['line_id_common'],
                 right_on=['line_id'],
@@ -359,6 +388,8 @@ class Transformer:
             .drop_duplicates()
             .dropna(subset=['line_id_common', 'line_id_main', split_col])
             .pipe(self._count_common_assn)
+            .groupby(['line_id_main', 'ferc_acct'], as_index=False)
+            [[split_col]].sum()
         )
         return common_pb
 
@@ -368,16 +399,16 @@ class Transformer:
             .merge(
                 (
                     common_pb.assign(count_common=1)
-                    .groupby(['line_id_common', 'ferc_acct'])
-                    [['count_common']].sum().reset_index()
+                    .groupby(['line_id_common', 'ferc_acct'], dropna=False)
+                    [['count_common']].sum(min_count=1).reset_index()
                 ),
                 on=['line_id_common', 'ferc_acct']
             )
             .merge(
                 (
                     common_pb.assign(count_main=1)
-                    .groupby(['line_id_main', 'ferc_acct'])
-                    [['count_main']].sum().reset_index()
+                    .groupby(['line_id_main', 'ferc_acct'], dropna=False)
+                    [['count_main']].sum(min_count=1).reset_index()
                 ),
                 on=['line_id_main', 'ferc_acct']
             )
@@ -408,39 +439,52 @@ class Transformer:
         """
         # the new  data col we are trying to generate
         new_data_col = f'{split_col}_w{common_suffix}'
-
         deprish_w_c = self.split_merge_common_records(split_col=split_col)
+        # split apart the common records from the main records.
+        deprish_common = (deprish_w_c.loc[
+            deprish_w_c.line_id.isin(self.common_assn.line_id_common.unique())]
+            .assign(common=True))
+        deprish_w_c = deprish_w_c.loc[
+            ~deprish_w_c.line_id.isin(self.common_assn.line_id_common.unique())
+        ]
 
+        logger.info(
+            f"grabbed {len(deprish_common)} common reocrds and "
+            f"{len(deprish_w_c)} atomic records. of total {len(deprish_w_c)}")
         simple_case_df = self.calc_common_portion_simple(
-            deprish_w_c, split_col, common_suffix, new_data_col)
+            deprish_w_c, split_col, common_suffix)
         edge_case_df = self.calc_common_portion_with_no_part_balance(
-            deprish_w_c, split_col, common_suffix, new_data_col)
-
+            deprish_w_c, split_col, common_suffix)
+        # test_yucca_line_id(simple_case_df, name='edge_case_df')
         deprish_w_common_allocated = pd.concat([simple_case_df, edge_case_df])
-
         # finally, calcuate the new column w/ the % of the total group. if
         # there is no common data, fill in this new data column with the og col
         deprish_w_common_allocated[new_data_col] = (
             deprish_w_common_allocated[f"{split_col}_common_portion"].fillna(0)
             + deprish_w_common_allocated[split_col].fillna(0))
+        # add the common records back in
+        deprish_w_common_allocated = pd.concat(
+            [deprish_w_common_allocated.assign(common=False),
+             deprish_common.assign(common=True)])
 
-        if len(deprish_w_common_allocated) != len(deprish_w_c):
+        if len(deprish_w_common_allocated) != (
+                len(deprish_w_c) + len(deprish_common)):
             raise AssertionError(
                 "smh.. the number of alloacted records "
                 f"({len(deprish_w_common_allocated)}) don't match the "
                 f"original records ({len(deprish_w_c)})... "
                 "so something went wrong here."
             )
-        _ = self._check_common_allocation(
+        df_w_check = self._check_common_allocation(
             deprish_w_common_allocated, split_col, new_data_col, common_suffix)
 
-        return deprish_w_common_allocated
+        # return deprish_w_common_allocated
+        return df_w_check
 
     def calc_common_portion_simple(self,
                                    deprish_w_c,
                                    split_col,
-                                   common_suffix,
-                                   new_data_col):
+                                   common_suffix):
         """
         Generate the portion of the common plant based on the split_col.
 
@@ -453,8 +497,14 @@ class Transformer:
         plant/ferc_acct plant balance.
         """
         weight_col = 'unaccrued_balance'
-        filled_df = self.fill_in_df(
-            deprish_w_c, which_plant_balance='plant_balance')
+        # because we are using a weight_col that might be filled in we're going
+        # to fill it in, but drop all the other columns and merge them back in
+        # after we are done using the weight_col
+        filled_df = (
+            self.fill_in_df(
+                deprish_w_c, which_plant_balance='plant_balance')
+            # [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
+        )
         # exclude the nulls and the 0's
         simple_case_df = filled_df[
             (filled_df[weight_col].notnull()) & (
@@ -497,8 +547,7 @@ class Transformer:
     def calc_common_portion_with_no_part_balance(self,
                                                  deprish_w_c,
                                                  split_col,
-                                                 common_suffix,
-                                                 new_data_col):
+                                                 common_suffix):
         """
         Calculate portion of common when ``split_col`` is null.
 
@@ -571,14 +620,15 @@ class Transformer:
         weight_col = 'unaccrued_balance'
         calc_check = (
             df_w_tots
-            .groupby(by=IDX_COLS_DEPRISH, dropna=False)
+            # .groupby(by=IDX_COLS_DEPRISH, dropna=False)
+            .groupby(by=IDX_COLS_COMMON, dropna=False)
             [[f"{weight_col}_ratio", f"{split_col}_common_portion"]]
             .sum(min_count=1)
             .add_suffix("_check")
             .reset_index()
         )
         df_w_tots = pd.merge(
-            df_w_tots, calc_check, on=IDX_COLS_DEPRISH, how='outer'
+            df_w_tots, calc_check, on=IDX_COLS_COMMON, how='outer'
         )
 
         df_w_tots[f"{split_col}_common_portion_check"] = np.where(
@@ -591,23 +641,13 @@ class Transformer:
 
         # sum up all of the slices of the plant balance column.. these will be
         # used in the logs/asserts below
-        plant_balance_og = (
-            self.tidy_df[self.tidy_df.plant_part_name.notnull()]
-            [split_col].sum()
-        )
-        plant_balance = df_w_tots[split_col].sum()
-        plant_balance_w_common = df_w_tots[df_w_tots.plant_part_name.notnull(
-        )][new_data_col].sum()
-        plant_balance_c = (
-            df_w_tots.drop_duplicates(
-                subset=[c for c in IDX_COLS_DEPRISH if c != 'plant_part_name'],
-                keep='first')
-            [f"{split_col}{common_suffix}"].sum())
-
+        plant_balance_og = df_w_tots[split_col].sum()
+        plant_balance_w_common = df_w_tots[new_data_col].sum()
         logger.info(
             f"The resulting {split_col} allocated is "
             f"{plant_balance_w_common / plant_balance_og:.02%} of the original"
         )
+
         if plant_balance_w_common / plant_balance_og < .99:
             warnings.warn(
                 f"ahhh the {split_col} allocation is off. The resulting "
@@ -617,22 +657,25 @@ class Transformer:
                 f"{plant_balance_w_common:.3}"
             )
 
-        if (plant_balance + plant_balance_c) / plant_balance_og < .99:
+        plant_balance_atomic = df_w_tots[~df_w_tots.common][split_col].sum()
+        plant_balance_c = df_w_tots[df_w_tots.common][split_col].sum()
+        if (plant_balance_atomic + plant_balance_c) / plant_balance_og < .99:
             warnings.warn(
                 "well something went wrong here. even before proportionally "
                 "assigning the common plant balance, the plant balance + "
                 "common doesn't add up."
             )
 
-        if len(df_w_tots) + self.common_len != len(self.early_tidy()):
+        if len(df_w_tots) != len(self.early_tidy()):
             warnings.warn(
                 'ahhh we have a problem here with the number of records being '
-                'generated here'
+                f'generated {len(self.early_tidy())} og vs {len(df_w_tots)}'
             )
 
         bad_ratio_check = (df_w_tots[~df_w_tots[f'{weight_col}_ratio_check']
-                                     .round(0).isin([1, 0])])
+                                     .round(0).isin([1, 0, np.NaN])])
         if not bad_ratio_check.empty:
+            self.bad_ratio_check = bad_ratio_check
             warnings.warn(
                 f"why would you do this?!?! there are {len(bad_ratio_check)} "
                 f"records that are not passing our {split_col} check. "
@@ -643,8 +686,10 @@ class Transformer:
             (df_w_tots.plant_balance_common.isnull()
              & (df_w_tots.plant_balance.notnull()))
             & (df_w_tots.plant_balance != df_w_tots.plant_balance_w_common)
+            & (~df_w_tots.common)
         ]
         if not no_common.empty:
+            self.no_common = no_common
             warnings.warn(
                 f"Ack! We have {len(no_common)} records that have no common "
                 f"{split_col} but the og {split_col} is different than "
@@ -670,6 +715,7 @@ def agg_to_idx(deprish_df, idx_cols):
         level. This functionally removes the granularity of the FERC account #.
 
     """
+    logger.info(f"aggregating to: {idx_cols}")
     # prep for the groupby:
     # we have to break out the columns that need to be summed and the columns
     # which needs to be run through a weighted average aggregation for two
@@ -791,13 +837,15 @@ def add_ferc_acct_name(tidy_df):
         file_path_ferc_acct_names)
 
     # break out the float-y decimals in the ferc acct col into a sub column
-    tidy_df[['ferc_acct', 'ferc_acct_sub']] = (
+    tidy_df[['ferc_acct_main', 'ferc_acct_sub']] = (
         tidy_df.ferc_acct.str.split('.', expand=True))
     tidy_df = (
         pd.merge(
             tidy_df,
             ferc_acct_names[['ferc_acct', 'ferc_acct_name']],
-            on=['ferc_acct'],
+            left_on=['ferc_acct_main'],
+            right_on=['ferc_acct'],
+            suffixes=('', '_merge'),
             how='left',
             validate='m:1'
         )
