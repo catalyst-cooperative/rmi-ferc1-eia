@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 INT_IDS = ['utility_id_ferc1', 'utility_id_pudl',
            'plant_id_pudl', 'report_year']
 
-NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
+NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*", "■"]
 
 IDX_COLS_DEPRISH = [
     'report_date',
