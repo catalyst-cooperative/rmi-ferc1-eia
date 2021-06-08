@@ -15,9 +15,9 @@ setup(
     long_description_content_type="text/x-rst",
     url='https://github.com/catalyst-cooperative/rmi-ferc1-eia/',
     license="MIT",
-    version='0.0.1',
+    version='0.1.0',
     install_requires=[
-        "catalystcoop.pudl>0.3.2",
+        "catalystcoop.pudl @ git+ssh://git@github.com/catalyst-cooperative/pudl.git@dev",
         "fuzzywuzzy~=0.18.0",
         "recordlinkage~=0.14.0",
         "python-levenshtein~=0.12.2",
