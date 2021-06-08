@@ -24,7 +24,7 @@ branch](https://github.com/catalyst-cooperative/pudl/tree/dev) of the [main PUDL
 repository](https://github.com/catalyst-cooperative/pudl), and will install it directly
 from GitHub. This can be a bit slow, as `pip` clones the entire history of the
 repository containing the package being installed. How long it takes will depend on the
-speed of your network connection.
+speed of your network connection. It could be a few minutes.
 
 In order to use this repository, you will need a recent copy of the PUDL database. You
 You can either create one for yourself by [running the ETL
