@@ -17,7 +17,7 @@ setup(
     license="MIT",
     version='0.1.0',
     install_requires=[
-        "catalystcoop.pudl @ git+ssh://git@github.com/catalyst-cooperative/pudl.git@dev",
+        "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@dev",
         "fuzzywuzzy~=0.18.0",
         "recordlinkage~=0.14.0",
         "python-levenshtein~=0.12.2",
