@@ -53,7 +53,27 @@ You can either create one for yourself by [running the ETL
 pipeline](https://catalystcoop-pudl.readthedocs.io/en/latest/dev/run_the_etl.html), or
 you can follow the instructions in the [PUDL examples
 repository](https://github.com/catalyst-cooperative/pudl-examples) to download the
-processed data alongside a Docker container.
+pre-processed data alongside a Docker container.
+
+To work with the pre-processed data **outside** of the Docker container, you will need
+to tell the PUDL software where to find that data on your computer. When you extract the
+pre-processed data archive, it will include a directory named `pudl_data` -- you need to
+put the path to that directory in a file called `.pudl.yml` in your home directory. The
+contents will need to look like the following (but with real paths...):
+
+```yml
+pudl_in: /path/to/your/downloaded/pudl_data
+pudl_out: /the/same/path/to/pudl_data
+```
+
+**NOTE:** If you get to a point where you need or want to run the PUDL ETL for yourself,
+you will need to reset these paths to another location so that you don't accidentally
+overwrite the pre-processed data.
+
+If you're unfamiliar with file paths, directories, and the command line in general, we
+recommend checking out
+[The Basics of the Unix Shell](https://merely-useful.tech/py-rse/bash-basics.html) from
+[Research Software Engineering in Python](https://merely-useful.tech/py-rse/index.html)
 
 ## Process Overview
 Below is a visual overview of the main processes in this repo:
@@ -64,7 +84,3 @@ Each of the outputs shown above have a dedicated module:
 * EIA & Depreciation Connected: [`connect_deprish_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_deprish_to_eia.py)
 * EIA & FERC Connected: [`connect_ferc1_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_ferc1_to_eia.py)
 * Connected Depreciation & FERC: [`connect_ferc1_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_ferc1_to_eia.py)
-
-RMI Collaborators include:
- * @UdayVaradarajan
- * @SamMardell
