@@ -70,10 +70,15 @@ pudl_out: /the/same/path/to/pudl_data
 you will need to reset these paths to another location so that you don't accidentally
 overwrite the pre-processed data.
 
-If you're unfamiliar with file paths, directories, and the command line in general, we
-recommend checking out
-[The Basics of the Unix Shell](https://merely-useful.tech/py-rse/bash-basics.html) from
-[Research Software Engineering in Python](https://merely-useful.tech/py-rse/index.html)
+* If you're unfamiliar with file paths, directories, and the command line in general, we
+  recommend checking out
+  [The Basics of the Unix Shell](https://merely-useful.tech/py-rse/bash-basics.html) from
+  [Research Software Engineering in Python](https://merely-useful.tech/py-rse/index.html).
+* If you'd like more background on reproducible software environments, including
+  software package managers and the role played by containerization systems like
+  Docker, check out the chapter on
+  [Reproducible Research](https://the-turing-way.netlify.app/reproducible-research/renv.html)
+  from [The Turing Way](https://the-turing-way.netlify.app/welcome.html).
 
 ## Process Overview
 Below is a visual overview of the main processes in this repo:
