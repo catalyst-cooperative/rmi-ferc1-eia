@@ -77,7 +77,7 @@ recommend checking out
 
 ## Process Overview
 Below is a visual overview of the main processes in this repo:
-![Design overview:](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/rmi_design.png?raw=true)
+![Design overview:](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/main/rmi_design.png?raw=true)
 
 Each of the outputs shown above have a dedicated module:
 * EIA Master Unit List: [`make_plant_parts_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/make_plant_parts_eia.py)
