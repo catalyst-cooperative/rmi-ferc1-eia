@@ -3,19 +3,30 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  # Basic python environment requirements:
   - pip~=21.0
   - python>=3.8,<3.10
-  - python-snappy~=0.6.0 # Ensures snappy-dev library gets installed
+
+  - python-snappy~=0.6.0  # Ensures snappy-dev library gets installed
+  - numba~=0.53  # not strictly necessary, but speeds some things up by 100x
 
   # So we can run a notebook server
   - jupyterlab~=3.0
   - jupyter-resource-usage~=0.5.0
-  - nbgitpuller~=0.9
+
+  # RMI package requirements, also specified in setup.py
+  - fuzzywuzzy~=0.18.0
+  - recordlinkage~=0.14.0
+  - python-levenshtein~=0.12.2
+
+  # Not normal Python packages that come from PyPI
+  - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
-    # Branch for RMI collaboration, in case we need to update it:
-    - git+https://github.com/catalyst-cooperative/pudl.git@pudl-rmi
-    # For Running Jupyter Notebook Server w/o complaints about build:
-    - jupyter-offlinenotebook~=0.2
+    # If you want to be able to make changes to the PUDL repo as well, you can install
+    # it in editable mode with a line like the following. HOWEVER if you do that, you
+    # should also remove or comment out the github based dependency inside setup.py as
+    # it may supersede the editable installation, which would be confusing.
+    # - --editable ../path/to/your/cloned/pudl/repo
     # Install the local package such that we can do development work:
     - --editable ./
