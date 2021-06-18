@@ -3,11 +3,16 @@ Form 1 plant records, EIA plant records and depreciation study records at the mo
 granular level.
 
 ## Installation
-To install the software in this repository, clone it to your computer using git. E.g.
-
+To install the software in this repository, clone it to your computer using git. If
+you're authenticating using SSH:
 ```sh
 git clone git@github.com:catalyst-cooperative/rmi-ferc1-eia.git
 ```
+Or if you're authenticating via HTTPS:
+```sh
+git clone https://github.com/catalyst-cooperative/rmi-ferc1-eia.git
+```
+
 Then in the top level directory of the repository, create a `conda` environment based on
 the `environment.yml` file that is stored in the repo:
 
