@@ -43,7 +43,6 @@ IDX_COLS_DEPRISH = [
     'plant_id_pudl',
     'plant_part_name',
     'ferc_acct',
-    # 'note',
     'utility_id_pudl',
     'data_source'
 ]
@@ -120,13 +119,17 @@ class Transformer:
         self.reshaped_df = None
         self.filled_df = None
 
-    def execute(self, clobber=False):
+    def execute(self, clobber=False, agg_cols=None):
         """
         Generate a transformed dataframe for the depreciation studies.
 
         Args:
             clobber (bool): if True and dataframe has already been generated,
                 regenergate the datagframe.
+            agg_cols (iterable): list of column names to aggregate on. Default
+                is None, which defualts to: ['report_date', 'plant_id_pudl',
+                'plant_part_name', 'ferc_acct', 'utility_id_pudl',
+                'data_source', 'line_id', 'common', 'utility_name_ferc1']
 
         Returns:
             pandas.dataframe: depreciation study records that have been cleaned
@@ -136,10 +139,13 @@ class Transformer:
         self.reshaped_df = self.reshape(clobber=clobber)
         # value transform
         self.filled_df = self.fill_in(clobber=clobber)
+        logger.info('agg-ing now')
+        if agg_cols is None:
+            agg_cols = [x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
+            + ['line_id', 'common', 'utility_name_ferc1']
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
-            idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
-            + ['line_id', 'common', 'utility_name_ferc1'])
+            idx_cols=agg_cols)
         return self.agg_by_plant_df
 
     def early_tidy(self, clobber=False):
@@ -835,7 +841,9 @@ def add_ferc_acct_name(tidy_df):
         pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
     ferc_acct_names = get_ferc_acct_type_map(
         file_path_ferc_acct_names)
-
+    # ensure the ferc_acct column is a string, otherwise the string
+    # manipliations won't work
+    tidy_df = tidy_df.astype({'ferc_acct': pd.StringDtype()})
     # break out the float-y decimals in the ferc acct col into a sub column
     tidy_df[['ferc_acct_main', 'ferc_acct_sub']] = (
         tidy_df.ferc_acct.str.split('.', expand=True))
@@ -873,10 +881,64 @@ def assign_line_id(df):
 
 
 def get_common_assn():
-    """Get stored common plant assocations."""
-    path_common_assn = pathlib.Path().cwd().parent / 'outputs/common_assn.csv'
-    common_assn = pd.read_csv(path_common_assn)
-    return common_assn
+    """
+    Get stored common plant assocations.
+
+    Grab the mannunal overrides that RMI has compiled and reshape them a bit.
+
+    Returns:
+        pandas.DataFrame: table with two columns - line_id_common and
+        line_id_main - which coorespond to the common record ID and the
+        associated main record ID. Some common records are associated with
+        multiple main records and thus are repeted.
+    """
+    # grab the mannually labeled common records
+    path_common_dc = (
+        pathlib.Path().cwd().parent / 'outputs' / 'deprish_cleaned.xlsx')
+    common_mannual = (
+        pd.read_excel(
+            path_common_dc,
+            skiprows=0,
+            sheet_name='common_labeling',
+            dtype={i: pd.Int64Dtype() for i in INT_IDS},
+        )
+    )
+
+    logger.info(
+        "overriding auto-generated common associations with "
+        f"{len(common_mannual[common_mannual.manual_textjoin.notnull()])} "
+        "mannual associations"
+    )
+    common_mannual = (
+        common_mannual.assign(
+            line_id_main_mannual=lambda x:
+                x.manual_textjoin.fillna(x.line_id_main_all))
+        [common_mannual.common]  # grab only the commons
+        .rename(columns={'line_id': 'line_id_common'})
+    )
+    # break out the one-cell list into many columns
+    melt_cols = common_mannual.line_id_main_mannual.str.split(
+        pat='; ', expand=True)
+    common_mannual.loc[:, list(melt_cols.columns)] = melt_cols
+    # melt the many columns into a skinny table
+    common_skinny = (
+        common_mannual.melt(
+            id_vars=['line_id_common'],
+            value_vars=list(melt_cols.columns),
+            value_name='line_id_main',
+        )
+        .drop(columns=['variable'])
+    )
+    # remove the nulls and empties
+    # these exist because the melt_cols have
+    # to be as many as the largest number of "main"
+    # records should be associated w/ the common line
+    common_skinny = common_skinny[
+        common_skinny.line_id_main.notnull()
+        & (common_skinny.line_id_main != '')
+    ]
+    logger.info(f"grabbed {len(common_skinny)} common records")
+    return common_skinny
 
 
 def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
