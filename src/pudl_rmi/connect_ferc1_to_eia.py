@@ -34,6 +34,7 @@ master unit list.
 import logging
 import statistics
 from copy import deepcopy
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -43,7 +44,7 @@ from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
+from pudl_rmi import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,12 @@ def main(file_path_training, file_path_mul, pudl_out):
 
     matcher = MatchManager(best=tuner.get_best_fit_model(), inputs=inputs)
     matches_best = matcher.get_best_matches(features_train, features_all)
-    return matches_best
+    connects_ferc1_eia = prettyify_best_matches(
+        matches_best,
+        plant_parts_true_df=inputs.plant_parts_true_df,
+        steam_df=inputs.steam_df
+    )
+    return connects_ferc1_eia
 
 
 class InputManager:
@@ -157,8 +163,6 @@ class InputManager:
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
                 .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-                # light cleaning
-                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
                 # recordlinkage and sklearn wants MultiIndexs to do the stuff
                 .set_index(['record_id_ferc1', 'record_id_eia', ])
@@ -827,7 +831,7 @@ class MatchManager:
         matches_best_df = (
             pd.merge(
                 matches_best_df.reset_index(),
-                train_df.reset_index(),
+                train_df.reset_index().dropna(),
                 on=['record_id_ferc1'],
                 how='outer',
                 suffixes=('_rl', '_trn'))
@@ -846,8 +850,9 @@ class MatchManager:
                matches_best_df.record_id_eia_rl)
         ]
         logger.info(
-            f"""Overridden records: {len(overridden)/len(train_df):.01%}
-New best match v ferc:    {len(matches_best_df)/self.ferc1_options_len:.02%}"""
+            f"Overridden records:       {len(overridden)/len(train_df):.01%}\n"
+            "New best match v ferc:    "
+            f"{len(matches_best_df)/self.ferc1_options_len:.02%}"
         )
         # we don't need these cols anymore...
         matches_best_df = matches_best_df.drop(
@@ -946,3 +951,89 @@ New best match v ferc:    {len(matches_best_df)/self.ferc1_options_len:.02%}"""
             .pipe(self.override_best_match_with_training_df, self.train_df)
         )
         return matches_best_df
+
+
+def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
+                           debug=False):
+    """
+    Make the EIA-FERC best matches usable.
+
+    Use the ID columns from the best matches to merge together both EIA
+    master unit list data and FERC steam plant data. This removes the
+    comparison vectors (the floats between 0 and 1 that compare the two
+    columns from each dataset).
+    """
+    # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
+    mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
+        'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh', 'capacity_mw'
+    ]
+    connects_ferc1_eia = (
+        # first merge in the EIA Master Unit List
+        pd.merge(
+            matches_best.reset_index()
+            [['record_id_ferc1', 'record_id_eia']],
+            # we only want the identifying columns from the MUL
+            plant_parts_true_df.reset_index()[mul_cols_to_grab],
+            how='left',
+            on=['record_id_eia'],
+            validate='m:1'  # multiple FERC records can have the same EIA match
+        )
+        .astype({"report_year": pd.Int64Dtype()})
+        # then merge in the FERC data
+        # we want the backbone of this table to be the steam records
+        # so we have all possible steam records, even the unmapped ones
+        .merge(
+            steam_df,
+            how='outer',
+            on=['record_id_ferc1', 'report_year'],
+            suffixes=('_eia', '_ferc1'),
+            validate='1:1',
+            indicator=True
+        )
+        .assign(
+            opex_nonfuel=lambda x: (x.opex_production_total - x.opex_fuel),
+            report_date=lambda x: pd.to_datetime(x.report_year, format="%Y")
+        )
+    )
+
+    no_ferc = connects_ferc1_eia[
+        (connects_ferc1_eia._merge == 'left_only')
+        & (connects_ferc1_eia.record_id_eia.notnull())
+        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_hydro_'))
+        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_gnrt_plant_'))
+    ]
+    if not no_ferc.empty:
+        message = (
+            "Help. \nI'm trapped in this computer and I can't get out.\n"
+            ".... jk there shouldn't be any matches between FERC and EIA\n"
+            "that have EIA matches but aren't in the Steam table, but we\n"
+            f"got {len(no_ferc)}. Check the training data and "
+            "prettyify_best_matches()"
+        )
+        if debug:
+            warnings.warn(message)
+            return no_ferc
+        else:
+            raise AssertionError(message)
+    _log_match_coverage(connects_ferc1_eia)
+    return connects_ferc1_eia
+
+
+def _log_match_coverage(connects_ferc1_eia):
+    eia_years = pudl.constants.working_partitions['eia860']['years']
+    # get the matches from just the EIA working years
+    m_eia_years = connects_ferc1_eia[
+        (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
+        & (connects_ferc1_eia.record_id_eia.notnull())]
+
+    fuel_type_coverage = (
+        len(m_eia_years[m_eia_years.energy_source_code_1.notnull()])
+        / len(m_eia_years))
+    tech_type_coverage = (
+        len(m_eia_years[m_eia_years.technology_description.notnull()])
+        / len(m_eia_years))
+    logger.info(
+        "Coverage for matches during EIA working years:\n"
+        f"    Fuel type: {fuel_type_coverage:.01%}\n"
+        f"    Tech type: {tech_type_coverage:.01%}"
+    )

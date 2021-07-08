@@ -120,7 +120,7 @@ class Transformer:
         self.reshaped_df = None
         self.filled_df = None
 
-    def execute(self, clobber=False):
+    def execute(self, clobber=False, agg_cols=None):
         """
         Generate a transformed dataframe for the depreciation studies.
 
@@ -136,6 +136,10 @@ class Transformer:
         self.reshaped_df = self.reshape(clobber=clobber)
         # value transform
         self.filled_df = self.fill_in(clobber=clobber)
+        logger.info('agg-ing now')
+        if agg_cols is None:
+            agg_cols = ([x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
+                        + ['line_id', 'common', 'utility_name_ferc1'])
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
             idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
@@ -157,6 +161,7 @@ class Transformer:
                 .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
                 .pipe(add_ferc_acct_name)
                 .pipe(assign_line_id)
+                .pipe(self.fill_in_df, common_allocated=False)
             )
         return self.tidy_df
 
@@ -173,7 +178,31 @@ class Transformer:
         methods.
         """
         if clobber or self.reshaped_df is None:
-            self.reshaped_df = self.split_allocate_common()
+            # common assn's: common id's w/ main id's
+            self.common_assn = get_common_assn()
+
+            data_cols = [
+                'plant_balance', 'book_reserve', 'unaccrued_balance',
+                'net_salvage', 'depreciation_annual_epxns'
+            ]
+
+            merged = deepcopy(self.tidy_df)
+            for col in data_cols:
+                allocated_df = self.split_allocate_common(split_col=col)
+                new_cols = IDX_COLS_DEPRISH + [f"{col}_w_common"]
+                merged = pd.merge(
+                    merged,
+                    allocated_df.drop_duplicates(IDX_COLS_DEPRISH)[new_cols],
+                    on=IDX_COLS_DEPRISH,
+                    validate='m:1',
+                    how='left'
+                )
+            merged['common'] = np.where(
+                merged.line_id.isin(
+                    list(self.common_assn['line_id_common'].drop_duplicates())),
+                True, False
+            )
+            self.reshaped_df = merged
         return self.reshaped_df
 
     def fill_in(self, clobber=False):
@@ -189,42 +218,18 @@ class Transformer:
             and nulls have been filled in.
         """
         if clobber or self.filled_df is None:
-            filled_df = self.fill_in_df(
-                deepcopy(self.reshape()),
-                which_plant_balance='plant_balance_w_common'
-            )
-            self.filled_df = filled_df
+            self.filled_df = self.fill_in_df(
+                self.reshape(), common_allocated=True)
         return self.filled_df
 
-    def fill_in_df(self,
-                   df_to_fill,
-                   which_plant_balance='plant_balance_w_common'):
+    def fill_in_df(self, df_to_fill, common_allocated):
         """
         Fill in depreciaion data of a specific dataframe.
 
         This method will enable filling in data earlier in the transform
         process, as well as at the standard 'fill_in' step. This enables
         filling in during the common plant allocation to use a more fleshed out
-        unaccrued_balance, and then
-
-        Args:
-            df_to_fill (pandas.DataFrame): depreciation table to fill in.
-            which_plant_balance (string): Which plant balance column to be used
-                during the filling in. Either 'plant_balance' or
-                'plant_balance_w_common'. If this method is being run before
-                the common plant allocation use 'plant_balance'. Default is
-                'plant_balance_w_common'.
-        """
-        filled_df = deepcopy(df_to_fill)
-
-        # then we need to do the actuall filling in
-        filled_df = self._fill_in_assign(
-            filled_df, which_plant_balance=which_plant_balance)
-        return filled_df
-
-    def _fill_in_assign(self, filled_df, which_plant_balance):
-        """
-        Calculate missing values in the depreciaion studies.
+        unaccrued_balance, and then after the common plant allocation.
 
         This method does the filling in twice because these variables are
         related.
@@ -233,43 +238,65 @@ class Transformer:
             df_to_fill (pandas.DataFrame): depreciation table to fill in. This
                 table should have cleaned rate columns (they should all be
                 rates, not percentages) because we will use them.
+            common_allocated (boolean):
             which_plant_balance (string): Which plant balance column to be used
                 during the filling in. Either 'plant_balance' or
                 'plant_balance_w_common'. If this method is being run before
                 the common plant allocation use 'plant_balance'. Default is
                 'plant_balance_w_common'.
         """
+        filled_df = deepcopy(df_to_fill)
+
+        # we need to be able to fill in the native columns as well as those that
+        # have been augmented via
+        if common_allocated:
+            suffix = "_w_common"
+        else:
+            suffix = ""
         for _ in range(2):
             filled_df = filled_df.assign(
-                depreciation_annual_epxns=lambda x:
-                # is this correct? should it be unaccrued_balance?
-                x.depreciation_annual_epxns.fillna(
-                    x.depreciation_annual_rate * x[which_plant_balance]),
                 net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
                     x.net_salvage_rate.fillna(
                         x.net_salvage / x.book_reserve),
-                net_salvage=lambda x:
-                    x.net_salvage.fillna(
-                        x.net_salvage_rate * x.book_reserve),
-                book_reserve=lambda x: x.book_reserve.fillna(
-                    x[which_plant_balance] -
-                    (x.depreciation_annual_epxns * x.remaining_life_avg)),
-                unaccrued_balance=lambda x:  # is this correct?
-                    x.unaccrued_balance.fillna(
-                        x[which_plant_balance] - x.book_reserve
-                        - x.net_salvage),
                 reserve_rate=lambda x: x.reserve_rate.fillna(
-                    x.book_reserve / x[which_plant_balance]),
+                    x.book_reserve / x[f"plant_balance{suffix}"]),
             )
-            filled_df = filled_df.assign(
-                book_reserve=lambda x: x.book_reserve.fillna(
-                    x.net_salvage_rate * x.unaccrued_balance
-                    - x.book_reserve,),
-                unaccrued_balance=lambda x: x.unaccrued_balance.fillna(
-                    x[which_plant_balance] * x.depreciation_annual_rate
-                    * x.remaining_life_avg),
+            filled_df[f'depreciation_annual_epxns{suffix}'] = (
+                filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
+                    # is this correct? should it be unaccrued_balance?
+                    filled_df.depreciation_annual_rate
+                    * filled_df[f"plant_balance{suffix}"])
+            )
+            filled_df[f"net_salvage{suffix}"] = (
+                filled_df[f"net_salvage{suffix}"].fillna(
+                    filled_df.net_salvage_rate
+                    * filled_df[f"book_reserve{suffix}"])
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    (filled_df[f"depreciation_annual_epxns{suffix}"]
+                     * filled_df.remaining_life_avg))
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    filled_df.net_salvage_rate *
+                    filled_df[f"unaccrued_balance{suffix}"] -
+                    filled_df[f"book_reserve{suffix}"])
+            )
 
+            filled_df[f"unaccrued_balance{suffix}"] = (  # is this correct?
+                filled_df[f"unaccrued_balance{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    filled_df[f"book_reserve{suffix}"] -
+                    filled_df[f"net_salvage{suffix}"])
+            )
+            filled_df[f"unaccrued_balance{suffix}"] = (
+                filled_df[f"unaccrued_balance{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] *
+                    filled_df.depreciation_annual_rate *
+                    filled_df.remaining_life_avg)
             )
         return filled_df
 
@@ -338,7 +365,6 @@ class Transformer:
 
         """
         common_pb = self.get_common_plant_bal(split_col=split_col)
-        # test_yucca_line_id(common_pb, 'common_pb')
 
         deprish_w_c = (
             pd.merge(
@@ -363,8 +389,6 @@ class Transformer:
 
     def get_common_plant_bal(self, split_col='plant_balance'):
         """Get common plant records and their associated plant balance."""
-        # common assn's: common id's w/ main id's
-        self.common_assn = get_common_assn()
         # merge back in the ferc acct #
         common_assn_acct = (
             pd.merge(
@@ -416,8 +440,7 @@ class Transformer:
         return common_pb_w_counts
 
     def split_allocate_common(self,
-                              split_col='plant_balance',
-                              common_suffix='_common'):
+                              split_col='plant_balance'):
         """
         Split and allocate the common plant depreciation lines.
 
@@ -434,11 +457,9 @@ class Transformer:
             split_col (string): column name of common records to split and
                 allocate. Column must contain numeric data. Default
                 'plant_balance'.
-            common_suffix (string): suffix to use for the common columns when
-                they are merged into the other plant-part records.
         """
         # the new  data col we are trying to generate
-        new_data_col = f'{split_col}_w{common_suffix}'
+        new_data_col = f'{split_col}_w_common'
         deprish_w_c = self.split_merge_common_records(split_col=split_col)
         # split apart the common records from the main records.
         deprish_common = (deprish_w_c.loc[
@@ -452,10 +473,9 @@ class Transformer:
             f"grabbed {len(deprish_common)} common reocrds and "
             f"{len(deprish_w_c)} atomic records. of total {len(deprish_w_c)}")
         simple_case_df = self.calc_common_portion_simple(
-            deprish_w_c, split_col, common_suffix)
+            deprish_w_c, split_col)
         edge_case_df = self.calc_common_portion_with_no_part_balance(
-            deprish_w_c, split_col, common_suffix)
-        # test_yucca_line_id(simple_case_df, name='edge_case_df')
+            deprish_w_c, split_col)
         deprish_w_common_allocated = pd.concat([simple_case_df, edge_case_df])
         # finally, calcuate the new column w/ the % of the total group. if
         # there is no common data, fill in this new data column with the og col
@@ -476,15 +496,12 @@ class Transformer:
                 "so something went wrong here."
             )
         df_w_check = self._check_common_allocation(
-            deprish_w_common_allocated, split_col, new_data_col, common_suffix)
+            deprish_w_common_allocated, split_col, new_data_col)
 
         # return deprish_w_common_allocated
         return df_w_check
 
-    def calc_common_portion_simple(self,
-                                   deprish_w_c,
-                                   split_col,
-                                   common_suffix):
+    def calc_common_portion_simple(self, deprish_w_c, split_col):
         """
         Generate the portion of the common plant based on the split_col.
 
@@ -500,15 +517,11 @@ class Transformer:
         # because we are using a weight_col that might be filled in we're going
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
-        filled_df = (
-            self.fill_in_df(
-                deprish_w_c, which_plant_balance='plant_balance')
-            # [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
-        )
+
         # exclude the nulls and the 0's
-        simple_case_df = filled_df[
-            (filled_df[weight_col].notnull()) & (
-                filled_df[weight_col] != 0)
+        simple_case_df = deprish_w_c[
+            (deprish_w_c[weight_col].notnull()) & (
+                deprish_w_c[weight_col] != 0)
         ]
         logger.info(
             f"We are calculating the common portion for {len(simple_case_df)} "
@@ -539,15 +552,14 @@ class Transformer:
         # portion is to multiply the ratio (calculated above) with the total
         # common plant balance for the plant/ferc_acct group.
         df_w_tots[f"{split_col}_common_portion"] = (
-            df_w_tots[f'{split_col}{common_suffix}']
+            df_w_tots[f'{split_col}_common']
             * df_w_tots[f"{weight_col}_ratio"])
 
         return df_w_tots
 
     def calc_common_portion_with_no_part_balance(self,
                                                  deprish_w_c,
-                                                 split_col,
-                                                 common_suffix):
+                                                 split_col):
         """
         Calculate portion of common when ``split_col`` is null.
 
@@ -564,12 +576,10 @@ class Transformer:
         ``calc_common_portion_simple()``.
         """
         weight_col = 'unaccrued_balance'
-        filled_df = self.fill_in_df(
-            deprish_w_c, which_plant_balance='plant_balance')
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
-        edge_case_df = filled_df[
-            (filled_df[weight_col].isnull()) | (filled_df[weight_col] == 0)
+        edge_case_df = deprish_w_c[
+            (deprish_w_c[weight_col].isnull()) | (deprish_w_c[weight_col] == 0)
         ]
 
         logger.info(
@@ -604,7 +614,7 @@ class Transformer:
         # common plant balance will already be distributed amoung those records
         edge_case_df[f"{split_col}_common_portion"] = np.where(
             ~edge_case_df['plant_bal_any'],
-            (edge_case_df[f'{split_col}{common_suffix}'] /
+            (edge_case_df[f'{split_col}_common'] /
              edge_case_df['plant_bal_count']),
             np.nan
         )
@@ -614,8 +624,7 @@ class Transformer:
     def _check_common_allocation(self,
                                  df_w_tots,
                                  split_col,
-                                 new_data_col,
-                                 common_suffix):
+                                 new_data_col):
         """Check to see if the common plant allocation was effective."""
         weight_col = 'unaccrued_balance'
         calc_check = (
@@ -632,8 +641,8 @@ class Transformer:
         )
 
         df_w_tots[f"{split_col}_common_portion_check"] = np.where(
-            (df_w_tots.plant_balance.isnull() &
-             df_w_tots.plant_balance_common.notnull()),
+            (df_w_tots[split_col].isnull() &
+             df_w_tots[f"{split_col}_common"].notnull()),
             df_w_tots[f"{split_col}_common_portion"] *
             df_w_tots["plant_bal_count"],
             df_w_tots[f"{split_col}_common_portion_check"]
@@ -650,10 +659,9 @@ class Transformer:
 
         if plant_balance_w_common / plant_balance_og < .99:
             warnings.warn(
-                f"ahhh the {split_col} allocation is off. The resulting "
-                f"{split_col} is "
-                f"{plant_balance_w_common/plant_balance_og:.02%} of the "
-                f"original. og {plant_balance_og:.3} vs new: "
+                f"ahhh the {split_col} allocation is off. The {split_col}"
+                f"_w_common is {plant_balance_w_common/plant_balance_og:.02%} "
+                f"of the original. og {plant_balance_og:.3} vs new: "
                 f"{plant_balance_w_common:.3}"
             )
 
@@ -683,9 +691,10 @@ class Transformer:
             )
         # check for records w/ associated common plant balance
         no_common = df_w_tots[
-            (df_w_tots.plant_balance_common.isnull()
-             & (df_w_tots.plant_balance.notnull()))
-            & (df_w_tots.plant_balance != df_w_tots.plant_balance_w_common)
+            (df_w_tots[f"{split_col}_common"].isnull()
+             & (df_w_tots[split_col].notnull()))
+            & (~np.isclose(df_w_tots[split_col],
+                           df_w_tots[f"{split_col}_w_common"]))
             & (~df_w_tots.common)
         ]
         if not no_common.empty:
@@ -727,10 +736,10 @@ def agg_to_idx(deprish_df, idx_cols):
     # sum agg section
     # enumerate sum cols
     sum_cols = [
-        'plant_balance', 'book_reserve',
-        'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
+        'plant_balance', 'book_reserve', 'unaccrued_balance',
+        'net_salvage', 'depreciation_annual_epxns']
     if 'plant_balance_w_common' in deprish_df.columns:
-        sum_cols.append('plant_balance_w_common')
+        sum_cols = [f"{x}_w_common" for x in sum_cols] + sum_cols
     # aggregate..
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)

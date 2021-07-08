@@ -301,6 +301,15 @@ QUAL_RECORD_TABLES = {
 dict: a dictionary of qualifier column name (key) and original table (value).
 """
 
+MUL_COLS = [
+    'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
+    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
+    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+    'technology_description', 'ferc_acct_name', 'utility_id_eia',
+    'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
+    'record_count', 'fraction_owned', 'ownership_dupe'
+]
+
 DTYPES_MUL = {
     "plant_id_eia": "int64",
     "report_date": "datetime64[ns]",
@@ -1574,6 +1583,7 @@ class CompilePlantParts(object):
             self.add_additonal_cols(plant_parts_df)
             .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
+            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
         self.test_ownership_for_owned_records(self.plant_parts_df)
         return self.plant_parts_df
@@ -1774,24 +1784,28 @@ def get_master_unit_list_eia(file_path_mul, clobber=False):
     """
     Get the master unit list; generate it or get if from a file.
 
+    If you generate the MUL, it will be saved at the file path given.
+
     Args:
-        file_path_mul (pathlib.Path)
+        file_path_mul (pathlib.Path): where you want the master unit list to
+            live. Must be a compressed pickle file ('.pkl.gz').
         clobber (boolean): True if you want to regenerate the master unit list
             whether or not it is saved at the file_path_mul
     """
+    if '.pkl' not in file_path_mul.suffixes:
+        raise AssertionError(f"{file_path_mul} must be a pickle file")
     if not file_path_mul.is_file() or clobber:
         logger.info(
             f"Master unit list not found {file_path_mul}"
             "Generating a new master unit list. This should take ~10 minutes."
         )
-
-        table_compiler = CompileTables(
-            pudl_engine=sa.create_engine(
-                pudl.workspace.setup.get_defaults()["pudl_db"]),
-            freq='AS', roll=True, fill=True)
-        parts_compilers = CompilePlantParts(table_compiler)
-        plant_parts_df = parts_compilers.generate_master_unit_list()
-        plant_parts_df.to_csv(file_path_mul, compression='gzip')
+        pudl_engine = sa.create_engine(
+            pudl.workspace.setup.get_defaults()["pudl_db"])
+        table_compiler = CompileTables(pudl_engine=pudl_engine, freq='AS')
+        parts_compiler = CompilePlantParts(table_compiler)
+        plant_parts_df = parts_compiler.generate_master_unit_list(
+            qual_records=True)
+        plant_parts_df.to_pickle(file_path_mul, compression='gzip')
 
     elif file_path_mul.is_file():
         logger.info(f"Reading the master unit list from {file_path_mul}")

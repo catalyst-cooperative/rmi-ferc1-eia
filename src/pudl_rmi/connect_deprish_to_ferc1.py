@@ -94,7 +94,7 @@ class InputsCompiler():
         # because mostly
         self.steam_cleaned_ferc1_raw = pd.read_pickle(
             file_path_steam_ferc1, compression='gzip')
-        self.connects_ferc1_eia_raw = pd.read_pickle(
+        self.connects_ferc1_eia = pd.read_pickle(
             file_path_ferc1_eia, compression='gzip')
         self.connects_deprish_eia_raw = pd.read_pickle(
             file_path_deprish_eia, compression='gzip')
@@ -106,42 +106,6 @@ class InputsCompiler():
         self.plant_parts_eia = (
             self.plant_parts_eia_raw.reset_index()
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
-
-    def _prep_steam_cleaned_ferc1(self):
-        self.steam_cleaned_ferc1 = (
-            self.steam_cleaned_ferc1_raw.reset_index()
-                .pipe(pudl.helpers.convert_to_date))
-
-    def _prep_connects_ferc1_eia(self):
-        # should this be done over in connect_ferc1_to_eia land?
-        # i think much of this and _prep_steam_cleaned_ferc1 should be moved.
-        id_cols = ['plant_id_pudl', 'utility_id_pudl', ]
-        self.connects_ferc1_eia = (
-            pd.merge(
-                self.connects_ferc1_eia_raw.reset_index()[
-                    ['record_id_ferc1', 'record_id_eia']],
-                # we only want the identifying columns from the MUL
-                self.plant_parts_eia[list(set(
-                    connect_deprish_to_eia.MUL_COLS + id_cols
-                    + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']
-                ))],
-                how='left', on=['record_id_eia'])
-            .astype({i: pd.Int64Dtype() for i in id_cols})
-            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
-            # we want the backbone of this table to be the steam records
-            # so we have all possible steam records, even the unmapped ones
-            .merge(self.steam_cleaned_ferc1,
-                   how='right', on=['record_id_ferc1'] + id_cols,
-                   suffixes=('_eia_ferc1', ''))
-            .assign(opex_nonfuel=lambda x: (x.opex_production_total -
-                                            x.opex_fuel))
-        )
-
-        if len(self.connects_ferc1_eia) != len(self.steam_cleaned_ferc1):
-            raise AssertionError(
-                """Merge between steam_cleaned_ferc1 and connects_ferc1_eia erred.
-                The output and the orignal table should be the same length.
-                Check the columns included.""")
 
     def _prep_connects_deprish_eia(self):
         self.connects_deprish_eia = (
@@ -203,7 +167,6 @@ class InputsCompiler():
 
             self._prep_plant_parts_eia()
             self._prep_steam_cleaned_ferc1()
-            self._prep_connects_ferc1_eia()
             self._prep_connects_deprish_eia()
 
             self.inputs_prepped = True
