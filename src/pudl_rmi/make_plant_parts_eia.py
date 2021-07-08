@@ -1583,7 +1583,7 @@ class CompilePlantParts(object):
             self.add_additonal_cols(plant_parts_df)
             .pipe(pudl.helpers.organize_cols, FIRST_COLS)
             .pipe(self._clean_plant_parts)
-            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
+            .pipe(pudl.helpers.cleanstrings_snake, ['record_id'])
         )
         self.test_ownership_for_owned_records(self.plant_parts_df)
         return self.plant_parts_df
