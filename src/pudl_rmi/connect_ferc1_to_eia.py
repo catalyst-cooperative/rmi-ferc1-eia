@@ -163,6 +163,7 @@ class InputManager:
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
                 .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
+                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
                 # recordlinkage and sklearn wants MultiIndexs to do the stuff
                 .set_index(['record_id_ferc1', 'record_id_eia', ])
