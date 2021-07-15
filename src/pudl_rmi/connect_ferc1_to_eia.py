@@ -247,7 +247,7 @@ class InputManager:
             #     raise AssertionError(
             #         'Merge issue w/ pudl_out.plants_steam_ferc1 and fbp_ferc1')
 
-        return self.all_plants_ferc1_df #self.steam_df
+        return self.all_plants_ferc1_df  # self.steam_df
 
     def get_train_records(self, dataset_df, dataset_id_col):
         """
@@ -1037,6 +1037,9 @@ def _log_match_coverage(connects_ferc1_eia):
     m_eia_years = connects_ferc1_eia[
         (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
         & (connects_ferc1_eia.record_id_eia.notnull())]
+    # get all records from just the EIA working years
+    r_eia_years = connects_ferc1_eia[
+        connects_ferc1_eia.report_date.dt.year.isin(eia_years)]
 
     fuel_type_coverage = (
         len(m_eia_years[m_eia_years.energy_source_code_1.notnull()])
@@ -1044,8 +1047,23 @@ def _log_match_coverage(connects_ferc1_eia):
     tech_type_coverage = (
         len(m_eia_years[m_eia_years.technology_description.notnull()])
         / len(m_eia_years))
+
+    def _get_subtable(table_name):
+        return r_eia_years[r_eia_years.record_id_ferc1.str.contains(f"{table_name}")]
+
+    def _get_match_pct(df):
+        return round((len(df[df['record_id_eia'].notna()]) / len(df) * 100), 1)
+
     logger.info(
         "Coverage for matches during EIA working years:\n"
         f"    Fuel type: {fuel_type_coverage:.01%}\n"
-        f"    Tech type: {tech_type_coverage:.01%}"
+        f"    Tech type: {tech_type_coverage:.01%}\n\n"
+        "Coverage for all steam table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('steam'))}\n\n"
+        f"Coverage for all small gen table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('gnrt_plant'))}\n\n"
+        f"Coverage for all hydro table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('hydro'))}\n\n"
+        f"Coverage for all pumped storage table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('pumped'))}"
     )
