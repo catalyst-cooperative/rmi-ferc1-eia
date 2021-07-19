@@ -156,6 +156,7 @@ class InputManager:
                 # records which are ownership dupes to reflect their "total"
                 # ownership counterparts
                 pd.read_csv(self.file_path_training,)
+                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .merge(
                     self.get_plant_parts_full().reset_index()
                     [['record_id_eia'] + mul_cols],
@@ -163,8 +164,8 @@ class InputManager:
                 )
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
+                # .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
                 # recordlinkage and sklearn wants MultiIndexs to do the stuff
                 .set_index(['record_id_ferc1', 'record_id_eia', ])
@@ -1004,7 +1005,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
         )
         .assign(
             opex_nonfuel=lambda x: (x.opex_production_total - x.opex_fuel),
-            report_date=lambda x: pd.to_datetime(x.report_year, format="%Y")
+            report_date=lambda x: pd.to_datetime(
+                x.report_year, format="%Y", errors='coerce')
         )
     )
 

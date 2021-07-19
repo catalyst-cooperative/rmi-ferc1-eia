@@ -955,12 +955,14 @@ class CompilePlantParts(object):
             part_df = part_df.assign(
                 record_id_eia=part_df.record_id_eia + "_" +
                 part_df[col].astype(str))
-        part_df = part_df.assign(
-            record_id_eia=part_df.record_id_eia + "_" +
-            part_df.report_date.dt.year.astype(str) + "_" +
-            part_df[plant_part_col] + "_" +
-            part_df.ownership.astype(str) + "_" +
-            part_df.utility_id_eia.astype('Int64').astype(str))
+        part_df = (
+            part_df.assign(
+                record_id_eia=part_df.record_id_eia + "_" +
+                part_df.report_date.dt.year.astype(str) + "_" +
+                part_df[plant_part_col] + "_" +
+                part_df.ownership.astype(str) + "_" +
+                part_df.utility_id_eia.astype('Int64').astype(str))
+            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
         return part_df
 
     def add_install_year(self, part_df, id_cols, install_table):
@@ -1452,7 +1454,7 @@ class CompilePlantParts(object):
             assign(report_year=lambda x: x.report_date.dt.year,
                    plant_id_report_year=lambda x: x.plant_id_pudl.astype(str)
                    + "_" + x.report_year.astype(str)).
-            pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']).
+            # pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']).
             # we'll eventually take this out... once Issue #20
             drop_duplicates(subset=['record_id_eia']).
             set_index('record_id_eia'))
