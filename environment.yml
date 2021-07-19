@@ -22,7 +22,6 @@ dependencies:
   - fuzzywuzzy~=0.18.0
   - recordlinkage~=0.14.0
   - python-levenshtein~=0.12.2
-  # - simpledbf~=0.2.6
 
   # Not normal Python packages that come from PyPI
   - nodejs  # Useful for Jupyter Notebook Server
@@ -35,4 +34,4 @@ dependencies:
     # it may supersede the editable installation, which would be confusing.
     # - --editable ../path/to/your/cloned/pudl/repo
     # Install the local package such that we can do development work:
-    # - --editable ./
+    - --editable ./
