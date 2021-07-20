@@ -815,6 +815,10 @@ class MatchManager:
         murk vs matches:      {len(self.murk_df)/len(unique_f):.02%}
         ties vs matches:      {len(self.ties_df)/2/len(unique_f):.02%}"""
         )
+
+        # Add a column to show it was a prediction
+        best_match.loc[:, 'match_type'] = 'prediction'
+
         return best_match
 
     def override_best_match_with_training_df(self, matches_best_df, train_df):
@@ -855,13 +859,35 @@ class MatchManager:
                     x.record_id_eia_rl)
             )
         )
-        # check how many records were overridden
-        overridden = matches_best_df.loc[
+
+        overwrite_rules = (
             (matches_best_df.record_id_eia_trn.notnull())
             & (matches_best_df.record_id_eia_rl.notnull())
             & (matches_best_df.record_id_eia_trn !=
                matches_best_df.record_id_eia_rl)
-        ]
+        )
+
+        correct_match_rules = (
+            (matches_best_df.record_id_eia_trn.notnull())
+            & (matches_best_df.record_id_eia_rl.notnull())
+            & (matches_best_df.record_id_eia_trn ==
+               matches_best_df.record_id_eia_rl)
+        )
+
+        fill_in_the_blank_rules = (
+            (matches_best_df.record_id_eia_trn.notnull())
+            & (matches_best_df.record_id_eia_rl.isnull())
+        )
+
+        # check how many records were overridden
+        overridden = matches_best_df.loc[overwrite_rules]
+
+        # Add flag
+        matches_best_df.loc[overwrite_rules, 'match_type'] = 'overridden'
+        matches_best_df.loc[correct_match_rules, 'match_type'] = 'correct prediction'
+        matches_best_df.loc[fill_in_the_blank_rules,
+                            'match_type'] = 'no prediction; training'
+
         logger.info(
             f"Overridden records:       {len(overridden)/len(train_df):.01%}\n"
             "New best match v ferc:    "
@@ -966,8 +992,7 @@ class MatchManager:
         return matches_best_df
 
 
-def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
-                           debug=False):
+def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df, debug=False):
     """
     Make the EIA-FERC best matches usable.
 
@@ -984,7 +1009,7 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
         # first merge in the EIA Master Unit List
         pd.merge(
             matches_best.reset_index()
-            [['record_id_ferc1', 'record_id_eia']],
+            [['record_id_ferc1', 'record_id_eia', 'match_type']],
             # we only want the identifying columns from the MUL
             plant_parts_true_df.reset_index()[mul_cols_to_grab],
             how='left',
