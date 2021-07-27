@@ -255,6 +255,8 @@ the neccessary components, how to denormalize, aggregate and perform weighted
 averages at the generator level.
 """
 
+IDX_GEN = ['plant_id_eia', 'report_date', 'generator_id']
+
 FREQ_AG_COLS = {
     'generation_eia923': {
         'id_cols': ['plant_id_eia', 'generator_id'],
@@ -407,6 +409,7 @@ class CompileTables(object):
             # pudl_out tables
             'fuel_cost': None,
             'mcoe': None,
+            'gens_eia860': None,
             'plants_steam_ferc1': None,
 
             'ferc_acct_rmi': None,
@@ -642,10 +645,13 @@ class CompilePlantParts(object):
     def get_ownership(self):
         """Get the ownership table and create total rows."""
         # get the ownership table and do some munging
-        own860 = (self.table_compiler.get_the_table('ownership_eia860')
-                  [['plant_id_eia', 'generator_id', 'report_date',
-                    'utility_id_eia', 'fraction_owned',
-                    'owner_utility_id_eia']])
+        own860 = (
+            self.table_compiler.get_the_table('ownership_eia860')
+            [['plant_id_eia', 'generator_id', 'report_date',
+              'utility_id_eia', 'fraction_owned', 'owner_utility_id_eia']]
+            .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+            .dropna()
+        )
         return own860
 
     def aggregate_plant_part(self, plant_part_details):
@@ -678,17 +684,13 @@ class CompilePlantParts(object):
     def make_fake_totals(self, plant_gen_df):
         """Generate total versions of generation-owner records."""
         # make new records for generators to replicate the total generator
-        fake_totals = plant_gen_df[[
-            'plant_id_eia', 'report_date', 'utility_id_eia',
-            'owner_utility_id_eia']].drop_duplicates()
         # asign 1 to all of the fraction_owned column
-        fake_totals = fake_totals.assign(fraction_owned=1,
-                                         ownership='total')
-        fake_totals = pd.merge(
-            plant_gen_df.drop(
-                columns=['ownership', 'utility_id_eia',
-                         'owner_utility_id_eia', 'fraction_owned']),
-            fake_totals)
+        fake_totals = (
+            plant_gen_df.drop_duplicates(subset=[
+                'plant_id_eia', 'report_date', 'utility_id_eia',
+                'owner_utility_id_eia'])
+            .assign(fraction_owned=1, ownership='total')
+        )
         return fake_totals
 
     def slice_by_ownership(self, plant_gen_df):
@@ -955,12 +957,15 @@ class CompilePlantParts(object):
             part_df = part_df.assign(
                 record_id_eia=part_df.record_id_eia + "_" +
                 part_df[col].astype(str))
-        part_df = part_df.assign(
-            record_id_eia=part_df.record_id_eia + "_" +
-            part_df.report_date.dt.year.astype(str) + "_" +
-            part_df[plant_part_col] + "_" +
-            part_df.ownership.astype(str) + "_" +
-            part_df.utility_id_eia.astype('Int64').astype(str))
+        part_df = (
+            part_df.assign(
+                record_id_eia=part_df.record_id_eia + "_" +
+                part_df.report_date.dt.year.astype(str) + "_" +
+                part_df[plant_part_col] + "_" +
+                part_df.ownership.astype(str) + "_" +
+                part_df.utility_id_eia.astype('Int64').astype(str))
+            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
+        )
         return part_df
 
     def add_install_year(self, part_df, id_cols, install_table):
@@ -1499,6 +1504,7 @@ class CompilePlantParts(object):
 
     def add_ferc_acct(self, plant_gen_df):
         """Merge the plant_gen_df with the ferc_acct map."""
+        # TODO: Delete w/ new plant_gen_df prep
         return pd.merge(plant_gen_df, get_eia_ferc_acct_map(), how='left')
 
     def prep_plant_gen_df(self, qual_records=True, clobber=False):
@@ -1507,12 +1513,61 @@ class CompilePlantParts(object):
             logger.info(
                 'Generating the master generator table with ownership.')
             self.plant_gen_df = (
-                self.aggregate_plant_part(self.plant_parts['plant_gen'])
+                # self.aggregate_plant_part(self.plant_parts['plant_gen'])
+                self.make_main_generator_table()
                 .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
                 .pipe(self.slice_by_ownership)
-                .pipe(self.denorm_plant_gen, qual_records)
+                # .pipe(self.denorm_plant_gen, qual_records)
             )
         return self.plant_gen_df
+
+    def make_main_generator_table(self):
+        # grab the main generators table.
+        gens = self.table_compiler.get_the_table('gens_eia860')
+        mcoe_cols = [
+            'total_fuel_cost', 'total_mmbtu', 'fuel_cost_per_mwh',
+            'heat_rate_mmbtu_mwh', 'fuel_cost_per_mmbtu']
+        gen_cols = ['net_generation_mwh']
+
+        # Ensure we have all of the ID cols
+        # add ferc acct
+        plant_gen_df = (
+            pd.merge(
+                gens,
+                get_eia_ferc_acct_map(),
+                on=['technology_description', 'prime_mover_code'],
+                validate='m:1',
+                how='left'
+            )
+            .merge(  # and now add the data columns
+                self.table_compiler.get_the_table('mcoe')[IDX_GEN + mcoe_cols],
+                on=IDX_GEN,
+                how='left',
+                validate='1:1'
+            )
+            .merge(
+                self.table_compiler.pudl_out.gen_eia923()[IDX_GEN + gen_cols],
+                on=IDX_GEN,
+                how='left',
+                validate='1:1'
+            )
+        )
+        # ensure we have all of the data columns
+        id_cols = _get_list_of_cols('id_cols')
+        ag_cols = _get_list_of_cols('ag_cols')
+        wtavg_cols = _get_list_of_cols('wtavg_cols')
+
+        _check_missing_cols(plant_gen_df, id_cols + ag_cols + wtavg_cols)
+
+        # we'll extract only the columns we need
+        plant_gen_df = plant_gen_df[
+            ['report_date'] + id_cols + ag_cols + wtavg_cols +
+            ['utility_id_eia', 'fuel_type_code_pudl', 'operational_status',
+             'planned_retirement_date']]
+
+        # ensure we didn't accedentially add or loose some generators
+        assert(len(gens) == len(plant_gen_df))
+        return plant_gen_df
 
     def get_part_df(self, part_name):
         """
@@ -1693,6 +1748,37 @@ class CompilePlantParts(object):
             self.test_ag_cols(part_name)
 
 
+def _get_list_of_cols(cols_type):
+    """
+    F.
+
+    Args:
+        cols_type (str): Either id_cols, ag_cols or wtavg_cols
+    """
+    # check to ensure we have ALL of the identifying columns in this big gen table
+    list_of_cols_lists = [[x for x in x[cols_type]]
+                          for x in PLANT_PARTS.values()]
+    return list(set(
+        [item for sublist in list_of_cols_lists for item in sublist]))
+
+
+def _check_missing_cols(df, cols):
+    """
+    Check to ensrue presence of columns from the PLANT_PARTS dict.
+
+    Args:
+        cols (iterable): List of column names (str)
+
+    Raise:
+        AssertionError: if columns are missing from table.
+    """
+    missing_cols = [x for x in cols if x not in df.columns]
+    if len(missing_cols) != 0:
+        raise AssertionError(
+            f"Missing {missing_cols} from the generator table."
+        )
+
+
 def calc_capacity_factor(df, min_cap_fact, max_cap_fact, freq):
     """
     Calculate capacity factor.
@@ -1742,7 +1828,7 @@ def get_eia_ferc_acct_map(file_path=pathlib.Path.cwd().parent / 'inputs/deprecia
     map as a dataframe or dictionary.
     """
     eia_ferc_acct_map = (
-        pd.read_excel(file_path, skiprows=0, sheet_name=3)
+        pd.read_excel(file_path, skiprows=0, sheet_name='EIA Codes <> FERC')
         [['technology_description', 'prime_mover_code', 'ferc_acct_name']]
         .drop_duplicates()
     )
