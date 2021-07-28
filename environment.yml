@@ -27,6 +27,7 @@ dependencies:
   - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
+    - simpledbf~=0.2.6
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
     # should also remove or comment out the github based dependency inside setup.py as
