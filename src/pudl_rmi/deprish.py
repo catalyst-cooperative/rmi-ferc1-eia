@@ -14,9 +14,6 @@ transformer = deprish.Transformer(
         sheet_name=sheet_name_deprish
     ).execute())
 deprish_df = transformer.execute()
-deprish_asset_df = agg_to_idx(
-    deprish_df,
-    idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']])
 """
 
 import logging
@@ -236,41 +233,18 @@ class Transformer:
         This method will enable filling in data earlier in the transform
         process, as well as at the standard 'fill_in' step. This enables
         filling in during the common plant allocation to use a more fleshed out
-        unaccrued_balance, and then
-
-        Args:
-            df_to_fill (pandas.DataFrame): depreciation table to fill in.
-            common_allocated (boolean):
-            which_plant_balance (string): Which plant balance column to be used
-                during the filling in. Either 'plant_balance' or
-                'plant_balance_w_common'. If this method is being run before
-                the common plant allocation use 'plant_balance'. Default is
-                'plant_balance_w_common'.
-        """
-        filled_df = deepcopy(df_to_fill)
-
-        # then we need to do the actuall filling in
-        filled_df = self._fill_in_assign(
-            filled_df, common_allocated=common_allocated)
-        return filled_df
-
-    def _fill_in_assign(self, df_to_fill, common_allocated):
-        """
-        Calculate missing values in the depreciaion studies.
+        unaccrued_balance, and then after the common records have been
+        allocated, depending on the `common_allocated` boolean flag.
 
         This method does the filling in twice because these variables are
         related.
 
         Args:
-            df_to_fill (pandas.DataFrame): depreciation table to fill in. This
-                table should have cleaned rate columns (they should all be
-                rates, not percentages) because we will use them.
-            common_allocated (boolean)
-            which_plant_balance (string): Which plant balance column to be used
-                during the filling in. Either 'plant_balance' or
-                'plant_balance_w_common'. If this method is being run before
-                the common plant allocation use 'plant_balance'. Default is
-                'plant_balance_w_common'.
+            df_to_fill (pandas.DataFrame): depreciation table to fill in.
+            common_allocated (boolean): True if the intention is to fill in
+                data columns with common plant allocated
+                (f"{data_col_name}_w_common"). False if the filling in should
+                be applied to the non-allocated data columns
         """
         filled_df = deepcopy(df_to_fill)
 
