@@ -602,7 +602,7 @@ class Transformer:
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
         # filled_df = (self.fill_in_df(deprish_w_c, common_allocated=False)
-        #     # [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
+        #     [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
         # )
         # exclude the nulls and the 0's
         simple_case_df = deprish_w_c[
