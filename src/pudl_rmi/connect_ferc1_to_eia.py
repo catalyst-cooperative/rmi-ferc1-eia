@@ -843,32 +843,40 @@ class MatchManager:
             corresponding training data, matches that had the highest rank
             in their record_id_ferc1, by a wide enough margin.
         """
+        # create an duplicate column to show exactly where there are and aren't
+        # overrides for ferc records. This is necessary because sometimes the
+        # override is a blank so we can't just depend on record_id_eia.notnull()
+        # when we merge on ferc id below.
+        train_df = train_df.reset_index()
+        train_df.loc[:, 'record_id_ferc1_trn'] = train_df['record_id_ferc1']
+
         # we want to override the eia when the training id is
         # different than the "winning" match from the recrod linkage
         matches_best_df = (
             pd.merge(
                 matches_best_df.reset_index(),
-                train_df.reset_index().dropna(),
+                train_df[['record_id_eia', 'record_id_ferc1', 'record_id_ferc1_trn']],
                 on=['record_id_ferc1'],
                 how='outer',
                 suffixes=('_rl', '_trn'))
             .assign(
                 record_id_eia=lambda x: np.where(
-                    x.record_id_eia_trn.notnull(),
+                    x.record_id_ferc1_trn.notnull(),
                     x.record_id_eia_trn,
                     x.record_id_eia_rl)
             )
         )
 
         overwrite_rules = (
-            (matches_best_df.record_id_eia_trn.notnull())
-            & (matches_best_df.record_id_eia_rl.notnull())
-            & (matches_best_df.record_id_eia_trn !=
-               matches_best_df.record_id_eia_rl)
+            (matches_best_df.record_id_ferc1_trn.notnull())
+            # & (matches_best_df.record_id_eia_rl.notnull())
+            # & (matches_best_df.record_id_eia_trn !=
+            #   matches_best_df.record_id_eia_rl)
         )
 
-        correct_match_rules = (
-            (matches_best_df.record_id_eia_trn.notnull())
+        correct_match_rules = (  # need to update this
+            (matches_best_df.record_id_ferc1_trn.notnull())
+            & (matches_best_df.record_id_eia_trn.notnull())
             & (matches_best_df.record_id_eia_rl.notnull())
             & (matches_best_df.record_id_eia_trn ==
                matches_best_df.record_id_eia_rl)
@@ -895,7 +903,7 @@ class MatchManager:
         )
         # we don't need these cols anymore...
         matches_best_df = matches_best_df.drop(
-            columns=['record_id_eia_trn', 'record_id_eia_rl'])
+            columns=['record_id_eia_trn', 'record_id_eia_rl', 'record_id_ferc1_trn'])
         return matches_best_df
 
     @staticmethod
@@ -1016,10 +1024,13 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df, debug=Fa
             on=['record_id_eia'],
             validate='m:1'  # multiple FERC records can have the same EIA match
         )
-        .astype({"report_year": pd.Int64Dtype()})
-        # then merge in the FERC data
-        # we want the backbone of this table to be the steam records
-        # so we have all possible steam records, even the unmapped ones
+        # this is necessary in instances where the overrides don't have a record_id_eia
+        # i.e., they override to NO MATCH. These get merged in without a report_year,
+        # so we need to create one for them from the record_id.
+        .assign(report_year=lambda x: (
+            x.record_id_ferc1.str.extract(r"(\d{4})")[0].astype('int')))
+        # then merge in the FERC data we want the backbone of this table to be the
+        # steam records so we have all possible steam records, even the unmapped ones
         .merge(
             steam_df,
             how='outer',
