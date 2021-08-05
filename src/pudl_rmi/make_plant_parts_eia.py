@@ -1432,7 +1432,7 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
         )
 
         parts_compilers = CompilePlantParts(pudl_out)
-        plant_parts_df = parts_compilers.generate_master_unit_list()
+        plant_parts_df = parts_compilers.generate_master_plant_parts()
         plant_parts_df.to_csv(file_path_mul, compression='gzip')
 
     elif file_path_mul.is_file():
