@@ -1,0 +1,60 @@
+,technology_description,prime_mover_code,ferc_acct_name
+0,All Other,ST,Steam
+1,All Other,CA,Other
+2,All Other,OT,Other
+3,All Other,GT,Other
+4,Batteries,BA,Other
+5,Coal Integrated Gasification Combined Cycle,CT,Steam
+6,Coal Integrated Gasification Combined Cycle,CA,Steam
+7,Conventional Hydroelectric,HY,Hydraulic
+8,Conventional Steam Coal,ST,Steam
+9,Flywheels,FW,Other
+10,Geothermal,ST,Other
+11,Geothermal,BT,Other
+12,Hydroelectric Pumped Storage,PS,Hydraulic
+13,Landfill Gas,IC,Other
+14,Landfill Gas,GT,Other
+15,Landfill Gas,FC,Other
+16,Landfill Gas,CT,Other
+17,Landfill Gas,CA,Other
+18,Landfill Gas,ST,Steam
+19,Municipal Solid Waste,ST,Other
+20,Natural Gas Fired Combined Cycle,CT,Other
+21,Natural Gas Fired Combined Cycle,CA,Other
+22,Natural Gas Fired Combined Cycle,CS,Other
+23,Natural Gas Fired Combined Cycle,CC,Other
+24,Natural Gas Fired Combustion Turbine,GT,Other
+25,Natural Gas Internal Combustion Engine,IC,Other
+26,Natural Gas Steam Turbine,ST,Steam
+27,Natural Gas with Compressed Air Storage,CE,Steam
+28,Nuclear,ST,Nuclear
+29,Offshore Wind Turbine,WS,Other
+30,Onshore Wind Turbine,WT,Other
+31,Other Gases,ST,Steam
+32,Other Gases,OT,Other
+33,Other Gases,GT,Other
+34,Other Gases,IC,Other
+35,Other Gases,CA,Other
+36,Other Gases,CT,Other
+37,Other Natural Gas,FC,Other
+38,Other Natural Gas,OT,Other
+39,Other Waste Biomass,IC,Other
+40,Other Waste Biomass,ST,Steam
+41,Other Waste Biomass,GT,Other
+42,Other Waste Biomass,FC,Other
+43,Other Waste Biomass,CA,Other
+44,Other Waste Biomass,CT,Other
+45,Petroleum Coke,ST,Steam
+46,Petroleum Coke,OT,Other
+47,Petroleum Coke,CA,Other
+48,Petroleum Liquids,IC,Other
+49,Petroleum Liquids,GT,Other
+50,Petroleum Liquids,ST,Steam
+51,Petroleum Liquids,CT,Other
+52,Petroleum Liquids,CA,Other
+53,Solar Photovoltaic,PV,Other
+54,Solar Thermal with Energy Storage,CP,Other
+55,Solar Thermal without Energy Storage,ST,Steam
+56,Solar Thermal without Energy Storage,OT,Other
+57,Wood/Wood Waste Biomass,ST,Steam
+58,Wood/Wood Waste Biomass,OT,Other
