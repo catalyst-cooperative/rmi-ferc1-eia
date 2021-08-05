@@ -209,45 +209,6 @@ class InputManager:
                         x.plant_id_report_year + "_" + x.utility_id_pudl.map(str)))
                 .set_index('record_id_ferc1'))
 
-            # self.steam_df = (
-            #     pd.merge(
-            #         self.pudl_out.plants_steam_ferc1(),
-            #         self.pudl_out.fbp_ferc1()[fpb_cols_to_use],
-            #         on=['report_year',
-            #             'utility_id_ferc1',
-            #             'utility_id_pudl',
-            #             'plant_name_ferc1',
-            #             ],
-            #         how='left')
-            #     .pipe(pudl.helpers.convert_cols_dtypes,
-            #           'ferc1', 'ferc1 plant records')
-            #     # we want the column names to conform to EIA's column names
-            #     .rename(columns={
-            #         'fuel_cost': 'total_fuel_cost',
-            #         'fuel_mmbtu': 'total_mmbtu',
-            #         'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
-            #         'primary_fuel_by_mmbtu': 'fuel_type_code_pudl',
-            #         'record_id': 'record_id_ferc1', })
-            #     .set_index('record_id_ferc1')
-            #     .assign(
-            #         fuel_cost_per_mmbtu=lambda x: (
-            #             x.total_fuel_cost / x.total_mmbtu),
-            #         heat_rate_mmbtu_mwh=lambda x: (
-            #             x.total_mmbtu / x.net_generation_mwh),
-            #         plant_id_report_year=lambda x: x.plant_id_pudl.map(
-            #             str) + "_" + x.report_year.map(str),
-            #         plant_id_report_year_util_id=lambda x:
-            #             x.plant_id_report_year + "_" + \
-            #         x.utility_id_pudl.map(str)
-            #     ))
-            # if 0.9 > (len(self.steam_df) /
-            #           len(self.steam_df.drop_duplicates(
-            #               subset=['report_year',
-            #                       'utility_id_pudl',
-            #                       'plant_id_ferc1'])) < 1.1):
-            #     raise AssertionError(
-            #         'Merge issue w/ pudl_out.plants_steam_ferc1 and fbp_ferc1')
-
         return self.all_plants_ferc1_df  # self.steam_df
 
     def get_train_records(self, dataset_df, dataset_id_col):
@@ -1011,7 +972,9 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df, debug=Fa
     """
     # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
     mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
-        'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh', 'capacity_mw'
+        'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu', 'net_generation_mwh',
+        'capacity_mw', 'capacity_factor', 'total_mmbtu', 'heat_rate_mmbtu_mwh',
+        'fuel_type_code_pudl', 'installation_year'
     ]
     connects_ferc1_eia = (
         # first merge in the EIA Master Unit List

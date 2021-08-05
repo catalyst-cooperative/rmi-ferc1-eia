@@ -234,25 +234,6 @@ PLANT_PARTS = {
             'fuel_cost_per_mmbtu': 'capacity_mw',
         },
     },
-    #    'plant_install_year': {
-    #        'id_cols': ['plant_id_eia', 'installation_year'],
-    #        'denorm_table': None,  # 'ferc_acct_rmi',
-    # ['technology_description', 'prime_mover_code', 'ferc_acct_name'],
-    #        'denorm_cols':  None,
-    #        'install_table': 'generators_eia860',
-    #        'false_grans': ['plant_gen', 'plant_unit', 'plant'],
-    #        'ag_cols': {
-    #            'total_fuel_cost': 'sum',
-    #            'net_generation_mwh': 'sum',
-    #            'capacity_mw': 'sum',
-    #            'total_mmbtu': 'sum'
-    #        },
-    #        'wtavg_cols': {
-    #            'fuel_cost_per_mwh': 'capacity_mw',
-    #            'heat_rate_mmbtu_mwh': 'capacity_mw',
-    #            'fuel_cost_per_mmbtu': 'capacity_mw',
-    #        },
-    #    },
 }
 """
 dict: this dictionary contains a key for each of the 'plant parts' that should
@@ -546,13 +527,8 @@ class CompilePlantParts(object):
         self.plant_parts_df = None
         self.clobber = clobber
         self.plant_parts_ordered = [
-            'plant',
-            'plant_unit',
-            'plant_prime_mover',
-            'plant_technology',
-            'plant_prime_fuel',
-            'plant_ferc_acct',
-            'plant_gen'
+            'plant', 'plant_unit', 'plant_prime_mover', 'plant_technology',
+            'plant_prime_fuel', 'plant_ferc_acct', 'plant_gen'
         ]
         self.parts_to_parent_parts = self.get_parts_to_parent_parts()
         self.gen_util_ids = ['plant_id_eia', 'generator_id',
