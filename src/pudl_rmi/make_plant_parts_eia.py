@@ -144,6 +144,7 @@ QUAL_RECORDS = [
     'energy_source_code_1',
     'prime_mover_code',
     'ferc_acct_name',
+    # 'installation_year'
 ]
 """
 dict: a dictionary of qualifier column name (key) and original table (value).
@@ -1170,10 +1171,29 @@ class CompilePlantParts(object):
         part_df = (
             self.ag_part_by_own_slice(part_name)
             .assign(plant_part=part_name)
+            .pipe(self.add_install_year, id_cols)
             .pipe(self.assign_true_gran, part_name)
             .pipe(self.add_record_id, id_cols, plant_part_col='plant_part')
             .pipe(self.add_new_plant_name, id_cols, part_name)
             .pipe(self.add_record_count)
+        )
+        return part_df
+
+    def add_install_year(self, part_df, id_cols):
+        """Add the install year from the entities table to your plant part."""
+        logger.debug(f'pre count of part DataFrame: {len(part_df)}')
+        # we want to sort to have the most recent on top
+        install = (
+            self.plant_gen_df[id_cols + ['installation_year']]
+            .sort_values('installation_year', ascending=False)
+            .drop_duplicates(subset=id_cols, keep='first')
+            .dropna(subset=id_cols)
+        )
+        part_df = part_df.merge(install, how='left',
+                                on=id_cols, validate='1:1')
+        logger.debug(
+            f'count of install years for part: {len(install)}'
+            f'post count of part DataFrame: {len(part_df)}'
         )
         return part_df
 
