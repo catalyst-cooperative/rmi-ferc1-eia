@@ -1189,10 +1189,11 @@ class CompilePlantParts(object):
             .drop_duplicates(subset=id_cols, keep='first')
             .dropna(subset=id_cols)
         )
-        part_df = part_df.merge(install, how='left',
-                                on=id_cols, validate='1:1')
+        part_df = part_df.merge(
+            install, how='left',
+            on=id_cols, validate='m:1')
         logger.debug(
-            f'count of install years for part: {len(install)}'
+            f'count of install years for part: {len(install)} \n'
             f'post count of part DataFrame: {len(part_df)}'
         )
         return part_df
