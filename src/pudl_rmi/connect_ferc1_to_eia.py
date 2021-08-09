@@ -100,8 +100,11 @@ class InputManager:
         if clobber or self.plant_parts_df is None:
             self.plant_parts_df = (
                 make_plant_parts_eia.get_master_unit_list_eia(
-                    self.file_path_mul)
-                .assign(plant_id_report_year_util_id=lambda x:
+                    self.file_path_mul,
+                    pudl_out=self.pudl_out
+                )
+                .assign(
+                    plant_id_report_year_util_id=lambda x:
                         x.plant_id_report_year + "_" +
                         x.utility_id_pudl.map(str))
             )
