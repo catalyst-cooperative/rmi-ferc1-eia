@@ -1467,7 +1467,7 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
         plant_parts_df = parts_compilers.generate_master_plant_parts()
         plant_parts_df.to_csv(file_path_mul, compression='gzip')
 
-   elif file_path_mul.is_file():
+    elif file_path_mul.is_file():
         logger.info(f"Reading the master unit list from {file_path_mul}")
         plant_parts_df = pd.read_pickle(file_path_mul, compression='gzip')
     return plant_parts_df
