@@ -72,52 +72,41 @@ logger = logging.getLogger(__name__)
 PLANT_PARTS = {
     'plant': {
         'id_cols': ['plant_id_eia'],
-        'false_grans': None
     },
     'plant_gen': {
         'id_cols': ['plant_id_eia', 'generator_id'],
-        'false_grans': ['plant', 'plant_unit']
     },
     'plant_unit': {
         'id_cols': ['plant_id_eia', 'unit_id_pudl'],
-        'false_grans': ['plant']
     },
     'plant_technology': {
         'id_cols': ['plant_id_eia', 'technology_description'],
-        'false_grans': ['plant_prime_mover', 'plant_gen', 'plant_unit', 'plant'
-                        ]
     },
     'plant_prime_fuel': {
         'id_cols': ['plant_id_eia', 'energy_source_code_1'],
-        'false_grans': ['plant_technology', 'plant_prime_mover', 'plant_gen',
-                        'plant_unit', 'plant']
     },
     'plant_prime_mover': {
         'id_cols': ['plant_id_eia', 'prime_mover_code'],
-        'false_grans': ['plant_ferc_acct', 'plant_gen', 'plant_unit', 'plant']
     },
     'plant_ferc_acct': {
         'id_cols': ['plant_id_eia', 'ferc_acct_name'],
-        'false_grans': ['plant_gen', 'plant_unit', 'plant']
     },
     #    'plant_install_year': {
     #        'id_cols': ['plant_id_eia', 'installation_year'],
-    #        'false_grans': ['plant_gen', 'plant_unit', 'plant'],
     #    },
 }
 """
 dict: this dictionary contains a key for each of the 'plant parts' that should
 end up in the mater unit list. The top-level value for each key is another
-dictionary, which contains seven keys:
-    * id_cols (the primary key type id columns for this plant part),
-    * false_grans (the list of other plant parts to check against for whether
-    or not the records are in this plant part are false granularities)
+dictionary, which contains keys:
+    * id_cols (the primary key type id columns for this plant part)
 """
 
 SUM_COLS = [
     'total_fuel_cost',
     'net_generation_mwh',
     'capacity_mw',
+    'capacity_mw_eoy',
     'total_mmbtu',
 ]
 """
@@ -138,6 +127,7 @@ QUAL_RECORDS = [
     'fuel_type_code_pudl',
     'operational_status',
     'planned_retirement_date',
+    'retirement_date',
     'generator_id',
     'unit_id_pudl',
     'technology_description',
@@ -149,40 +139,6 @@ QUAL_RECORDS = [
 """
 dict: a dictionary of qualifier column name (key) and original table (value).
 """
-
-DTYPES_MUL = {
-    "plant_id_eia": "int64",
-    "report_date": "datetime64[ns]",
-    "plant_part": "object",
-    "generator_id": "object",
-    "unit_id_pudl": "object",
-    "prime_mover_code": "object",
-    "energy_source_code_1": "object",
-    "technology_description": "object",
-    "ferc_acct_name": "object",
-    "utility_id_eia": "object",
-    "true_gran": "bool",
-    "appro_part_label": "object",
-    "appro_record_id_eia": "object",
-    "capacity_factor": "float64",
-    "capacity_mw": "float64",
-    "fraction_owned": "float64",
-    "fuel_cost_per_mmbtu": "float64",
-    "fuel_cost_per_mwh": "float64",
-    "heat_rate_mmbtu_mwh": "float64",
-    "installation_year": "Int64",
-    "net_generation_mwh": "float64",
-    "ownership": "category",
-    "plant_id_pudl": "Int64",
-    "plant_name_eia": "string",
-    "total_fuel_cost": "float64",
-    "total_mmbtu": "float64",
-    "utility_id_pudl": "Int64",
-    "utility_name_eia": "string",
-    "report_year": "int64",
-    "plant_id_report_year": "object",
-    "plant_name_new": "string"
-}
 
 FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
               'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
@@ -342,20 +298,11 @@ class CompilePlantParts(object):
         logger.debug(f'# of generators before munging: {len(plant_gen_df)}')
         plant_gen_df = plant_gen_df.merge(
             own860,
-            how='outer',
+            how='left',  # we're left merging BC we've removed the retired gens
             on=['plant_id_eia', 'generator_id', 'report_date'],
-            indicator=True
+            validate='1:m'
         )
 
-        # if there are records that don't show up in the ownership table (and
-        # have a 'left_only' merge indicator and NaN for 'fraction_owned'),
-        # we're going to assume the ownership % is 1 for the reporting utility
-        if len(plant_gen_df[(plant_gen_df['_merge'] == 'right_only') &
-                            (plant_gen_df['fraction_owned'].isnull())]) != 0:
-            # if there are records with null 'fraction_owned' then we've done
-            # something wrong.
-            raise AssertionError(
-                'merge error: ownership and gens produced with null records')
         # clean the remaining nulls
         # assign 100% ownership for records not in the ownership table
         plant_gen_df = plant_gen_df.assign(
@@ -371,14 +318,15 @@ class CompilePlantParts(object):
         plant_gen_df = plant_gen_df.append(fake_totals, sort=False)
         logger.debug(f'# of generators post-fakes:     {len(plant_gen_df)}')
         plant_gen_df = (
-            plant_gen_df.drop(columns=['_merge', 'utility_id_eia']).
-            rename(columns={'owner_utility_id_eia': 'utility_id_eia'}).
-            drop_duplicates())
+            plant_gen_df.drop(columns=['utility_id_eia'])
+            .rename(columns={'owner_utility_id_eia': 'utility_id_eia'})
+            .drop_duplicates()
+        )
 
-        cols_to_cast = ['net_generation_mwh', 'capacity_mw', 'total_fuel_cost']
-        plant_gen_df[cols_to_cast] = (plant_gen_df[cols_to_cast].
-                                      multiply(plant_gen_df['fraction_owned'],
-                                               axis='index'))
+        plant_gen_df[SUM_COLS] = (
+            plant_gen_df[SUM_COLS]
+            .multiply(plant_gen_df['fraction_owned'], axis='index')
+        )
         if (len(plant_gen_df[plant_gen_df.ownership == 'owned']) >
                 len(plant_gen_df[plant_gen_df.ownership == 'total'])):
             warnings.warn(
@@ -1099,8 +1047,8 @@ class CompilePlantParts(object):
         all_gens = (
             pd.merge(
                 gens.pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
-                mcoe.drop(drop_cols, axis=1)
-                .pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
+                mcoe.pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+                .drop(drop_cols, axis=1),
                 on=merge_cols,
                 validate='1:1',
                 how='left'
@@ -1113,6 +1061,7 @@ class CompilePlantParts(object):
             )
             .assign(installation_year=lambda x: x.operating_date.dt.year)
             .astype({'installation_year': 'Int64', })
+            .pipe(self.get_only_operating_gens)
         )
 
         # check to see if the master gens table has all of the columns we want
@@ -1123,7 +1072,8 @@ class CompilePlantParts(object):
             'utility_id_eia',
             'fuel_type_code_pudl',
             'operational_status',
-            'planned_retirement_date'
+            'planned_retirement_date',
+            'retirement_date'
         ]
         all_cols = (
             self.id_cols_list + SUM_COLS + list(WTAVG_DICT.keys()) + other_cols
@@ -1146,6 +1096,53 @@ class CompilePlantParts(object):
         )
         return all_gens[all_cols]
 
+    def get_only_operating_gens(
+            self,
+            gen_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove the fully retired generators from the main generators table.
+
+        For the MUL, we want only generators that are operational during a
+        given reporting period. This requires keeping both the generators that
+        report as "existing" and generators that have mid-year retirements.
+
+        This method also adds a column called "capacity_mw_eoy", which is the
+        end of year capacity of the generators. We assume that if a generator
+        retired mid-year, its EOY capacity should be zero.
+
+        Args:
+            gen_df (pandas.DataFrame): annual table of all generators from EIA.
+
+        Returns
+            pandas.DataFrame: annual table of all generators from EIA that
+            operated within each reporting year.
+        """
+        # gen_df = gen_df.reset_index()
+
+        mid_year_retirees_mask = (
+            gen_df.retirement_date.dt.year == gen_df.report_date.dt.year)
+        # grab only the operational gens - the gens that are existing and those
+        # that retired mid-year
+        op_df = gen_df.loc[
+            (gen_df.operational_status == 'existing') | mid_year_retirees_mask
+        ].copy()
+
+        op_df.loc[mid_year_retirees_mask, 'capacity_mw_eoy'] = 0
+        op_df.loc[~mid_year_retirees_mask, 'capacity_mw_eoy'] = (
+            op_df.loc[~mid_year_retirees_mask, 'capacity_mw'])
+
+        og_len = len(gen_df)
+        removed = og_len - len(op_df)
+        logger.info(
+            f"Removing {removed} retired or planned generators: "
+            f"{removed/og_len:.02%}"
+        )
+        # ensure the new EOY capacity column is complete for all records it
+        # can be - ie for all records that have a standard capacity
+        assert(op_df.loc[op_df.capacity_mw_eoy.isnull()
+               & op_df.capacity_mw.notnull()].empty)
+        return op_df
+
     def get_part_df(self, part_name):
         """
         Get a table of data aggregated by a specific plant-part.
@@ -1159,8 +1156,7 @@ class CompilePlantParts(object):
         Args:
             part_name (string): name of plant-part
         """
-        plant_part = PLANT_PARTS[part_name]
-        id_cols = plant_part['id_cols']
+        id_cols = PLANT_PARTS[part_name]['id_cols']
 
         part_df = (
             self.ag_part_by_own_slice(part_name)
