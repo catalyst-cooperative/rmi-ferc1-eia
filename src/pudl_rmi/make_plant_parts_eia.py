@@ -450,21 +450,34 @@ class CompilePlantParts(object):
         """
         Add additonal data and id columns.
 
-        capacity_factor +
-        utility_id_pudl +
-        plant_id_pudl +
-        ownership_dupe (boolean): indicates whether the "owned" record has a
-        corresponding "total" duplicate.
+        This method adds a set of either calculated columns or PUDL ID columns.
+
+        Returns:
+            pandas.DataFrame: master unit list table with these additional
+            columns:
+                * utility_id_pudl +
+                * plant_id_pudl +
+                * capacity_factor +
+                * ownership_dupe (boolean): indicator of whether the "owned"
+                    record has a corresponding "total" duplicate.
+
+
         """
         plant_parts_df = (
             calc_capacity_factor(plant_parts_df, -0.5, 1.5, self.freq)
             .merge(
                 self.pudl_out.plants_eia860()
-                [['plant_id_eia', 'plant_id_pudl',
-                  'utility_id_eia', 'utility_id_pudl']]
+                [['plant_id_eia', 'plant_id_pudl']]
                 .drop_duplicates(),
                 how='left',
-                on=['plant_id_eia', 'utility_id_eia']
+                on=['plant_id_eia', ]
+            )
+            .merge(
+                self.pudl_out.utils_eia860()
+                [['utility_id_eia', 'utility_id_pudl']]
+                .drop_duplicates(),
+                how='left',
+                on=['utility_id_eia']
             )
             .assign(ownership_dupe=lambda x: np.where(
                 (x.ownership == 'owned') & (x.fraction_owned == 1),
