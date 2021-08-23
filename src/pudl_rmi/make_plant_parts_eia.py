@@ -140,6 +140,40 @@ QUAL_RECORDS = [
 dict: a dictionary of qualifier column name (key) and original table (value).
 """
 
+DTYPES_MUL = {
+    "plant_id_eia": "int64",
+    "report_date": "datetime64[ns]",
+    "plant_part": "object",
+    "generator_id": "object",
+    "unit_id_pudl": "object",
+    "prime_mover_code": "object",
+    "energy_source_code_1": "object",
+    "technology_description": "object",
+    "ferc_acct_name": "object",
+    "utility_id_eia": "object",
+    "true_gran": "bool",
+    "appro_part_label": "object",
+    "appro_record_id_eia": "object",
+    "capacity_factor": "float64",
+    "capacity_mw": "float64",
+    "fraction_owned": "float64",
+    "fuel_cost_per_mmbtu": "float64",
+    "fuel_cost_per_mwh": "float64",
+    "heat_rate_mmbtu_mwh": "float64",
+    "installation_year": "Int64",
+    "net_generation_mwh": "float64",
+    "ownership": "category",
+    "plant_id_pudl": "Int64",
+    "plant_name_eia": "string",
+    "total_fuel_cost": "float64",
+    "total_mmbtu": "float64",
+    "utility_id_pudl": "Int64",
+    "utility_name_eia": "string",
+    "report_year": "int64",
+    "plant_id_report_year": "object",
+    "plant_name_new": "string"
+}
+
 FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
               'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
               'technology_description', 'ferc_acct_name',
