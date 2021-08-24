@@ -18,41 +18,44 @@ portion records are labeled in the `ownership` column as "owned" and the total
 records are labeled as "total".
 
 This module refers to "true granularies". Many plant parts we cobble together
-here in the master unit list refer to the same collection of infrastructure as
-other master unit list records. For example, if we have a "plant_prime_mover"
-plant part record and a "plant_unit" plant part record which were both cobbled
-together from the same two generators. We want to be able to reduce the master
-unit list to only unique collections of generators, so we label the first
-unique granularity as a true granularity and label the subsequent records as
-false granularities with the `true_gran` column. In order to choose which plant
-part to keep in these instances, we assigned a `PLANT_PARTS_ORDERED` and
-effectively keep the first instance of a unique granularity.
+here in the master plant-part list refer to the same collection of
+infrastructure as other plant-part list records. For example, if we have a
+"plant_prime_mover" plant part record and a "plant_unit" plant part record
+which were both cobbled together from the same two generators. We want to be
+able to reduce the master unit list to only unique collections of generators,
+so we label the first unique granularity as a true granularity and label the
+subsequent records as false granularities with the `true_gran` column. In order
+to choose which plant part to keep in these instances, we assigned a
+`PLANT_PARTS_ORDERED` and effectively keep the first instance of a unique
+granularity.
 
 Overview of flow for generating the master unit list:
 
-There are two classes in here - one which compiles input tables (CompileTables)
-and one which compiles the master unit list (CompilePlantParts). The method
-that rules the show here is `generate_master_unit_list`, which is a method of
-CompilePlantParts.
+`PLANT_PARTS` is the main recipe book for how each of the plant parts need to
+be compiled.
 
-`PLANT_PARTS` is basically the main recipe book for how each of the plant parts
-need to be compiled. CompilePlantParts eats this recipe book and follows the
-recipe to make the master unit list.
-
-All of the plant parts are compiled from generators. So we first generate a
-big dataframe of generators with any columns we'll need. This is where we add
-records regarding utility ownership slices. Then we use that generator
-dataframe and information stored in `PLANT_PARTS` to know how to aggregate each
-of the plant parts. Then we have plant part dataframes with the columns which
-identify the plant part and all of the data columns aggregated to the level of
-the plant part.
-
-With that compiled plant part dataframe we also add in qualifier columns with
-`get_qualifiers()`. A qualifer column is a column which contain data that is
-not endemic to the plant part record (it is not one of the identifying columns
-or aggregated data columns) but the data is still useful data that is
-attributable to each of the plant part records. For more detail on what a
-qualifier column is, see the `get_qualifiers()` method.
+The three classes which enable the generation of the plant-part table are:
+ * ``MakeMegaGenTbl``: All of the plant parts are compiled from generators. So
+ this class generates a big dataframe of generators with any ID and data
+ columns we'll need. This is also where we add records regarding utility
+ ownership slices. The table includes two records for every generator-owner:
+ one for the "total" generator (assuming the owner owns 100% of the generator)
+ and one for the report ownership fraction of that generator with all of the
+ data columns scaled to the ownership fraction.
+ * ``LabelTrueGranularities``: This class creates labels for all generators
+ which note wether the plant-part records that will be compiled from each
+ generator will be a "true granulary", as described above.
+ * ``MakePlantParts``: This class uses the generator dataframe, the granularity
+ dataframe from the above two classes as well as the information stored in
+ `PLANT_PARTS` to know how to aggregate each of the plant parts. Then we have
+ plant part dataframes with the columns which identify the plant part and all
+ of the data columns aggregated to the level of the plant part. With that
+ compiled plant part dataframe we also add in qualifier columns with
+ `get_qualifiers()`. A qualifer column is a column which contain data that is
+ not endemic to the plant part record (it is not one of the identifying columns
+ or aggregated data columns) but the data is still useful data that is
+ attributable to each of the plant part records. For more detail on what a
+ qualifier column is, see the `get_qualifiers()` method.
 """
 
 
@@ -191,12 +194,14 @@ FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
               'utility_id_eia', 'true_gran', 'appro_part_label']
 
 
-class CompileMegaGenTbl(object):
+class MakeMegaGenTbl(object):
     """Compiler for a MEGA generator table with ownership integrated."""
 
     def __init__(self, pudl_out):
         """
-        Initialize compiler for a MEGA generator table.
+        Initialize object which creates a MEGA generator table.
+
+        The controlling function here is ``execute()``.
 
         Args:
             pudl_out (pudl.output.pudltabl.PudlTabl): An object used to create
@@ -409,9 +414,16 @@ class CompileMegaGenTbl(object):
 class LabelTrueGranularities(object):
     """True Granularity Labeler."""
 
-    def __init__(self, gens_compiler):
-        """Initialize the true granulary labeler."""
-        self.gens_compiler = gens_compiler
+    def __init__(self, gens_maker):
+        """
+        Initialize the true granulary labeler.
+
+        The controlling function here is ``execute()``.
+
+        Args:
+            gens_maker (object): an instance of ``MakeMegaGenTbl``
+        """
+        self.gens_maker = gens_maker
         self.parts_to_parent_parts = self.get_parts_to_parent_parts()
         self.id_cols_list = make_id_cols_list()
         # make a dictionary with the main id column (key) corresponding to the
@@ -496,7 +508,7 @@ class LabelTrueGranularities(object):
             columns will be named in the following format:
             {child/parent_part_name}_count_per_{part_name}
         """
-        plant_gen_df = self.gens_compiler.execute()
+        plant_gen_df = self.gens_maker.execute()
         # grab the plant-part id columns from the generator table
         count_ids = plant_gen_df.loc[:, self.id_cols_list].drop_duplicates()
 
@@ -697,29 +709,33 @@ class LabelTrueGranularities(object):
         return part_trues
 
 
-class CompilePlantParts(object):
+class MakePlantParts(object):
     """Compile plant parts."""
 
-    def __init__(self, pudl_out, gens_compiler, true_grans_compiler):
+    def __init__(self, pudl_out, gens_maker, true_grans_labeler):
         """
         Compile the plant parts for the master unit list.
+
+        The controlling function here is ``execute()``.
 
         Args:
             pudl_out (pudl.output.pudltabl.PudlTabl): An object used to create
                 the tables for EIA and FERC Form 1 analysis.
-
+            gens_maker (object): an instance of ``MakeMegaGenTbl``
+            true_grans_labeler (object): an instance of
+                ``LabelTrueGranularities``
         """
         self.pudl_out = pudl_out
         self.freq = self.pudl_out.freq
-        self.gens_compiler = gens_compiler
-        self.true_grans_compiler = true_grans_compiler
-        self.parts_to_ids = self.true_grans_compiler.parts_to_ids
+        self.gens_maker = gens_maker
+        self.true_grans_labeler = true_grans_labeler
+        self.parts_to_ids = self.true_grans_labeler.parts_to_ids
 
         # get a list of all of the id columns that constitue the primary keys
         # for all of the plant parts
         self.id_cols_list = make_id_cols_list()
 
-    def generate_master_plant_parts(self):
+    def execute(self):
         """
         Aggreate and slice data points by each plant part.
 
@@ -743,9 +759,9 @@ class CompilePlantParts(object):
             pandas.DataFrame:
         """
         # make the master generator table
-        self.plant_gen_df = self.gens_compiler.execute()
+        self.plant_gen_df = self.gens_maker.execute()
         # generate the true granularity labels
-        self.part_true_gran_labels = self.true_grans_compiler.execute()
+        self.part_true_gran_labels = self.true_grans_labeler.execute()
         # 3) aggreate everything by each plant part
         plant_parts_df = pd.DataFrame()
         for part_name in PLANT_PARTS_ORDERED:
@@ -821,7 +837,7 @@ class CompilePlantParts(object):
         id_cols = plant_part['id_cols']
         # split up the 'owned' slices from the 'total' slices.
         # this is because the aggregations are different
-        plant_gen_df = self.gens_compiler.execute()
+        plant_gen_df = self.gens_maker.execute()
         part_own = plant_gen_df[plant_gen_df.ownership == 'owned']
         part_tot = plant_gen_df[plant_gen_df.ownership == 'total']
         if len(plant_gen_df) != len(part_own) + len(part_tot):
@@ -917,7 +933,7 @@ class CompilePlantParts(object):
         logger.debug(f'pre count of part DataFrame: {len(part_df)}')
         # we want to sort to have the most recent on top
         install = (
-            self.gens_compiler.execute()[id_cols + ['installation_year']]
+            self.gens_maker.execute()[id_cols + ['installation_year']]
             .sort_values('installation_year', ascending=False)
             .drop_duplicates(subset=id_cols, keep='first')
             .dropna(subset=id_cols)
@@ -940,7 +956,7 @@ class CompilePlantParts(object):
             part_name (string)
 
         """
-        bool_df = self.true_grans_compiler.execute()
+        bool_df = self.true_grans_labeler.execute()
         # get only the columns you need for this part and drop duplicates
         bool_df = (
             bool_df[
@@ -1045,7 +1061,7 @@ class CompilePlantParts(object):
             logger.debug(f'{record_name} already here.. ')
             return part_df
 
-        record_df = self.gens_compiler.execute().copy()
+        record_df = self.gens_maker.execute().copy()
 
         # the base columns will be the id columns, plus the other two main ids
         id_cols = PLANT_PARTS[part_name]['id_cols']
@@ -1120,7 +1136,7 @@ class CompilePlantParts(object):
         part_df = (
             pd.merge(
                 part_df,
-                self.gens_compiler.execute()
+                self.gens_maker.execute()
                 [id_cols + ['plant_name_eia']].drop_duplicates(),
                 on=id_cols,
                 how='left'
@@ -1486,9 +1502,9 @@ def dedupe_n_flatten_list_of_lists(mega_list):
         [item for sublist in mega_list for item in sublist]))
 
 
-########################
-# Keep in repo functions
-########################
+############################
+# Keep in rmi repo functions
+############################
 
 
 def reassign_id_ownership_dupes(plant_parts_df):
@@ -1538,13 +1554,11 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
             "Generating a new master unit list. This should take ~10 minutes."
         )
         # initilize the compilers
-        gens_compiler = CompileMegaGenTbl(pudl_out)
-        true_grans_compiler = LabelTrueGranularities(gens_compiler)
-        parts_compiler = CompilePlantParts(
-            pudl_out, gens_compiler, true_grans_compiler
-        )
+        gens_maker = MakeMegaGenTbl(pudl_out)
+        grans_labeler = LabelTrueGranularities(gens_maker)
+        parts_compiler = MakePlantParts(pudl_out, gens_maker, grans_labeler)
         # actually make the master plant parts list
-        plant_parts_df = parts_compiler.generate_master_plant_parts()
+        plant_parts_df = parts_compiler.execute()
         # export
         plant_parts_df.to_csv(file_path_mul, compression='gzip')
 
