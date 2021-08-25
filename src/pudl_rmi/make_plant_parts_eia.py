@@ -116,6 +116,22 @@ PLANT_PARTS_ORDERED = [
 ]
 
 
+IDX_TO_ADD = ['report_date', 'operational_status_pudl']
+"""
+iterable: list of additional columns to add to the id_cols in `PLANT_PARTS`.
+The id_cols are the base columns that we need to aggregate on, but we also need
+to add the report date to keep the records time sensitive and the
+operational_status_pudl to separate the operating plant-parts from the
+non-operating plant-parts.
+"""
+
+IDX_OWN_TO_ADD = ['utility_id_eia', 'ownership']
+"""
+iterable: list of additional columns beyond the IDX_TO_ADD to add to the
+id_cols in `PLANT_PARTS` when we are dealing with plant-part records that have
+been broken out into "owned" and "total" records for each of their owners.
+"""
+
 SUM_COLS = [
     'total_fuel_cost',
     'net_generation_mwh',
@@ -224,6 +240,7 @@ class MakeMegaGenTbl(object):
             logger.info('Generating the mega generator table with ownership.')
             self.plant_gen_df = (
                 self.get_mega_gens_table()
+                .pipe(self.ensure_column_completeness)
                 .pipe(self.slice_by_ownership)
             )
         return self.plant_gen_df
@@ -269,11 +286,62 @@ class MakeMegaGenTbl(object):
             )
             .assign(installation_year=lambda x: x.operating_date.dt.year)
             .astype({'installation_year': 'Int64'})
-            .pipe(self.get_only_operating_gens)
+            .pipe(self.label_operating_gens)
+        )
+        return all_gens
+
+    def label_operating_gens(self, gen_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Label the operating generators.
+
+        We want to distinguish between "operating" generators (those that
+        report as "existing" and those that retire mid-year) and everything
+        else so that we can group the operating generators into their own
+        plant-parts separate from retired or proposed generators. We do this by
+        creating
+
+        This method also adds a column called "capacity_mw_eoy", which is the
+        end of year capacity of the generators. We assume that if a generator
+        isn't "existing", its EOY capacity should be zero.
+
+        Args:
+            gen_df (pandas.DataFrame): annual table of all generators from EIA.
+
+        Returns
+            pandas.DataFrame: annual table of all generators from EIA that
+            operated within each reporting year.
+        """
+        mid_year_retiree_mask = (
+            gen_df.retirement_date.dt.year == gen_df.report_date.dt.year)
+        existing_mask = (gen_df.operational_status == 'existing')
+        operating_mask = existing_mask | mid_year_retiree_mask
+
+        # we've going to make a new column which combines both the mid-year
+        # reitrees and the fully existing gens into one code so we can group
+        # them together later on
+        gen_df.loc[operating_mask, 'operational_status_pudl'] = 'operating'
+        gen_df.loc[~operating_mask, 'operational_status_pudl'] = (
+            gen_df.loc[~operating_mask, 'operational_status']
         )
 
-        # check to see if the master gens table has all of the columns we want
-        # extract columns from PLANT_PARTS + a few extra
+        gen_df.loc[~existing_mask, 'capacity_mw_eoy'] = 0
+        gen_df.loc[existing_mask, 'capacity_mw_eoy'] = (
+            gen_df.loc[existing_mask, 'capacity_mw']
+        )
+
+        logger.info(
+            f"Labeled {len(gen_df.loc[~existing_mask])/len(gen_df):.02%} of "
+            "generators as non-operative."
+        )
+        return gen_df
+
+    def ensure_column_completeness(self, all_gens):
+        """
+        Ensure the generators table has all the columns we need.
+
+        Check to see if the master gens table has all of the columns we want
+        extract columns from PLANT_PARTS + a few extra.
+        """
         other_cols = [
             'plant_name_eia',
             'installation_year',
@@ -303,49 +371,6 @@ class MakeMegaGenTbl(object):
             ))
         )
         return all_gens[all_cols]
-
-    def get_only_operating_gens(self, gen_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Remove the fully retired generators from the main generators table.
-
-        For the MUL, we want only generators that are operational during a
-        given reporting period. This requires keeping both the generators that
-        report as "existing" and generators that have mid-year retirements.
-
-        This method also adds a column called "capacity_mw_eoy", which is the
-        end of year capacity of the generators. We assume that if a generator
-        retired mid-year, its EOY capacity should be zero.
-
-        Args:
-            gen_df (pandas.DataFrame): annual table of all generators from EIA.
-
-        Returns
-            pandas.DataFrame: annual table of all generators from EIA that
-            operated within each reporting year.
-        """
-        mid_year_retirees_mask = (
-            gen_df.retirement_date.dt.year == gen_df.report_date.dt.year)
-        # grab only the operational gens - the gens that are existing and those
-        # that retired mid-year
-        op_df = gen_df.loc[
-            (gen_df.operational_status == 'existing') | mid_year_retirees_mask
-        ].copy()
-
-        op_df.loc[mid_year_retirees_mask, 'capacity_mw_eoy'] = 0
-        op_df.loc[~mid_year_retirees_mask, 'capacity_mw_eoy'] = (
-            op_df.loc[~mid_year_retirees_mask, 'capacity_mw'])
-
-        og_len = len(gen_df)
-        removed = og_len - len(op_df)
-        logger.info(
-            f"Removing {removed} retired or planned generators: "
-            f"{removed/og_len:.02%}"
-        )
-        # ensure the new EOY capacity column is complete for all records it
-        # can be - ie for all records that have a standard capacity
-        assert(op_df.loc[op_df.capacity_mw_eoy.isnull()
-               & op_df.capacity_mw.notnull()].empty)
-        return op_df
 
     def slice_by_ownership(self, plant_gen_df):
         """Generate proportional data by ownership %s."""
@@ -465,21 +490,18 @@ class LabelTrueGranularities(object):
 
         """
         if self.part_true_gran_labels is None or clobber:
-            self.part_true_gran_labels = (
+            true_gran_labels = (
                 self.make_all_the_counts()
                 .pipe(self.make_all_the_bools)
                 .pipe(self.label_true_grans_by_part)
                 .pipe(self.label_true_id_by_part)
             )
-
             if drop_extra_cols:
                 for drop_cols in ['_v_', '_has_only_one_', 'count_per']:
-                    self.part_true_gran_labels = (
-                        self.part_true_gran_labels.drop(
-                            columns=self.part_true_gran_labels
-                            .filter(like=drop_cols)
-                        )
+                    true_gran_labels = true_gran_labels.drop(
+                        columns=true_gran_labels.filter(like=drop_cols)
                     )
+            self.part_true_gran_labels = true_gran_labels
         return self.part_true_gran_labels
 
     def get_parts_to_parent_parts(self):
@@ -521,8 +543,8 @@ class LabelTrueGranularities(object):
                 how='left')
 
         # check the expected # of columns
-        # id columns minus the report_date column
-        pp_l = len(self.id_cols_list) - 1
+        # id columns minus the added columns
+        pp_l = len(self.id_cols_list) - len(IDX_TO_ADD)
         expected_col_len = (
             len(plant_gen_df.columns) +  # the plant_gen_df colums
             pp_l * (pp_l - 1) + 1  # the count columns (we add one bc we get a
@@ -552,7 +574,7 @@ class LabelTrueGranularities(object):
             {child/parent_part_name}_count_per_{part_name}
 
         """
-        part_cols = PLANT_PARTS[part_name]['id_cols'] + ['report_date']
+        part_cols = PLANT_PARTS[part_name]['id_cols'] + IDX_TO_ADD
         # because the plant_id_eia is always a part of the groupby columns
         # and we want to count the plants as well, we need to make a duplicate
         # plant_id_eia column to count on
@@ -650,7 +672,7 @@ class LabelTrueGranularities(object):
             trues_found = (
                 part_bools[part_bools[f'true_gran_{part_name}']]
                 .drop_duplicates(subset=[self.parts_to_ids[part_name],
-                                         'plant_id_eia', 'report_date']))
+                                         'plant_id_eia', ] + IDX_TO_ADD))
             logger.info(
                 f'true grans found for {part_name}: {len(trues_found)}'
             )
@@ -695,9 +717,10 @@ class LabelTrueGranularities(object):
             part_trues[appro_part_col] = part_trues[appro_part_col].fillna(
                 part_name)
             part_trues = (
-                assign_record_id_eia(part_trues, plant_part_col=appro_part_col)
-                .rename(columns={'record_id_eia': f'record_id_eia_{part_name}'}
-                        )
+                assign_record_id_eia(
+                    part_trues, plant_part_col=appro_part_col)
+                .rename(
+                    columns={'record_id_eia': f'record_id_eia_{part_name}'})
             )
             # do a little check
             if not all(part_trues[part_trues[f'true_gran_{part_name}']]
@@ -963,9 +986,8 @@ class PlantPart(object):
             pandas.DataFrame : dataframe aggregated to the level of the
                 part_name
         """
-        plant_part = PLANT_PARTS[self.part_name]
         logger.info(f'begin aggregation for: {self.part_name}')
-        id_cols = plant_part['id_cols']
+        # id_cols = PLANT_PARTS[self.part_name]['id_cols']
         # split up the 'owned' slices from the 'total' slices.
         # this is because the aggregations are different
         plant_gen_df = self.gens_maker.execute()
@@ -983,7 +1005,7 @@ class PlantPart(object):
         part_tot = part_tot.drop_duplicates(subset=dedup_cols)
         part_own = agg_cols(
             df_in=part_own,
-            id_cols=id_cols + ['utility_id_eia', 'ownership'],
+            id_cols=self.id_cols + IDX_TO_ADD + IDX_OWN_TO_ADD,
             sum_cols=SUM_COLS,
             wtavg_dict=WTAVG_DICT,
             freq=self.freq
@@ -992,14 +1014,15 @@ class PlantPart(object):
         part_tot = (
             agg_cols(
                 df_in=part_tot,
-                id_cols=id_cols,
+                id_cols=self.id_cols + IDX_TO_ADD,
                 sum_cols=SUM_COLS,
                 wtavg_dict=WTAVG_DICT,
                 freq=self.freq
             )
-            .merge(plant_gen_df[id_cols + ['report_date', 'utility_id_eia']]
-                   .dropna()
-                   .drop_duplicates())
+            .merge(  # why is this here?
+                plant_gen_df[self.id_cols + ['report_date', 'utility_id_eia']]
+                .dropna()
+                .drop_duplicates())
             .assign(ownership='total')
         )
         part_ag = (
@@ -1034,7 +1057,9 @@ class PlantPart(object):
         # We are automatically assign fraction_owned == 1 to them, but it seems
         # cleaner to run the full df through this same grouby
         frac_owned = (
-            part_ag.groupby(by=self.id_cols + ['ownership', 'report_date'])
+            part_ag.groupby(
+                by=self.id_cols +
+                ['ownership', 'operational_status_pudl', 'report_date'])
             [['capacity_mw']].sum(min_count=1)
         )
         # then merge the total capacity with the plant-part capacity to use to
@@ -1064,14 +1089,15 @@ class PlantPart(object):
         logger.debug(f'pre count of part DataFrame: {len(part_df)}')
         # we want to sort to have the most recent on top
         install = (
-            self.gens_maker.execute()[self.id_cols + ['installation_year']]
+            self.gens_maker.execute()
+            [self.id_cols + ['operational_status_pudl', 'installation_year']]
             .sort_values('installation_year', ascending=False)
             .drop_duplicates(subset=self.id_cols, keep='first')
             .dropna(subset=self.id_cols)
         )
         part_df = part_df.merge(
             install, how='left',
-            on=self.id_cols, validate='m:1')
+            on=self.id_cols + ['operational_status_pudl'], validate='m:1')
         logger.debug(
             f'count of install years for part: {len(install)} \n'
             f'post count of part DataFrame: {len(part_df)}'
@@ -1090,13 +1116,11 @@ class PlantPart(object):
         # get only the columns you need for this part and drop duplicates
         bool_df = (
             bool_df[
-                self.id_cols +
-                ['report_date',
-                 f'true_gran_{self.part_name}',
+                self.id_cols + IDX_TO_ADD + IDX_OWN_TO_ADD +
+                [f'true_gran_{self.part_name}',
                  f'appro_part_label_{self.part_name}',
-                 f'record_id_eia_{self.part_name}',
-                 'utility_id_eia',
-                 'ownership']]
+                 f'record_id_eia_{self.part_name}', ]
+            ]
             .drop_duplicates()
         )
 
@@ -1108,7 +1132,9 @@ class PlantPart(object):
         part_df = (
             part_df.merge(
                 bool_df,
-                how='left')
+                on=self.id_cols + IDX_TO_ADD + IDX_OWN_TO_ADD,
+                how='left',
+            )
             .rename(columns={
                 f'true_gran_{self.part_name}': 'true_gran',
                 f'appro_part_label_{self.part_name}': 'appro_part_label',
@@ -1154,9 +1180,7 @@ class PlantPart(object):
             part_df (pandas.DataFrame): dataframe containing records associated
                 with one plant part.
         """
-        group_cols = [
-            'plant_id_eia', 'utility_id_eia', 'report_date', 'ownership'
-        ]
+        group_cols = ['plant_id_eia'] + IDX_TO_ADD + IDX_OWN_TO_ADD
         # count unique records per plant
         part_count = (
             part_df.groupby(group_cols, as_index=False)
@@ -1188,7 +1212,9 @@ class AddQualifier(object):
         # the base columns will be the id columns, plus the other two main ids
         self.part_name = part_name
         self.id_cols = PLANT_PARTS[part_name]['id_cols']
-        self.base_cols = self.id_cols + ['ownership', 'report_date']
+        # why no util id? otoh does ownership need to be here at all?
+        # qualifiers should be independent of ownership
+        self.base_cols = self.id_cols + IDX_TO_ADD + ['ownership']
         self.gens_maker = gens_maker
 
     def execute(self, part_df):
@@ -1339,7 +1365,7 @@ def _test_prep_merge(part_name, plant_parts_df, plant_gen_df):
     plant_cap = (
         plant_gen_df
         .groupby(
-            by=id_cols + ['report_date', 'utility_id_eia', 'ownership'])
+            by=id_cols + IDX_TO_ADD + IDX_OWN_TO_ADD)
         [SUM_COLS]
         .sum(min_count=1)
         .reset_index()
@@ -1347,7 +1373,7 @@ def _test_prep_merge(part_name, plant_parts_df, plant_gen_df):
     test_merge = pd.merge(
         plant_parts_df[plant_parts_df.plant_part == part_name],
         plant_cap,
-        on=id_cols + ['report_date', 'utility_id_eia', 'ownership'],
+        on=id_cols + IDX_TO_ADD + IDX_OWN_TO_ADD,
         how='outer',
         indicator=True,
         suffixes=('', '_test'))
@@ -1368,7 +1394,7 @@ def make_id_cols_list():
             including `report_date`
     """
     return (
-        ['report_date'] + dedupe_n_flatten_list_of_lists(
+        IDX_TO_ADD + dedupe_n_flatten_list_of_lists(
             [x['id_cols'] for x in PLANT_PARTS.values()])
     )
 
@@ -1396,6 +1422,13 @@ def add_record_id(part_df, id_cols, plant_part_col='plant_part'):
         part_df[plant_part_col] + "_" +
         part_df.ownership.astype(str) + "_" +
         part_df.utility_id_eia.astype('Int64').astype(str))
+    # add operational status only when records are not "operating" (i.e.
+    # existing or retiring mid-year see MakeMegaGenTbl.abel_operating_gens()
+    # for more details)
+    non_op_mask = part_df.operational_status_pudl != 'operating'
+    part_df.loc[non_op_mask, 'record_id_eia'] = (
+        part_df.loc[non_op_mask, 'record_id_eia'] + "_"
+        + part_df.loc[non_op_mask, 'operational_status_pudl'])
     return part_df
 
 
@@ -1408,15 +1441,14 @@ def assign_record_id_eia(test_df, plant_part_col='plant_part'):
         plant_part_col (string)
 
     """
-    test_df_ids = pd.DataFrame()
+    dfs = []
     for part in PLANT_PARTS:
-        test_df_ids = pd.concat(
-            [test_df_ids,
-             add_record_id(
-                 part_df=test_df[test_df[plant_part_col] == part],
-                 id_cols=PLANT_PARTS[part]['id_cols'],
-                 plant_part_col=plant_part_col
-             )])
+        dfs.append(add_record_id(
+            part_df=test_df[test_df[plant_part_col] == part],
+            id_cols=PLANT_PARTS[part]['id_cols'],
+            plant_part_col=plant_part_col
+        ))
+    test_df_ids = pd.concat(dfs)
     return test_df_ids
 
 
@@ -1500,15 +1532,8 @@ def agg_cols(df_in, id_cols, sum_cols, wtavg_dict, freq):
         set([x for x in cols_to_grab if x in list(df_in.columns)]))
     if cols_to_grab != cols_to_grab:
         warnings.warn(f"um {[x for x in id_cols if x not in cols_to_grab]}")
-    # Not totally sure if this freq functionally still works.. haven't used it
-    # in a while.
+
     df_in = df_in.astype({'report_date': 'datetime64[ns]'})
-    if 'report_date' in list(df_in.columns):
-        if not df_in[df_in['report_date'].dt.month > 2].empty:
-            cols_to_grab = cols_to_grab + [pd.Grouper(freq=freq)]
-            df_in = df_in.set_index(pd.DatetimeIndex(df_in.report_date))
-        else:
-            cols_to_grab = cols_to_grab + ['report_date']
     logger.debug('aggregate the parts')
     logger.debug(f'     grouping by on {cols_to_grab}')
 
