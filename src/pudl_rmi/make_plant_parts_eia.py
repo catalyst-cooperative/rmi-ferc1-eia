@@ -209,6 +209,15 @@ FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
               'technology_description', 'ferc_acct_name',
               'utility_id_eia', 'true_gran', 'appro_part_label']
 
+MUL_COLS = [
+    'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
+    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
+    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+    'technology_description', 'ferc_acct_name', 'utility_id_eia',
+    'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
+    'record_count', 'fraction_owned', 'ownership_dupe'
+]
+
 
 class MakeMegaGenTbl(object):
     """Compiler for a MEGA generator table with ownership integrated."""
