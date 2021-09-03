@@ -149,7 +149,7 @@ class Transformer:
             idx_cols=agg_cols)
         return self.agg_by_plant_df
 
-    def early_tidy(self, clobber=False, fill=False):
+    def early_tidy(self, clobber=False):
         """Early transform type assignments and column assignments."""
         if clobber or self.tidy_df is None:
             # read in the depreciation sheet, assign types when required
@@ -160,7 +160,7 @@ class Transformer:
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
                 .pipe(self.convert_rate_cols)
-                .pipe(self.correct_net_salvage_sign, fill=fill)
+                .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
                 .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
                 .pipe(add_ferc_acct_name)
@@ -395,13 +395,9 @@ class Transformer:
         )
         # get rid of the bool columns we used to clean % columns
         tidy_df = tidy_df.drop(columns=tidy_df.filter(like='num'))
-        # force the net salvage to be negative
-        # tidy_df['net_salvage_rate'] = - tidy_df['net_salvage_rate'].abs()
-        # tidy_df['net_salvage'] = - tidy_df['net_salvage'].abs()
-
         return tidy_df
 
-    def correct_net_salvage_sign(self, tidy_df_og, fill=False):
+    def correct_net_salvage_sign(self, tidy_df):
         """
         Correct for net salvage sign and fill in some 0's.
 
@@ -420,13 +416,6 @@ class Transformer:
         """
         # Note: we've tried filling in the df before fixing the sign and
         # it gave us the same outputs.
-        if fill:
-            tidy_df = self.fill_in_df(
-                tidy_df_og.copy(),
-                common_allocated=False
-            )
-        else:
-            tidy_df = tidy_df_og.copy()
 
         # rate check based on the book reserve fill_in calc
         tidy_df['net_salvage_rate_sign_check'] = (
@@ -460,18 +449,13 @@ class Transformer:
                 f"have postive {col}"
             )
             tidy_df[col] = np.where(
-                sign_check_mask,
-                tidy_df[col].abs(),
-                - tidy_df[col].abs()
+                sign_check_mask, tidy_df[col].abs(), - tidy_df[col].abs()
             )
         # drop the two interim columns bc we don't need them anymore.
-        # tidy_df = tidy_df.drop(
-        #     columns=['net_salvage_rate_sign_check', 'net_salvage_sign_check']
-        # )
-
-        tidy_df_og.set_index(IDX_COLS_DEPRISH).loc[:, salvage_cols] = (
-            tidy_df.set_index(IDX_COLS_DEPRISH).loc[:, salvage_cols])
-        return tidy_df_og
+        tidy_df = tidy_df.drop(
+            columns=['net_salvage_rate_sign_check', 'net_salvage_sign_check']
+        )
+        return tidy_df
 
     def remove_ferc_acct_duplicates(self, tidy_df):
         """
