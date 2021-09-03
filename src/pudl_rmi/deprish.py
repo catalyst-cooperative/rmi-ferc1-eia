@@ -120,7 +120,7 @@ class Transformer:
         self.reshaped_df = None
         self.filled_df = None
 
-    def execute(self, clobber=False, agg_cols=None, fill=False):
+    def execute(self, clobber=False, agg_cols=None):
         """
         Generate a transformed dataframe for the depreciation studies.
 
@@ -136,7 +136,7 @@ class Transformer:
             pandas.dataframe: depreciation study records that have been cleaned
             and nulls have been filled in.
         """
-        self.tidy_df = self.early_tidy(clobber=clobber, fill=fill)
+        self.tidy_df = self.early_tidy(clobber=clobber)
         self.reshaped_df = self.reshape(clobber=clobber)
         # value transform
         self.filled_df = self.fill_in(clobber=clobber)
