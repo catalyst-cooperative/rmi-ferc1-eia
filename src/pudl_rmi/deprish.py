@@ -25,7 +25,6 @@ import pandas as pd
 import numpy as np
 
 import pudl
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +258,7 @@ class Transformer:
                 net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
                     x.net_salvage_rate.fillna(
+
                         x[f"net_salvage{suffix}"] /
                         x[f"book_reserve{suffix}"]),
                 reserve_rate=lambda x: x.reserve_rate.fillna(
@@ -269,6 +269,7 @@ class Transformer:
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
                     filled_df.depreciation_annual_rate *
                     filled_df[f"plant_balance{suffix}"])
+
             )
             filled_df[f"net_salvage{suffix}"] = (
                 filled_df[f"net_salvage{suffix}"].fillna(
@@ -490,8 +491,7 @@ class Transformer:
         return common_pb_w_counts
 
     def split_allocate_common(self,
-                              split_col='plant_balance',
-                              common_suffix='_common'):
+                              split_col='plant_balance'):
         """
         Split and allocate the common plant depreciation lines.
 
@@ -508,11 +508,9 @@ class Transformer:
             split_col (string): column name of common records to split and
                 allocate. Column must contain numeric data. Default
                 'plant_balance'.
-            common_suffix (string): suffix to use for the common columns when
-                they are merged into the other plant-part records.
         """
         # the new  data col we are trying to generate
-        new_data_col = f'{split_col}_w{common_suffix}'
+        new_data_col = f'{split_col}_w_common'
         deprish_w_c = self.split_merge_common_records(split_col=split_col)
         # split apart the common records from the main records.
         deprish_common = (deprish_w_c.loc[
@@ -527,10 +525,9 @@ class Transformer:
             f"   grabbed {len(deprish_common)} common reocrds and "
             f"{len(deprish_w_c)} atomic records. of total {len(deprish_w_c)}")
         simple_case_df = self.calc_common_portion_simple(
-            deprish_w_c, split_col, common_suffix)
+            deprish_w_c, split_col)
         edge_case_df = self.calc_common_portion_with_no_part_balance(
-            deprish_w_c, split_col, common_suffix)
-        # test_yucca_line_id(simple_case_df, name='edge_case_df')
+            deprish_w_c, split_col)
         deprish_w_common_allocated = pd.concat([simple_case_df, edge_case_df])
         # finally, calcuate the new column w/ the % of the total group. if
         # there is no common data, fill in this new data column with the og col
@@ -551,15 +548,12 @@ class Transformer:
                 "so something went wrong here."
             )
         df_w_check = self._check_common_allocation(
-            deprish_w_common_allocated, split_col, new_data_col, common_suffix)
+            deprish_w_common_allocated, split_col, new_data_col)
 
         # return deprish_w_common_allocated
         return df_w_check
 
-    def calc_common_portion_simple(self,
-                                   deprish_w_c,
-                                   split_col,
-                                   common_suffix):
+    def calc_common_portion_simple(self, deprish_w_c, split_col):
         """
         Generate the portion of the common plant based on the split_col.
 
@@ -575,9 +569,7 @@ class Transformer:
         # because we are using a weight_col that might be filled in we're going
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
-        # filled_df = (self.fill_in_df(deprish_w_c, common_allocated=False)
-        #     [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
-        # )
+
         # exclude the nulls and the 0's
         simple_case_df = deprish_w_c[
             (deprish_w_c[weight_col].notnull()) & (
@@ -612,15 +604,14 @@ class Transformer:
         # portion is to multiply the ratio (calculated above) with the total
         # common plant balance for the plant/ferc_acct group.
         df_w_tots[f"{split_col}_common_portion"] = (
-            df_w_tots[f'{split_col}{common_suffix}']
+            df_w_tots[f'{split_col}_common']
             * df_w_tots[f"{weight_col}_ratio"])
 
         return df_w_tots
 
     def calc_common_portion_with_no_part_balance(self,
                                                  deprish_w_c,
-                                                 split_col,
-                                                 common_suffix):
+                                                 split_col):
         """
         Calculate portion of common when ``split_col`` is null.
 
@@ -637,12 +628,10 @@ class Transformer:
         ``calc_common_portion_simple()``.
         """
         weight_col = 'unaccrued_balance'
-        filled_df = self.fill_in_df(
-            deprish_w_c, common_allocated=False)
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
-        edge_case_df = filled_df[
-            (filled_df[weight_col].isnull()) | (filled_df[weight_col] == 0)
+        edge_case_df = deprish_w_c[
+            (deprish_w_c[weight_col].isnull()) | (deprish_w_c[weight_col] == 0)
         ]
 
         logger.debug(
@@ -677,7 +666,7 @@ class Transformer:
         # common plant balance will already be distributed amoung those records
         edge_case_df[f"{split_col}_common_portion"] = np.where(
             ~edge_case_df['plant_bal_any'],
-            (edge_case_df[f'{split_col}{common_suffix}'] /
+            (edge_case_df[f'{split_col}_common'] /
              edge_case_df['plant_bal_count']),
             np.nan
         )
@@ -687,8 +676,7 @@ class Transformer:
     def _check_common_allocation(self,
                                  df_w_tots,
                                  split_col,
-                                 new_data_col,
-                                 common_suffix):
+                                 new_data_col):
         """Check to see if the common plant allocation was effective."""
         weight_col = 'unaccrued_balance'
         calc_check = (
@@ -723,10 +711,9 @@ class Transformer:
 
         if plant_balance_w_common / plant_balance_og < .99:
             warnings.warn(
-                f"ahhh the {split_col} allocation is off. The resulting "
-                f"{split_col} is "
-                f"{plant_balance_w_common/plant_balance_og:.02%} of the "
-                f"original. og {plant_balance_og:.3} vs new: "
+                f"ahhh the {split_col} allocation is off. The {split_col}"
+                f"_w_common is {plant_balance_w_common/plant_balance_og:.02%} "
+                f"of the original. og {plant_balance_og:.3} vs new: "
                 f"{plant_balance_w_common:.3}"
             )
 
@@ -758,7 +745,8 @@ class Transformer:
         no_common = df_w_tots[
             (df_w_tots[f"{split_col}_common"].isnull()
              & (df_w_tots[split_col].notnull()))
-            & (df_w_tots[split_col] != df_w_tots[f"{split_col}_w_common"])
+            & (~np.isclose(
+                df_w_tots[split_col], df_w_tots[f"{split_col}_w_common"]))
             & (~df_w_tots.common)
         ]
         if not no_common.empty:
@@ -800,8 +788,8 @@ def agg_to_idx(deprish_df, idx_cols):
     # sum agg section
     # enumerate sum cols
     sum_cols = [
-        'plant_balance', 'book_reserve',
-        'unaccrued_balance', 'net_salvage', 'depreciation_annual_epxns', ]
+        'plant_balance', 'book_reserve', 'unaccrued_balance',
+        'net_salvage', 'depreciation_annual_epxns']
     if 'plant_balance_w_common' in deprish_df.columns:
         sum_cols = sum_cols + [f"{x}_w_common" for x in sum_cols]
     # aggregate..
@@ -822,11 +810,11 @@ def agg_to_idx(deprish_df, idx_cols):
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
             deprish_asset.merge(
-                make_plant_parts_eia.weighted_average(
+                pudl.helpers.weighted_average(
                     deprish_df,
                     data_col=data_col,
                     weight_col=weight_col,
-                    by_col=idx_cols),
+                    idx_cols=idx_cols),
                 # .rename(columns={data_col: f"{data_col}_wt"})
                 how='outer', on=idx_cols))
 
