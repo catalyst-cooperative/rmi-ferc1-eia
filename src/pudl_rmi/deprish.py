@@ -25,7 +25,6 @@ import pandas as pd
 import numpy as np
 
 import pudl
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
@@ -811,11 +810,11 @@ def agg_to_idx(deprish_df, idx_cols):
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
             deprish_asset.merge(
-                make_plant_parts_eia.weighted_average(
+                pudl.helpers.weighted_average(
                     deprish_df,
                     data_col=data_col,
                     weight_col=weight_col,
-                    by_col=idx_cols),
+                    idx_cols=idx_cols),
                 # .rename(columns={data_col: f"{data_col}_wt"})
                 how='outer', on=idx_cols))
 

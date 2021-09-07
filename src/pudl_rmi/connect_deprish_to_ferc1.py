@@ -16,7 +16,6 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-import sqlalchemy as sa
 import pathlib
 
 import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
@@ -144,19 +143,12 @@ class InputsCompiler():
         We need a few things from the class that generates the master unit
         list; mostly info about the identifying columns for the plant parts.
         """
-        # CompilePlantParts requires and instance of CompileTables
-        pudl_engine = sa.create_engine(
-            pudl.workspace.setup.get_defaults()["pudl_db"])
-        table_compiler = make_plant_parts_eia.CompileTables(
-            pudl_engine, freq='AS')
-        parts_compilers = make_plant_parts_eia.CompilePlantParts(
-            table_compiler, clobber=True)
-        self.plant_parts_ordered = parts_compilers.plant_parts_ordered
         # we need a dictionary of plant part named (keys) to their
         # corresponding id columns (values). parts_compilers has the inverse of
         # that sowe are just going to swap the ks and vs
-        self.parts_to_ids = {v: k for k, v
-                             in parts_compilers.ids_to_parts.items()}
+        self.parts_to_ids = (
+            pudl.analysis.plant_parts_eia.make_parts_to_ids_dict()
+        )
 
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
