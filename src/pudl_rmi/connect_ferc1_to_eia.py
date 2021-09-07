@@ -106,10 +106,14 @@ class InputManager:
         if clobber or self.plant_parts_df is None:
             self.plant_parts_df = (
                 make_plant_parts_eia.get_master_unit_list_eia(
-                    self.file_path_mul)
-                .assign(plant_id_report_year_util_id=lambda x:
+                    self.file_path_mul,
+                    pudl_out=self.pudl_out
+                )
+                .assign(
+                    plant_id_report_year_util_id=lambda x:
                         x.plant_id_report_year + "_" +
                         x.utility_id_pudl.map(str))
+                .astype({'installation_year': 'float'})
             )
         return self.plant_parts_df
 
@@ -227,7 +231,9 @@ class InputManager:
                     plant_id_report_year_util_id=lambda x:
                         x.plant_id_report_year + "_" + \
                     x.utility_id_pudl.map(str)
-                ))
+                )
+                .astype({'installation_year': 'float'})
+            )
             if 0.9 > (len(self.steam_df) /
                       len(self.steam_df.drop_duplicates(
                           subset=['report_year',
@@ -389,8 +395,8 @@ class Features:
                     label='heat_rate_mmbtu_mwh'),
             Exact('fuel_type_code_pudl', 'fuel_type_code_pudl',
                   label='fuel_type_code_pudl'),
-            Exact('installation_year', 'installation_year',
-                  label='installation_year'),
+            Numeric('installation_year', 'installation_year',
+                    label='installation_year'),
             # Exact('utility_id_pudl', 'utility_id_pudl',
             #      label='utility_id_pudl'),
         ])
@@ -721,27 +727,31 @@ class MatchManager:
 
         """
         df = self.weight_features(df).reset_index()
-        gb = df.groupby('record_id_ferc1')[['record_id_ferc1', 'score']]
+        gb = df.groupby('record_id_ferc1')[['score']]
+
         df = (
             df.sort_values(['record_id_ferc1', 'score'])
-            # rank the scores
-            .assign(rank=gb.rank(ascending=0, method='average'),
-                    # calculate differences between scores
-                    diffs=lambda x: x['score'].diff())
-            # count grouped records
-            .merge(pudl.helpers.count_records(df, ['record_id_ferc1'],
-                                              'count'),
-                   how='left',)
+            .assign(  # calculate differences between scores
+                diffs=lambda x: x['score'].diff()
+            )
+            .merge(  # count grouped records
+                pudl.helpers.count_records(df, ['record_id_ferc1'], 'count'),
+                how='left'
+            )
             # calculate the iqr for each record_id_ferc1 group
-            .merge((gb.agg(scipy.stats.iqr)
-                    # .droplevel(0, axis=1)
-                    .rename(columns={'score': 'iqr'})),
-                   left_on=['record_id_ferc1'],
-                   right_index=True))
-
+            # believe it or not this is faster than .transform(scipy.stats.iqr)
+            .merge(
+                gb.agg(scipy.stats.iqr).rename(columns={'score': 'iqr'}),
+                left_on=['record_id_ferc1'],
+                right_index=True)
+        )
+        # rank the scores
+        df.loc[:, 'rank'] = (
+            gb.transform('rank', ascending=0, method='average')
+        )
         # assign the first diff of each ferc_id as a nan
-        df['diffs'][df.record_id_ferc1 !=
-                    df.record_id_ferc1.shift(1)] = np.nan
+        df.loc[df.record_id_ferc1 != df.record_id_ferc1.shift(1), 'diffs'] = (
+            np.nan)
 
         df = df.set_index(['record_id_ferc1', 'record_id_eia'])
         return df

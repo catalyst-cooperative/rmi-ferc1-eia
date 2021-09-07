@@ -53,7 +53,7 @@ MUL_RENAME = {
 to fuzzy match with all possible MUL records names but only use the true
 granualries."""
 
-DEPRISH_COLS = [
+IDX_DEPRISH_COLS = [
     'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1', 'state',
     'plant_id_pudl', 'plant_part_name', 'report_year']
 
@@ -70,13 +70,20 @@ def prep_deprish(file_path_deprish, plant_parts_df,
     Grab only the records which can be associated with EIA master unit list
     records by plant_id_pudl, and do some light cleaning.
     """
+    # we could grab the output here instead of the input file...
     deprish_df = (
         deprish.Transformer(
             deprish.Extractor(file_path=file_path_deprish,
                               sheet_name=sheet_name_deprish).execute())
-        .execute()
+        .execute(agg_cols=[
+            x for x in deprish.IDX_COLS_DEPRISH if x not in ['ferc_acct']] +
+            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1',
+             'state'])
+        .assign(report_year=lambda x: x.report_date.dt.year)
         .dropna(subset=RESTRICT_MATCH_COLS)
+        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
     )
+    logger.info("we've got the deprish_df now..")
 
     deprish_df.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
         deprish_df.loc[:, key_deprish], str_map=STRINGS_TO_CLEAN)
@@ -187,7 +194,7 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
         get_fuzzy_matches(
             deprish_df, mul_df,
             key_deprish=key_deprish, key_mul=key_mul,
-            threshold=75)[DEPRISH_COLS + ['plant_name_match']],
+            threshold=75),
         mul_df.reset_index().drop_duplicates(
             subset=['report_year', 'plant_name_new'])[MUL_COLS],
         left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
@@ -224,12 +231,14 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
         overrides_df = (
             overrides_df[overrides_df.filter(like='record_id_eia_override')
                          .notnull().any(axis='columns')]
-            [DEPRISH_COLS +
+            [IDX_DEPRISH_COLS +
              list(overrides_df.filter(like='record_id_eia_override').columns)])
-        logger.info(f"Adding overrides from {sheet_name_output}.")
+        logger.info(
+            f"Adding {len(overrides_df)} overrides from {sheet_name_output}.")
         # concat, sort so the True overrides are at the top and drop dupes
         deprish_match_full = (
-            pd.merge(deprish_match, overrides_df, on=DEPRISH_COLS, how='left')
+            pd.merge(deprish_match, overrides_df,
+                     on=IDX_DEPRISH_COLS, how='left')
             .assign(record_id_eia=lambda x:
                     x.record_id_eia_override.fillna(x.record_id_eia_fuzzy))
         )
@@ -266,19 +275,14 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
               # we want to pull the used columns to the front, but there is
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
-              list(set(DEPRISH_COLS + [MUL_RENAME.get(c, c)
-                                       for c in MUL_COLS])))
+              list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
+                                           for c in MUL_COLS])))
     )
 
     first_cols = [
-        'plant_part_name', 'plant_name_match', 'record_id_eia',
-        'record_id_eia_fuzzy',
-        'record_id_eia_override', 'record_id_eia_override2',
-        'record_id_eia_override3', 'record_id_eia_override4',
-        'record_id_eia_override5', 'record_id_eia_override6',
-        'record_id_eia_override7', 'record_id_eia_override8',
-        'record_id_eia_override9', 'record_id_eia_override10',
-    ]
+        'plant_part_name', 'utility_name_ferc1', 'report_year',
+        'plant_name_match', 'record_id_eia', 'record_id_eia_fuzzy',
+    ] + list(deprish_match.filter(like='_override'))
     deprish_match = deprish_match.loc[
         :, first_cols + [x for x in deprish_match.columns
                          if x not in first_cols]]

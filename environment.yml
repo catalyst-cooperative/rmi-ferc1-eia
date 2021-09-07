@@ -22,12 +22,12 @@ dependencies:
   - fuzzywuzzy~=0.18.0
   - recordlinkage~=0.14.0
   - python-levenshtein~=0.12.2
-  - simpledbf~=0.2.6
 
   # Not normal Python packages that come from PyPI
   - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
+    - simpledbf~=0.2.6
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
     # should also remove or comment out the github based dependency inside setup.py as

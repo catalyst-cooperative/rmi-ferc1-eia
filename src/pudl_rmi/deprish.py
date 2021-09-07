@@ -14,9 +14,6 @@ transformer = deprish.Transformer(
         sheet_name=sheet_name_deprish
     ).execute())
 deprish_df = transformer.execute()
-deprish_asset_df = agg_to_idx(
-    deprish_df,
-    idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct', 'note']])
 """
 
 import logging
@@ -43,7 +40,6 @@ IDX_COLS_DEPRISH = [
     'plant_id_pudl',
     'plant_part_name',
     'ferc_acct',
-    # 'note',
     'utility_id_pudl',
     'data_source'
 ]
@@ -127,6 +123,10 @@ class Transformer:
         Args:
             clobber (bool): if True and dataframe has already been generated,
                 regenergate the datagframe.
+            agg_cols (iterable): list of column names to aggregate on. Default
+                is None, which defualts to: ['report_date', 'plant_id_pudl',
+                'plant_part_name', 'ferc_acct', 'utility_id_pudl',
+                'data_source', 'line_id', 'common', 'utility_name_ferc1']
 
         Returns:
             pandas.dataframe: depreciation study records that have been cleaned
@@ -142,8 +142,7 @@ class Transformer:
                         + ['line_id', 'common', 'utility_name_ferc1'])
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
-            idx_cols=[x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
-            + ['line_id', 'common', 'utility_name_ferc1'])
+            idx_cols=agg_cols)
         return self.agg_by_plant_df
 
     def early_tidy(self, clobber=False):
@@ -162,6 +161,7 @@ class Transformer:
                 .pipe(add_ferc_acct_name)
                 .pipe(assign_line_id)
                 .pipe(self.fill_in_df, common_allocated=False)
+                .pipe(self.remove_ferc_acct_duplicates)
             )
         return self.tidy_df
 
@@ -199,7 +199,8 @@ class Transformer:
                 )
             merged['common'] = np.where(
                 merged.line_id.isin(
-                    list(self.common_assn['line_id_common'].drop_duplicates())),
+                    list(self.common_assn['line_id_common']
+                         .drop_duplicates())),
                 True, False
             )
             self.reshaped_df = merged
@@ -218,8 +219,11 @@ class Transformer:
             and nulls have been filled in.
         """
         if clobber or self.filled_df is None:
-            self.filled_df = self.fill_in_df(
-                self.reshape(), common_allocated=True)
+            filled_df = self.fill_in_df(
+                deepcopy(self.reshape()),
+                common_allocated=True,
+            )
+            self.filled_df = filled_df
         return self.filled_df
 
     def fill_in_df(self, df_to_fill, common_allocated):
@@ -229,26 +233,23 @@ class Transformer:
         This method will enable filling in data earlier in the transform
         process, as well as at the standard 'fill_in' step. This enables
         filling in during the common plant allocation to use a more fleshed out
-        unaccrued_balance, and then after the common plant allocation.
+        unaccrued_balance, and then after the common records have been
+        allocated, depending on the `common_allocated` boolean flag.
 
         This method does the filling in twice because these variables are
         related.
 
         Args:
-            df_to_fill (pandas.DataFrame): depreciation table to fill in. This
-                table should have cleaned rate columns (they should all be
-                rates, not percentages) because we will use them.
-            common_allocated (boolean):
-            which_plant_balance (string): Which plant balance column to be used
-                during the filling in. Either 'plant_balance' or
-                'plant_balance_w_common'. If this method is being run before
-                the common plant allocation use 'plant_balance'. Default is
-                'plant_balance_w_common'.
+            df_to_fill (pandas.DataFrame): depreciation table to fill in.
+            common_allocated (boolean): True if the intention is to fill in
+                data columns with common plant allocated
+                (f"{data_col_name}_w_common"). False if the filling in should
+                be applied to the non-allocated data columns
         """
         filled_df = deepcopy(df_to_fill)
 
-        # we need to be able to fill in the native columns as well as those that
-        # have been augmented via
+        # we need to be able to fill in the native columns as well as those
+        # that have been augmented via
         if common_allocated:
             suffix = "_w_common"
         else:
@@ -258,20 +259,35 @@ class Transformer:
                 net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
                     x.net_salvage_rate.fillna(
-                        x.net_salvage / x.book_reserve),
+
+                        x[f"net_salvage{suffix}"] /
+                        x[f"book_reserve{suffix}"]),
                 reserve_rate=lambda x: x.reserve_rate.fillna(
-                    x.book_reserve / x[f"plant_balance{suffix}"]),
+                    x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]),
             )
-            filled_df[f'depreciation_annual_epxns{suffix}'] = (
+
+            filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
-                    # is this correct? should it be unaccrued_balance?
-                    filled_df.depreciation_annual_rate
-                    * filled_df[f"plant_balance{suffix}"])
+                    filled_df.depreciation_annual_rate *
+                    filled_df[f"plant_balance{suffix}"])
+
             )
             filled_df[f"net_salvage{suffix}"] = (
                 filled_df[f"net_salvage{suffix}"].fillna(
-                    filled_df.net_salvage_rate
-                    * filled_df[f"book_reserve{suffix}"])
+                    filled_df.net_salvage_rate *
+                    filled_df[f"book_reserve{suffix}"])
+            )
+            filled_df[f"unaccrued_balance{suffix}"] = (
+                filled_df[f"unaccrued_balance{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    filled_df[f"book_reserve{suffix}"]
+                    - filled_df[f"net_salvage{suffix}"])
+            )
+            filled_df[f"unaccrued_balance{suffix}"] = (
+                filled_df[f"unaccrued_balance{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] *
+                    filled_df['depreciation_annual_rate']
+                    * filled_df['remaining_life_avg'])
             )
             filled_df[f"book_reserve{suffix}"] = (
                 filled_df[f"book_reserve{suffix}"].fillna(
@@ -281,23 +297,11 @@ class Transformer:
             )
             filled_df[f"book_reserve{suffix}"] = (
                 filled_df[f"book_reserve{suffix}"].fillna(
-                    filled_df.net_salvage_rate *
-                    filled_df[f"unaccrued_balance{suffix}"] -
-                    filled_df[f"book_reserve{suffix}"])
+                    (1 - filled_df.net_salvage_rate) *
+                    filled_df[f"plant_balance{suffix}"]
+                    - filled_df[f"unaccrued_balance{suffix}"])
             )
 
-            filled_df[f"unaccrued_balance{suffix}"] = (  # is this correct?
-                filled_df[f"unaccrued_balance{suffix}"].fillna(
-                    filled_df[f"plant_balance{suffix}"] -
-                    filled_df[f"book_reserve{suffix}"] -
-                    filled_df[f"net_salvage{suffix}"])
-            )
-            filled_df[f"unaccrued_balance{suffix}"] = (
-                filled_df[f"unaccrued_balance{suffix}"].fillna(
-                    filled_df[f"plant_balance{suffix}"] *
-                    filled_df.depreciation_annual_rate *
-                    filled_df.remaining_life_avg)
-            )
         return filled_df
 
     def _convert_rate_cols(self, tidy_df):
@@ -352,6 +356,52 @@ class Transformer:
 
         return tidy_df
 
+    def remove_ferc_acct_duplicates(self, tidy_df):
+        """
+        Aggregate tidy_df based on `IDX_COLS_DEPRISH`.
+
+        Ensure the data doesn't have unknown duplicates and then aggregate the
+        records so there are no more remaining duplicates.
+
+        Args:
+            tidy_df (pandas.DataFrame):
+
+        """
+        known_dupes = [
+            # KCP&L plants
+            294, 306, 314, 534, 263, 335, 780, 389,
+            # Wisconsin Electric Power Company
+            756, 759, 775, 829, 839, 468,
+            # Kansas City Empire
+            458
+        ]
+        # grab the duplicates (only those that have plant_id_pudl's)
+        # because those are the atomic records we will process
+        dupes = tidy_df[
+            tidy_df.duplicated(subset=IDX_COLS_DEPRISH, keep=False)
+            & (tidy_df.plant_id_pudl.notnull())
+        ]
+        # we know there are a fair amount of duplicates from FERC.
+        # there is nothing to do for these records besides squishing
+        # them together
+        # and we know about some duplicates that we are trying to fix
+        unknown_dupes = dupes[
+            (dupes.data_source != 'FERC')
+            & (~dupes.plant_id_pudl.isin(known_dupes))
+        ]
+        if not unknown_dupes.empty:
+            self.unknown_dupes = unknown_dupes
+            raise AssertionError(
+                "WARNING \n"
+                f"Unknown duplicate records found: {len(unknown_dupes)}. "
+                "Check depreciation study input file and/or `unknown_dupes`"
+            )
+        # okay now that we feel confident that we aren't going to loose data
+        # let's aggregate away any remaining duplicates
+        agg_cols = (IDX_COLS_DEPRISH + ['line_id', 'utility_name_ferc1'])
+        tidy_df = agg_to_idx(tidy_df, idx_cols=agg_cols)
+        return tidy_df
+
     def split_merge_common_records(self, split_col):
         """
         Split apart common records and merge back specific columns.
@@ -364,7 +414,7 @@ class Transformer:
                 a count of instances of the common records and main records.
 
         """
-        common_pb = self.get_common_plant_bal(split_col=split_col)
+        common_pb = self.get_common_split_col(split_col=split_col)
 
         deprish_w_c = (
             pd.merge(
@@ -387,7 +437,7 @@ class Transformer:
 
         return deprish_w_c
 
-    def get_common_plant_bal(self, split_col='plant_balance'):
+    def get_common_split_col(self, split_col='plant_balance'):
         """Get common plant records and their associated plant balance."""
         # merge back in the ferc acct #
         common_assn_acct = (
@@ -396,6 +446,8 @@ class Transformer:
                 self.early_tidy()[['line_id', 'ferc_acct']],
                 left_on=['line_id_common'],
                 right_on=['line_id'],
+                how='outer',
+                indicator=True
             )
             .drop(columns=['line_id'])
         )
@@ -470,7 +522,8 @@ class Transformer:
         ]
 
         logger.info(
-            f"grabbed {len(deprish_common)} common reocrds and "
+            f"Allocating common records for: {split_col}\n"
+            f"   grabbed {len(deprish_common)} common reocrds and "
             f"{len(deprish_w_c)} atomic records. of total {len(deprish_w_c)}")
         simple_case_df = self.calc_common_portion_simple(
             deprish_w_c, split_col)
@@ -523,7 +576,7 @@ class Transformer:
             (deprish_w_c[weight_col].notnull()) & (
                 deprish_w_c[weight_col] != 0)
         ]
-        logger.info(
+        logger.debug(
             f"We are calculating the common portion for {len(simple_case_df)} "
             f"records w/ {weight_col}")
 
@@ -582,7 +635,7 @@ class Transformer:
             (deprish_w_c[weight_col].isnull()) | (deprish_w_c[weight_col] == 0)
         ]
 
-        logger.info(
+        logger.debug(
             f"We are calculating the common portion for {len(edge_case_df)} "
             f"records w/o {split_col}")
 
@@ -693,8 +746,8 @@ class Transformer:
         no_common = df_w_tots[
             (df_w_tots[f"{split_col}_common"].isnull()
              & (df_w_tots[split_col].notnull()))
-            & (~np.isclose(df_w_tots[split_col],
-                           df_w_tots[f"{split_col}_w_common"]))
+            & (~np.isclose(
+                df_w_tots[split_col], df_w_tots[f"{split_col}_w_common"]))
             & (~df_w_tots.common)
         ]
         if not no_common.empty:
@@ -739,7 +792,7 @@ def agg_to_idx(deprish_df, idx_cols):
         'plant_balance', 'book_reserve', 'unaccrued_balance',
         'net_salvage', 'depreciation_annual_epxns']
     if 'plant_balance_w_common' in deprish_df.columns:
-        sum_cols = [f"{x}_w_common" for x in sum_cols] + sum_cols
+        sum_cols = sum_cols + [f"{x}_w_common" for x in sum_cols]
     # aggregate..
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
@@ -844,10 +897,13 @@ def add_ferc_acct_name(tidy_df):
         pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
     ferc_acct_names = get_ferc_acct_type_map(
         file_path_ferc_acct_names)
-
+    # ensure the ferc_acct column is a string, otherwise the string
+    # manipliations won't work
+    tidy_df = tidy_df.astype({'ferc_acct': pd.StringDtype()})
     # break out the float-y decimals in the ferc acct col into a sub column
     tidy_df[['ferc_acct_main', 'ferc_acct_sub']] = (
-        tidy_df.ferc_acct.str.split('.', expand=True))
+        tidy_df.astype({'ferc_acct': pd.StringDtype()})
+        .ferc_acct.str.split('.', expand=True))
     tidy_df = (
         pd.merge(
             tidy_df,
@@ -858,6 +914,11 @@ def add_ferc_acct_name(tidy_df):
             how='left',
             validate='m:1'
         )
+    )
+    logger.info(
+        f"Added {len(tidy_df[tidy_df.ferc_acct_name.notnull()])} "
+        "ferc_acct_name's out of "
+        f"{len(tidy_df[tidy_df.ferc_acct.notnull()])} options"
     )
     return tidy_df
 
@@ -882,10 +943,67 @@ def assign_line_id(df):
 
 
 def get_common_assn():
-    """Get stored common plant assocations."""
-    path_common_assn = pathlib.Path().cwd().parent / 'outputs/common_assn.csv'
-    common_assn = pd.read_csv(path_common_assn)
-    return common_assn
+    """
+    Get stored common plant assocations.
+
+    Grab the mannunal overrides that RMI has compiled and reshape them a bit.
+
+    Returns:
+        pandas.DataFrame: table with two columns - line_id_common and
+        line_id_main - which coorespond to the common record ID and the
+        associated main record ID. Some common records are associated with
+        multiple main records and thus are repeted.
+    """
+    # grab the mannually labeled common records
+    path_common_dc = (
+        pathlib.Path().cwd().parent / 'outputs' / 'deprish_cleaned.xlsx')
+    common_mannual = (
+        pd.read_excel(
+            path_common_dc,
+            skiprows=0,
+            sheet_name='common_labeling',
+            dtype={i: pd.Int64Dtype() for i in INT_IDS},
+        )
+    )
+
+    logger.info(
+        "overriding auto-generated common associations with "
+        f"{len(common_mannual[common_mannual.manual_textjoin.notnull()])} "
+        "mannual associations"
+    )
+    common_mannual = (
+        common_mannual.assign(
+            line_id_main_mannual=lambda x:
+                x.manual_textjoin.fillna(x.line_id_main_all))
+    )
+    common_mannual = common_mannual.astype({'common': pd.BooleanDtype()})
+    # grab only the commons
+    common_mannual = common_mannual[common_mannual.common]
+    common_mannual = common_mannual.rename(
+        columns={'line_id': 'line_id_common'})
+    # break out the one-cell list into many columns
+    melt_cols = common_mannual.line_id_main_mannual.str.split(
+        pat='; ', expand=True)
+    common_mannual.loc[:, list(melt_cols.columns)] = melt_cols
+    # melt the many columns into a skinny table
+    common_skinny = (
+        common_mannual.melt(
+            id_vars=['line_id_common'],
+            value_vars=list(melt_cols.columns),
+            value_name='line_id_main',
+        )
+        .drop(columns=['variable'])
+    )
+    # remove the nulls and empties
+    # these exist because the melt_cols have
+    # to be as many as the largest number of "main"
+    # records should be associated w/ the common line
+    common_skinny = common_skinny[
+        common_skinny.line_id_main.notnull()
+        & (common_skinny.line_id_main != '')
+    ]
+    logger.info(f"grabbed {len(common_skinny)} common records")
+    return common_skinny
 
 
 def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
