@@ -7,11 +7,9 @@ list from PUDL into the other realms of this repo.
 
 import logging
 
-import sqlalchemy as sa
 import numpy as np
 import pandas as pd
 
-import pudl
 
 logger = logging.getLogger(__name__)
 
@@ -120,15 +118,6 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
         logger.info(
             f"Master unit list not found {file_path_mul}"
             "Generating a new master unit list. This should take ~10 minutes."
-        )
-        # initilize the compilers
-        pudl_settings = pudl.workspace.setup.get_defaults()
-        pudl_engine = sa.create_engine(pudl_settings['pudl_db'])
-        pudl_out = pudl.output.pudltabl.PudlTabl(
-            pudl_engine, freq='AS',
-            roll_fuel_cost=True,
-            fill_fuel_cost=True,
-            fill_net_gen=True
         )
         # actually make the master plant parts list
         plant_parts_eia = pudl_out.plant_parts_eia()

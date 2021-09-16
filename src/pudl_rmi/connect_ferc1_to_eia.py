@@ -996,7 +996,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
         .merge(
             steam_df,
             how='outer',
-            on=['record_id_ferc1', 'report_year'],
+            on=['record_id_ferc1', 'report_year',
+                'plant_id_pudl', 'utility_id_pudl'],
             suffixes=('_eia', '_ferc1'),
             validate='1:1',
             indicator=True
@@ -1027,6 +1028,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
         else:
             raise AssertionError(message)
     _log_match_coverage(connects_ferc1_eia)
+
+    connects_ferc1_eia = connects_ferc1_eia.drop(columns=['_merge'])
     return connects_ferc1_eia
 
 
