@@ -44,6 +44,7 @@ IDX_COLS_DEPRISH = [
 ]
 
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
+IDX_COLS_OUT = [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']
 
 # extract
 
