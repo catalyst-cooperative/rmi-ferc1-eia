@@ -44,6 +44,7 @@ IDX_COLS_DEPRISH = [
 ]
 
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
+IDX_COLS_OUT = [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']
 
 COMMON_SUFFIX = '_common'
 
@@ -287,12 +288,8 @@ class Transformer:
                 net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
                     x.net_salvage_rate.fillna(
-                        x[f"net_salvage{suffix}"] / \
-                        x[f"plant_balance{suffix}"],
-                    ),
-                # net_salvage_rate_option2=lambda x:
-                #     # first clean % v num, then net_salvage/book_value
-                #     x[f"net_salvage{suffix}"] / x[f"plant_balance{suffix}"],
+                        x[f"net_salvage{suffix}"] /
+                        x[f"book_reserve{suffix}"]),
                 reserve_rate=lambda x: x.reserve_rate.fillna(
                     x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]),
             )
@@ -301,6 +298,7 @@ class Transformer:
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
                     (filled_df.depreciation_annual_rate) *
                     filled_df[f"plant_balance{suffix}"])
+
             )
             filled_df[f"net_salvage{suffix}"] = (
                 filled_df[f"net_salvage{suffix}"].fillna(
@@ -614,7 +612,6 @@ class Transformer:
             deprish_w_c, split_col)
         edge_case_df = self.calc_common_portion_with_no_part_balance(
             deprish_w_c, split_col)
-        # test_yucca_line_id(simple_case_df, name='edge_case_df')
         deprish_w_common_allocated = pd.concat([simple_case_df, edge_case_df])
         # finally, calcuate the new column w/ the % of the total group. if
         # there is no common data, fill in this new data column with the og col
@@ -718,12 +715,10 @@ class Transformer:
         ``calc_common_portion_simple()``.
         """
         weight_col = 'unaccrued_balance'
-        filled_df = self.fill_in_df(
-            deprish_w_c, common_allocated=False)
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
-        edge_case_df = filled_df[
-            (filled_df[weight_col].isnull()) | (filled_df[weight_col] == 0)
+        edge_case_df = deprish_w_c[
+            (deprish_w_c[weight_col].isnull()) | (deprish_w_c[weight_col] == 0)
         ]
 
         logger.debug(
@@ -802,10 +797,9 @@ class Transformer:
 
         if plant_balance_w_common / plant_balance_og < .99:
             warnings.warn(
-                f"ahhh the {split_col} allocation is off. The resulting "
-                f"{split_col} is "
-                f"{plant_balance_w_common/plant_balance_og:.02%} of the "
-                f"original. og {plant_balance_og:.3} vs new: "
+                f"ahhh the {split_col} allocation is off. The {split_col}"
+                f"_w_common is {plant_balance_w_common/plant_balance_og:.02%} "
+                f"of the original. og {plant_balance_og:.3} vs new: "
                 f"{plant_balance_w_common:.3}"
             )
 
@@ -837,7 +831,8 @@ class Transformer:
         no_common = df_w_tots[
             (df_w_tots[f"{split_col}_common"].isnull()
              & (df_w_tots[split_col].notnull()))
-            & (df_w_tots[split_col] != df_w_tots[f"{split_col}_w_common"])
+            & (~np.isclose(
+                df_w_tots[split_col], df_w_tots[f"{split_col}_w_common"]))
             & (~df_w_tots.common)
         ]
         if not no_common.empty:

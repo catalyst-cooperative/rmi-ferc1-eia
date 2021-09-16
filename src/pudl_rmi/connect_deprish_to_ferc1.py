@@ -16,7 +16,6 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-import sqlalchemy as sa
 import pathlib
 
 import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
@@ -72,7 +71,7 @@ class InputsCompiler():
     """
 
     def __init__(self, file_path_mul, file_path_steam_ferc1,
-                 file_path_ferc1_eia, file_path_deprish_eia):
+                 file_path_ferc1_eia, file_path_deprish_eia, pudl_out):
         """
         Initialize input manager for connecting depreciation to FERC1.
 
@@ -85,16 +84,16 @@ class InputsCompiler():
             file_path_deprish_eia (path-like): file path to the table
                 connecting the depreciation records to the EIA master unit list
         """
+        self.plant_parts_eia_raw = (
+            make_plant_parts_eia.get_master_unit_list_eia(
+                file_path_mul,
+                pudl_out
+            )
+        )
         # TODO: This is a bit of a placeholder riht now. I'd like to make
         # functions like the get_master_unit_list_eia for each of these
         # components. Right now, the pickled outputs are expected to be there.
-        self.plant_parts_eia_raw = (
-            make_plant_parts_eia.get_master_unit_list_eia(file_path_mul))
-        # right now we need both the steam table and the ferc1_eia connection
-        # because mostly
-        self.steam_cleaned_ferc1_raw = pd.read_pickle(
-            file_path_steam_ferc1, compression='gzip')
-        self.connects_ferc1_eia_raw = pd.read_pickle(
+        self.connects_ferc1_eia = pd.read_pickle(
             file_path_ferc1_eia, compression='gzip')
         self.connects_deprish_eia_raw = pd.read_pickle(
             file_path_deprish_eia, compression='gzip')
@@ -106,42 +105,6 @@ class InputsCompiler():
         self.plant_parts_eia = (
             self.plant_parts_eia_raw.reset_index()
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
-
-    def _prep_steam_cleaned_ferc1(self):
-        self.steam_cleaned_ferc1 = (
-            self.steam_cleaned_ferc1_raw.reset_index()
-                .pipe(pudl.helpers.convert_to_date))
-
-    def _prep_connects_ferc1_eia(self):
-        # should this be done over in connect_ferc1_to_eia land?
-        # i think much of this and _prep_steam_cleaned_ferc1 should be moved.
-        id_cols = ['plant_id_pudl', 'utility_id_pudl', ]
-        self.connects_ferc1_eia = (
-            pd.merge(
-                self.connects_ferc1_eia_raw.reset_index()[
-                    ['record_id_ferc1', 'record_id_eia']],
-                # we only want the identifying columns from the MUL
-                self.plant_parts_eia[list(set(
-                    connect_deprish_to_eia.MUL_COLS + id_cols
-                    + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']
-                ))],
-                how='left', on=['record_id_eia'])
-            .astype({i: pd.Int64Dtype() for i in id_cols})
-            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
-            # we want the backbone of this table to be the steam records
-            # so we have all possible steam records, even the unmapped ones
-            .merge(self.steam_cleaned_ferc1,
-                   how='right', on=['record_id_ferc1'] + id_cols,
-                   suffixes=('_eia_ferc1', ''))
-            .assign(opex_nonfuel=lambda x: (x.opex_production_total -
-                                            x.opex_fuel))
-        )
-
-        if len(self.connects_ferc1_eia) != len(self.steam_cleaned_ferc1):
-            raise AssertionError(
-                """Merge between steam_cleaned_ferc1 and connects_ferc1_eia erred.
-                The output and the orignal table should be the same length.
-                Check the columns included.""")
 
     def _prep_connects_deprish_eia(self):
         self.connects_deprish_eia = (
@@ -180,19 +143,12 @@ class InputsCompiler():
         We need a few things from the class that generates the master unit
         list; mostly info about the identifying columns for the plant parts.
         """
-        # CompilePlantParts requires and instance of CompileTables
-        pudl_engine = sa.create_engine(
-            pudl.workspace.setup.get_defaults()["pudl_db"])
-        table_compiler = make_plant_parts_eia.CompileTables(
-            pudl_engine, freq='AS')
-        parts_compilers = make_plant_parts_eia.CompilePlantParts(
-            table_compiler, clobber=True)
-        self.plant_parts_ordered = parts_compilers.plant_parts_ordered
         # we need a dictionary of plant part named (keys) to their
         # corresponding id columns (values). parts_compilers has the inverse of
         # that sowe are just going to swap the ks and vs
-        self.parts_to_ids = {v: k for k, v
-                             in parts_compilers.ids_to_parts.items()}
+        self.parts_to_ids = (
+            pudl.analysis.plant_parts_eia.make_parts_to_ids_dict()
+        )
 
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
@@ -202,8 +158,6 @@ class InputsCompiler():
             self._prep_info_from_parts_compiler_eia()
 
             self._prep_plant_parts_eia()
-            self._prep_steam_cleaned_ferc1()
-            self._prep_connects_ferc1_eia()
             self._prep_connects_deprish_eia()
 
             self.inputs_prepped = True
@@ -301,8 +255,8 @@ class MatchMaker():
         # rename dict with the ordered plant part names with numbered prefixes
         replace_dict = {
             x:
-            f"{self.inputs.plant_parts_ordered.index(x)}_{x}"
-            for x in self.inputs.plant_parts_ordered
+            f"{pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED.index(x)}_{x}"
+            for x in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED
         }
         # we're going to add a column level_deprish, which indicates the
         # relative size of the plant part granularity between deprecaition and
@@ -416,7 +370,7 @@ class MatchMaker():
             source (string): either `ferc1` or `deprish`
         """
         df = pd.DataFrame()
-        for part_name in self.inputs.plant_parts_ordered:
+        for part_name in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
             part_df = candidate_matches[
                 candidate_matches[f"plant_part_{source}"] == part_name]
             # add the slice of the df for this part if the id columns for
