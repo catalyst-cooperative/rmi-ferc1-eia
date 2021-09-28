@@ -214,6 +214,8 @@ class InputManager:
                 ], how='left')
                 .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1', 'ferc1 plant records')
                 .assign(
+                    installation_year=lambda x: (
+                        x.installation_year.astype('float')),  # need for comparison vectors
                     plant_id_report_year=lambda x: (
                         x.plant_id_pudl.map(str) + "_" + x.report_year.map(str)),
                     plant_id_report_year_util_id=lambda x: (
@@ -838,7 +840,7 @@ class MatchManager:
         train_df.loc[:, 'record_id_ferc1_trn'] = train_df['record_id_ferc1']
 
         # we want to override the eia when the training id is
-        # different than the "winning" match from the recrod linkage
+        # different than the "winning" match from the record linkage
         matches_best_df = (
             pd.merge(
                 matches_best_df.reset_index(),
@@ -856,9 +858,9 @@ class MatchManager:
 
         overwrite_rules = (
             (matches_best_df.record_id_ferc1_trn.notnull())
-            # & (matches_best_df.record_id_eia_rl.notnull())
-            # & (matches_best_df.record_id_eia_trn !=
-            #   matches_best_df.record_id_eia_rl)
+            & (matches_best_df.record_id_eia_rl.notnull())
+            & (matches_best_df.record_id_eia_trn !=
+               matches_best_df.record_id_eia_rl)
         )
 
         correct_match_rules = (  # need to update this
