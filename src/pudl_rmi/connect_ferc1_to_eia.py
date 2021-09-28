@@ -114,6 +114,7 @@ class InputManager:
                     plant_id_report_year_util_id=lambda x:
                         x.plant_id_report_year + "_" +
                         x.utility_id_pudl.map(str))
+                .astype({'installation_year': 'float'})
             )
         return self.plant_parts_df
 
@@ -380,8 +381,8 @@ class Features:
                     label='heat_rate_mmbtu_mwh'),
             Exact('fuel_type_code_pudl', 'fuel_type_code_pudl',
                   label='fuel_type_code_pudl'),
-            Exact('installation_year', 'installation_year',
-                  label='installation_year'),
+            Numeric('installation_year', 'installation_year',
+                    label='installation_year'),
             # Exact('utility_id_pudl', 'utility_id_pudl',
             #      label='utility_id_pudl'),
         ])
@@ -712,7 +713,8 @@ class MatchManager:
 
         """
         df = self.weight_features(df).reset_index()
-        gb = df.groupby('record_id_ferc1')[['record_id_ferc1', 'score']]
+        gb = df.groupby('record_id_ferc1')[['score']]
+
         df = (
             df.sort_values(['record_id_ferc1', 'score'])
             # rank the scores
@@ -724,15 +726,19 @@ class MatchManager:
                                               'count'),
                    how='left',)
             # calculate the iqr for each record_id_ferc1 group
-            .merge((gb.agg(scipy.stats.iqr)
-                    # .droplevel(0, axis=1)
-                    .rename(columns={'score': 'iqr'})),
-                   left_on=['record_id_ferc1'],
-                   right_index=True))
-
+            # believe it or not this is faster than .transform(scipy.stats.iqr)
+            .merge(
+                gb.agg(scipy.stats.iqr).rename(columns={'score': 'iqr'}),
+                left_on=['record_id_ferc1'],
+                right_index=True)
+        )
+        # rank the scores
+        df.loc[:, 'rank'] = (
+            gb.transform('rank', ascending=0, method='average')
+        )
         # assign the first diff of each ferc_id as a nan
-        df['diffs'][df.record_id_ferc1 !=
-                    df.record_id_ferc1.shift(1)] = np.nan
+        df.loc[df.record_id_ferc1 != df.record_id_ferc1.shift(1), 'diffs'] = (
+            np.nan)
 
         df = df.set_index(['record_id_ferc1', 'record_id_eia'])
         return df
@@ -1016,7 +1022,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df, debug=Fa
         .merge(
             steam_df,
             how='outer',
-            on=['record_id_ferc1', 'report_year'],
+            on=['record_id_ferc1', 'report_year',
+                'plant_id_pudl', 'utility_id_pudl'],
             suffixes=('_eia', '_ferc1'),
             validate='1:1',
             indicator=True
@@ -1050,6 +1057,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df, debug=Fa
             table but this is because they are linked to retired EIA generators.")
             #raise AssertionError(message)
     _log_match_coverage(connects_ferc1_eia)
+
+    connects_ferc1_eia = connects_ferc1_eia.drop(columns=['_merge'])
     return connects_ferc1_eia
 
 
