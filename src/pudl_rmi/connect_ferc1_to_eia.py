@@ -197,19 +197,34 @@ class InputManager:
         """
         if clobber or self.all_plants_ferc1_df is None:
 
-            # fpb_cols_to_use = [
-            #     'report_year', 'utility_id_ferc1', 'plant_name_ferc1',
-            #     'utility_id_pudl', 'fuel_cost', 'fuel_mmbtu',
-            #     'primary_fuel_by_mmbtu']
+            fbp_cols_to_use = [
+                'report_year', 'utility_id_ferc1', 'plant_name_ferc1',
+                'utility_id_pudl', 'fuel_cost', 'fuel_mmbtu',
+                'primary_fuel_by_mmbtu']
 
             logger.info("Preparing the FERC1 tables.")
             self.all_plants_ferc1_df = (
                 self.pudl_out.all_plants_ferc1()
+                .merge(self.pudl_out.fbp_ferc1()[fbp_cols_to_use], on=[
+                    'report_year',
+                    'utility_id_ferc1',
+                    'utility_id_pudl',
+                    'plant_name_ferc1',
+                ], how='left')
                 .assign(
                     plant_id_report_year=lambda x: (
                         x.plant_id_pudl.map(str) + "_" + x.report_year.map(str)),
                     plant_id_report_year_util_id=lambda x: (
-                        x.plant_id_report_year + "_" + x.utility_id_pudl.map(str)))
+                        x.plant_id_report_year + "_" + x.utility_id_pudl.map(str)),
+                    fuel_cost_per_mmbtu=lambda x: (
+                        x.fuel_cost / x.fuel_mmbtu),
+                    heat_rate_mmbtu_mwh=lambda x: (
+                        x.fuel_mmbtu / x.net_generation_mwh))
+                .rename(columns={
+                    'record_id': 'record_id_ferc1',
+                    'opex_plants': 'opex_plant',
+                    'fuel_cost': 'total_fuel_cost',
+                    'fuel_mmbtu': 'total_mmbtu'})
                 .set_index('record_id_ferc1'))
 
         return self.all_plants_ferc1_df  # self.steam_df
