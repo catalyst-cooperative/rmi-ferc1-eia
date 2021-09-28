@@ -14,105 +14,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-PLANT_PARTS = {
-    'plant': {
-        'id_cols': ['plant_id_eia'],
-    },
-    'plant_gen': {
-        'id_cols': ['plant_id_eia', 'generator_id'],
-    },
-    'plant_unit': {
-        'id_cols': ['plant_id_eia', 'unit_id_pudl'],
-    },
-    'plant_technology': {
-        'id_cols': ['plant_id_eia', 'technology_description'],
-    },
-    'plant_prime_fuel': {
-        'id_cols': ['plant_id_eia', 'energy_source_code_1'],
-    },
-    'plant_prime_mover': {
-        'id_cols': ['plant_id_eia', 'prime_mover_code'],
-    },
-    'plant_ferc_acct': {
-        'id_cols': ['plant_id_eia', 'ferc_acct_name'],
-    },
-    #    'plant_install_year': {
-    #        'id_cols': ['plant_id_eia', 'installation_year'],
-    #    },
-}
-"""
-dict: this dictionary contains a key for each of the 'plant parts' that should
-end up in the mater unit list. The top-level value for each key is another
-dictionary, which contains keys:
-    * id_cols (the primary key type id columns for this plant part)
-"""
-
-PLANT_PARTS_ORDERED = [
-    'plant',
-    'plant_unit',
-    'plant_prime_mover',
-    'plant_technology',
-    'plant_prime_fuel',
-    'plant_ferc_acct',
-    'plant_gen'
-]
-
-
-IDX_TO_ADD = ['report_date', 'operational_status_pudl']
-"""
-iterable: list of additional columns to add to the id_cols in `PLANT_PARTS`.
-The id_cols are the base columns that we need to aggregate on, but we also need
-to add the report date to keep the records time sensitive and the
-operational_status_pudl to separate the operating plant-parts from the
-non-operating plant-parts.
-"""
-
-IDX_OWN_TO_ADD = ['utility_id_eia', 'ownership']
-"""
-iterable: list of additional columns beyond the IDX_TO_ADD to add to the
-id_cols in `PLANT_PARTS` when we are dealing with plant-part records that have
-been broken out into "owned" and "total" records for each of their owners.
-"""
-
-SUM_COLS = [
-    'total_fuel_cost',
-    'net_generation_mwh',
-    'capacity_mw',
-    'capacity_mw_eoy',
-    'total_mmbtu',
-]
-"""
-iterable: list of columns to sum when aggregating a table.
-"""
-
-WTAVG_DICT = {
-    'fuel_cost_per_mwh': 'capacity_mw',
-    'heat_rate_mmbtu_mwh': 'capacity_mw',
-    'fuel_cost_per_mmbtu': 'capacity_mw',
-}
-"""
-dict: a dictionary of columns (keys) to perform weighted averages on and
-the weight column (values)"""
-
-
-QUAL_RECORDS = [
-    'fuel_type_code_pudl',
-    'operational_status',
-    'planned_retirement_date',
-    'retirement_date',
-    'generator_id',
-    'unit_id_pudl',
-    'technology_description',
-    'energy_source_code_1',
-    'prime_mover_code',
-    'ferc_acct_name',
-    # 'installation_year'
-]
-"""
-dict: a dictionary of qualifier column name (key) and original table (value).
-"""
-=======
 MUL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
     'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
@@ -121,7 +22,6 @@ MUL_COLS = [
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
     'record_count', 'fraction_owned', 'ownership_dupe'
 ]
->>>>>>> main
 
 DTYPES_MUL = {
     "plant_id_eia": "int64",
@@ -161,15 +61,6 @@ FIRST_COLS = ['plant_id_eia', 'report_date', 'plant_part', 'generator_id',
               'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
               'technology_description', 'ferc_acct_name',
               'utility_id_eia', 'true_gran', 'appro_part_label']
-
-MUL_COLS = [
-    'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
-    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
-    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
-    'technology_description', 'ferc_acct_name', 'utility_id_eia',
-    'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned', 'ownership_dupe'
-]
 
 
 ############################
@@ -213,31 +104,25 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
     """
     Get the master unit list; generate it or get if from a file.
 
+    If you generate the MUL, it will be saved at the file path given.
+
     Args:
-        file_path_mul (pathlib.Path)
+        file_path_mul (pathlib.Path): where you want the master unit list to
+            live. Must be a compressed pickle file ('.pkl.gz').
         clobber (boolean): True if you want to regenerate the master unit list
             whether or not it is saved at the file_path_mul
     """
+    if '.pkl' not in file_path_mul.suffixes:
+        raise AssertionError(f"{file_path_mul} must be a pickle file")
     if not file_path_mul.is_file() or clobber:
         logger.info(
             f"Master unit list not found {file_path_mul}"
             "Generating a new master unit list. This should take ~10 minutes."
         )
-<<<<<<< HEAD
-        # initilize the compilers
-        gens_maker = MakeMegaGenTbl(pudl_out)
-        grans_labeler = LabelTrueGranularities(gens_maker)
-        parts_compiler = MakePlantParts(pudl_out, gens_maker, grans_labeler)
-=======
->>>>>>> main
         # actually make the master plant parts list
         plant_parts_eia = pudl_out.plant_parts_eia()
         # export
-<<<<<<< HEAD
-        plant_parts_df.to_csv(file_path_mul, compression='gzip')
-=======
         plant_parts_eia.to_csv(file_path_mul, compression='gzip')
->>>>>>> main
 
     elif file_path_mul.is_file():
         logger.info(f"Reading the master unit list from {file_path_mul}")
