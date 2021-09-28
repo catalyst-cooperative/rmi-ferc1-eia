@@ -212,6 +212,7 @@ class InputManager:
                     'utility_id_pudl',
                     'plant_name_ferc1',
                 ], how='left')
+                .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1', 'ferc1 plant records')
                 .assign(
                     plant_id_report_year=lambda x: (
                         x.plant_id_pudl.map(str) + "_" + x.report_year.map(str)),
@@ -225,7 +226,9 @@ class InputManager:
                     'record_id': 'record_id_ferc1',
                     'opex_plants': 'opex_plant',
                     'fuel_cost': 'total_fuel_cost',
-                    'fuel_mmbtu': 'total_mmbtu'})
+                    'fuel_mmbtu': 'total_mmbtu',
+                    'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
+                    'primary_fuel_by_mmbtu': 'fuel_type_code_pudl'})
                 .set_index('record_id_ferc1'))
 
         return self.all_plants_ferc1_df  # self.steam_df
@@ -717,14 +720,13 @@ class MatchManager:
 
         df = (
             df.sort_values(['record_id_ferc1', 'score'])
-            # rank the scores
-            .assign(rank=gb.rank(ascending=0, method='average')['score'],
-                    # calculate differences between scores
-                    diffs=lambda x: x['score'].diff())
-            # count grouped records
-            .merge(pudl.helpers.count_records(df, ['record_id_ferc1'],
-                                              'count'),
-                   how='left',)
+            .assign(  # calculate differences between scores
+                diffs=lambda x: x['score'].diff()
+            )
+            .merge(  # count grouped records
+                pudl.helpers.count_records(df, ['record_id_ferc1'], 'count'),
+                how='left'
+            )
             # calculate the iqr for each record_id_ferc1 group
             # believe it or not this is faster than .transform(scipy.stats.iqr)
             .merge(

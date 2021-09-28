@@ -122,7 +122,7 @@ def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
         # actually make the master plant parts list
         plant_parts_eia = pudl_out.plant_parts_eia()
         # export
-        plant_parts_eia.to_csv(file_path_mul, compression='gzip')
+        plant_parts_eia.to_pickle(file_path_mul, compression='gzip')
 
     elif file_path_mul.is_file():
         logger.info(f"Reading the master unit list from {file_path_mul}")

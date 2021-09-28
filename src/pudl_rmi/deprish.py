@@ -224,7 +224,8 @@ class Transformer:
                 )
             merged['common'] = np.where(
                 merged.line_id.isin(
-                    list(self.common_assn['line_id_common'].drop_duplicates())),
+                    list(common_assn['line_id_common']
+                         .drop_duplicates())),
                 True, False
             )
             self.reshaped_df = merged
@@ -297,10 +298,7 @@ class Transformer:
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
                     (filled_df.depreciation_annual_rate) *
                     filled_df[f"plant_balance{suffix}"])
-<< << << < HEAD
-== == == =
 
->>>>>> > main
             )
             filled_df[f"net_salvage{suffix}"] = (
                 filled_df[f"net_salvage{suffix}"].fillna(
@@ -515,36 +513,6 @@ class Transformer:
                 a count of instances of the common records and main records.
 
         """
-
-
-<< << << < HEAD
-        common_pb = self.get_common_split_col(split_col=split_col)
-
-        deprish_w_c = (
-            pd.merge(
-                self.early_tidy(),
-                common_pb,
-                left_on=['line_id', 'ferc_acct'],
-                right_on=['line_id_main', 'ferc_acct'],
-                how='left',
-                suffixes=('', '_common'),
-                # validate='1:1'
-            )
-            .drop(columns=['line_id_main'])
-        )
-        # at this stage we have merged in the plant_balance of the common
-        # records with their associated main depreciation records, so we can
-        # remove the common records from the main depreciation table.
-        # update: we're going to keep the common records in for RMI
-        # deprish_w_c = deprish_w_c.loc[
-        #    ~deprish_w_c.line_id.isin(common_pb.line_id_common.unique())]
-
-        return deprish_w_c
-
-    def get_common_split_col(self, split_col='plant_balance'):
-        """Get common plant records and their associated plant balance."""
-=======
->>>>>>> main
         # merge back in the ferc acct #
         common_assn_acct = (
             pd.merge(
@@ -685,18 +653,12 @@ class Transformer:
         # because we are using a weight_col that might be filled in we're going
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
-<<<<<<< HEAD
-        # filled_df = (self.fill_in_df(deprish_w_c, common_allocated=False)
-        #     [IDX_COLS_DEPRISH + [weight_col, f'{split_col}{common_suffix}']]
-        # )
-=======
         # sometimes we are allocating the weight_col so we don't want doubles
         cols = list(set([weight_col, split_col]))
         filled_df = (
             self.fill_in_df(deprish_w_c, common_allocated=False)
             [IDX_COLS_DEPRISH + cols + [f'{split_col}{COMMON_SUFFIX}']]
         )
->>>>>>> main
         # exclude the nulls and the 0's
         simple_case_df = filled_df[
             (filled_df[weight_col].notnull())
@@ -753,11 +715,6 @@ class Transformer:
         ``calc_common_portion_simple()``.
         """
         weight_col = 'unaccrued_balance'
-<<<<<<< HEAD
-        filled_df = self.fill_in_df(
-            deprish_w_c, common_allocated=False)
-=======
->>>>>>> main
         # there are a handfull of records which have no plant balances
         # but do have common plant_balances.
         edge_case_df = deprish_w_c[
@@ -874,12 +831,8 @@ class Transformer:
         no_common = df_w_tots[
             (df_w_tots[f"{split_col}_common"].isnull()
              & (df_w_tots[split_col].notnull()))
-<<<<<<< HEAD
-            & (df_w_tots[split_col] != df_w_tots[f"{split_col}_w_common"])
-=======
             & (~np.isclose(
                 df_w_tots[split_col], df_w_tots[f"{split_col}_w_common"]))
->>>>>>> main
             & (~df_w_tots.common)
         ]
         if not no_common.empty:
@@ -924,13 +877,8 @@ def agg_to_idx(deprish_df, idx_cols):
     # if common lines have been allocated, we need to aggregate those allocated
     # columns as well
     if 'plant_balance_w_common' in deprish_df.columns:
-<<<<<<< HEAD
-        sum_cols = sum_cols + [f"{x}_w_common" for x in sum_cols]
-    # aggregate..
-=======
         sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
     # aggregate the columns that can be summed..
->>>>>>> main
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
 
