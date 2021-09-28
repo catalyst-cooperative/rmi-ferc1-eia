@@ -22,16 +22,19 @@ dependencies:
   - fuzzywuzzy~=0.18.0
   - recordlinkage~=0.14.0
   - python-levenshtein~=0.12.2
+  - pandera~=0.7.2
+  - seaborn~=0.11.2
 
   # Not normal Python packages that come from PyPI
   - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
     - simpledbf~=0.2.6
+    - git+https://github.com/catalyst-cooperative/pudl.git@dev
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
     # should also remove or comment out the github based dependency inside setup.py as
     # it may supersede the editable installation, which would be confusing.
     # - --editable ../path/to/your/cloned/pudl/repo
     # Install the local package such that we can do development work:
-    - --editable ./
+    # - --editable ./
