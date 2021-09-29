@@ -1019,7 +1019,8 @@ def prettyify_best_matches(
         .merge(
             steam_df,
             how='outer',
-            on=['record_id_ferc1', 'report_year'],
+            on=['record_id_ferc1', 'report_year',
+                'plant_id_pudl', 'utility_id_pudl'],
             suffixes=('_eia', '_ferc1'),
             validate='1:1',
             indicator=True
