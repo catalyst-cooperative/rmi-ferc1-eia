@@ -54,7 +54,7 @@ to fuzzy match with all possible MUL records names but only use the true
 granualries."""
 
 IDX_DEPRISH_COLS = [
-    'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1', 'state',
+    'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1',
     'plant_id_pudl', 'plant_part_name', 'report_year']
 
 ###############################################################################
@@ -77,8 +77,7 @@ def prep_deprish(file_path_deprish, plant_parts_df,
                               sheet_name=sheet_name_deprish).execute())
         .execute(agg_cols=[
             x for x in deprish.IDX_COLS_DEPRISH if x not in ['ferc_acct']] +
-            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1',
-             'state'])
+            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1'])
         .assign(report_year=lambda x: x.report_date.dt.year)
         .dropna(subset=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
@@ -101,7 +100,7 @@ def prep_deprish(file_path_deprish, plant_parts_df,
         .drop_duplicates(subset=['plant_part_name', 'report_date'])
         # there are some records in the depreciation df that have no
         # names.... so they've got to go
-        .dropna(subset=['plant_part_name'])
+        .dropna(subset=['plant_part_name', '_merge'])
         .pipe(pudl.helpers.convert_cols_dtypes, 'depreciation')
     )
     return deprish_ids
@@ -195,7 +194,7 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             deprish_df, mul_df,
             key_deprish=key_deprish, key_mul=key_mul,
             threshold=75),
-        mul_df.reset_index().drop_duplicates(
+        mul_df.drop_duplicates(
             subset=['report_year', 'plant_name_new'])[MUL_COLS],
         left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
         right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
@@ -248,16 +247,12 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
     return deprish_match_full
 
 
-def match_deprish_eia(file_path_mul, file_path_deprish,
+def match_deprish_eia(plant_parts_df, file_path_deprish,
                       sheet_name_deprish, sheet_name_output):
     """Prepare the depreciation and master unit list and match on name cols."""
     key_deprish = 'plant_part_name'
     key_mul = 'plant_name_new'
-    logger.info('Grab or generate master unit list.')
-    plant_parts_df = (
-        make_plant_parts_eia.get_master_unit_list_eia(file_path_mul)
-        .reset_index()
-    )
+    plant_parts_df = plant_parts_df.reset_index()
     deprish_df = prep_deprish(
         file_path_deprish,
         plant_parts_df,
@@ -301,12 +296,13 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
 ###############################################################################
 
 
-def generate_depreciation_matches(file_path_mul,
-                                  file_path_deprish,
-                                  sheet_name_deprish,
-                                  sheet_name_output,
-                                  save_to_xls=True,
-                                  ):
+def generate_depreciation_matches(
+    plant_parts_df,
+    file_path_deprish,
+    sheet_name_deprish='Depreciation Studies Raw',
+    sheet_name_output='EIA to depreciation matches',
+    save_to_xls=True,
+):
     """
     Generate the matched names and save to excel.
 
@@ -336,7 +332,7 @@ def generate_depreciation_matches(file_path_mul,
             "Depretiation file must exist."
         )
     deprish_match_df, possible_matches_mul_df = match_deprish_eia(
-        file_path_mul, file_path_deprish,
+        plant_parts_df, file_path_deprish,
         sheet_name_deprish=sheet_name_deprish,
         sheet_name_output=sheet_name_output
     )
@@ -359,7 +355,7 @@ def save_to_workbook(file_path, sheets_df_dict):
     before saving.
 
     Args:
-        file_path (path-like): the location of the excel workbook.
+        file_path (pathlib.Path): the location of the excel workbook.
         sheets_df_dict (dict): dictionary of the names of sheets (keys) of
             where their corresponding dataframes (values) should end up in the
             workbook.

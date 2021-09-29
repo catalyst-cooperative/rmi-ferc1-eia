@@ -8,7 +8,6 @@ list from PUDL into the other realms of this repo.
 import logging
 
 import numpy as np
-import pandas as pd
 
 
 logger = logging.getLogger(__name__)
@@ -98,33 +97,3 @@ def reassign_id_ownership_dupes(plant_parts_df):
     if og_index:
         plant_parts_df = plant_parts_df.set_index("record_id_eia")
     return plant_parts_df
-
-
-def get_master_unit_list_eia(file_path_mul, pudl_out, clobber=False):
-    """
-    Get the master unit list; generate it or get if from a file.
-
-    If you generate the MUL, it will be saved at the file path given.
-
-    Args:
-        file_path_mul (pathlib.Path): where you want the master unit list to
-            live. Must be a compressed pickle file ('.pkl.gz').
-        clobber (boolean): True if you want to regenerate the master unit list
-            whether or not it is saved at the file_path_mul
-    """
-    if '.pkl' not in file_path_mul.suffixes:
-        raise AssertionError(f"{file_path_mul} must be a pickle file")
-    if not file_path_mul.is_file() or clobber:
-        logger.info(
-            f"Master unit list not found {file_path_mul}"
-            "Generating a new master unit list. This should take ~10 minutes."
-        )
-        # actually make the master plant parts list
-        plant_parts_eia = pudl_out.plant_parts_eia()
-        # export
-        plant_parts_eia.to_csv(file_path_mul, compression='gzip')
-
-    elif file_path_mul.is_file():
-        logger.info(f"Reading the master unit list from {file_path_mul}")
-        plant_parts_eia = pd.read_pickle(file_path_mul, compression='gzip')
-    return plant_parts_eia

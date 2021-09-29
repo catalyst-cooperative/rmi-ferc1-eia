@@ -398,7 +398,9 @@ class Transformer:
             )
         # okay now that we feel confident that we aren't going to loose data
         # let's aggregate away any remaining duplicates
-        agg_cols = (IDX_COLS_DEPRISH + ['line_id', 'utility_name_ferc1'])
+        agg_cols = (
+            IDX_COLS_DEPRISH +
+            ['line_id', 'utility_name_ferc1', 'utility_id_ferc1'])
         tidy_df = agg_to_idx(tidy_df, idx_cols=agg_cols)
         return tidy_df
 

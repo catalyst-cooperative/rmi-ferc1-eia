@@ -44,19 +44,20 @@ from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
+import pudl.helpers
 from pudl_rmi import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
 
-def main(file_path_training, file_path_mul, pudl_out):
+def ferc1_to_eia(file_path_training, pudl_out, plant_parts_df):
     """
     Coordinate the connection between FERC1 steam and EIA master unit list.
 
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
-    inputs = InputManager(file_path_training, file_path_mul, pudl_out)
+    inputs = InputManager(file_path_training, pudl_out, plant_parts_df)
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
     features_train = (Features(feature_type='training', inputs=inputs)
@@ -76,7 +77,7 @@ def main(file_path_training, file_path_mul, pudl_out):
 class InputManager:
     """Class prepare inputs for linking FERC1 and EIA."""
 
-    def __init__(self, file_path_training, file_path_mul, pudl_out):
+    def __init__(self, file_path_training, pudl_out, plant_parts_df):
         """
         Initialize inputs manager that gets inputs for linking FERC and EIA.
 
@@ -87,13 +88,12 @@ class InputManager:
             file_path_mul (pathlib.Path): path to EIA's the master unit list.
             pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
         """
-        self.file_path_mul = file_path_mul
         self.file_path_training = file_path_training
         self.pudl_out = pudl_out
+        self.plant_parts_df = plant_parts_df
 
         # generate empty versions of the inputs.. this let's this class check
         # whether or not the compiled inputs exist before compilnig
-        self.plant_parts_df = None
         self.plant_parts_true_df = None
         self.steam_df = None
         self.train_df = None
@@ -101,30 +101,21 @@ class InputManager:
         self.plant_parts_train_df = None
         self.steam_train_df = None
 
-    def get_plant_parts_full(self, clobber=False):
-        """Get the full master unit list."""
-        if clobber or self.plant_parts_df is None:
-            self.plant_parts_df = (
-                make_plant_parts_eia.get_master_unit_list_eia(
-                    self.file_path_mul,
-                    pudl_out=self.pudl_out
-                )
+    def get_plant_parts_true(self, clobber=False):
+        """Get the master unit list with only the unique granularities."""
+        # We want only the records of the master unit list that are "true
+        # granularies" and those which are not duplicates based on their
+        # ownership  so the model doesn't get confused as to which option to
+        # pick if there are many records with duplicate data
+        if clobber or self.plant_parts_true_df is None:
+            plant_parts_df = (
+                self.plant_parts_df
                 .assign(
                     plant_id_report_year_util_id=lambda x:
                         x.plant_id_report_year + "_" +
                         x.utility_id_pudl.map(str))
                 .astype({'installation_year': 'float'})
             )
-        return self.plant_parts_df
-
-    def get_plant_parts_true(self, clobber=False):
-        """Get the master unit list."""
-        # We want only the records of the master unit list that are "true
-        # granularies" and those which are not duplicates based on their
-        # ownership  so the model doesn't get confused as to which option to
-        # pick if there are many records with duplicate data
-        if clobber or self.plant_parts_true_df is None:
-            plant_parts_df = self.get_plant_parts_full()
             self.plant_parts_true_df = (
                 plant_parts_df[(plant_parts_df['true_gran'])
                                & (~plant_parts_df['ownership_dupe'])
@@ -160,7 +151,7 @@ class InputManager:
                 # ownership counterparts
                 pd.read_csv(self.file_path_training,)
                 .merge(
-                    self.get_plant_parts_full().reset_index()
+                    self.plant_parts_df.reset_index()
                     [['record_id_eia'] + mul_cols],
                     how='left', on=['record_id_eia'],
                 )
@@ -474,8 +465,8 @@ class ModelTuner:
         for train_index, test_index in kf.split(features_known):
             x_train = features_known.iloc[train_index]
             x_test = features_known.iloc[test_index]
-            y_train = x_train.index & known_index
-            y_test = x_test.index & known_index
+            y_train = x_train.index.intersection(known_index)
+            y_test = x_test.index.intersection(known_index)
             # Train the classifier
             lrc.fit(x_train, y_train)
             # predict matches for the test
@@ -866,15 +857,12 @@ class MatchManager:
             f"{len(matches_best_df)/self.ferc1_options_len:.02%}"
         )
         # we don't need these cols anymore...
-        matches_best_df = matches_best_df.drop(
-            columns=['record_id_eia_trn', 'record_id_eia_rl'])
+        # matches_best_df = matches_best_df.drop(
+        #     columns=['record_id_eia_trn', 'record_id_eia_rl'])
         return matches_best_df
 
     @staticmethod
-    def fit_predict_lrc(best,
-                        features_known,
-                        features_all,
-                        train_df_ids):
+    def fit_predict_lrc(best, features_known, features_all, train_df_ids):
         """Generate, fit and predict model. Wahoo."""
         # prep the model with the hyperparameters
         lrc = rl.LogisticRegressionClassifier(
@@ -959,7 +947,7 @@ class MatchManager:
         logger.info("Get the top scoring match for each FERC1 steam record.")
         matches_best_df = (
             self.calc_best_matches(self.matches_model, .02)
-            .pipe(self.override_best_match_with_training_df, self.train_df)
+            # .pipe(self.override_best_match_with_training_df, self.train_df)
         )
         return matches_best_df
 
