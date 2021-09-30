@@ -1019,7 +1019,7 @@ def prettyify_best_matches(
     mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
         'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu', 'net_generation_mwh',
         'capacity_mw', 'capacity_factor', 'total_mmbtu', 'heat_rate_mmbtu_mwh',
-        'fuel_type_code_pudl', 'installation_year'
+        'fuel_type_code_pudl', 'installation_year', 'plant_part_id_eia'
     ]
     connects_ferc1_eia = (
         # first merge in the EIA Master Unit List
@@ -1081,8 +1081,8 @@ def prettyify_best_matches(
             warnings.warn(message)
 
     _log_match_coverage(connects_ferc1_eia)
-    # for match_type in ['all', 'overrides']:
-    #    check_match_consistentcy(connects_ferc1_eia, train_df, match_type)
+    for match_type in ['all', 'overrides']:
+        check_match_consistentcy(connects_ferc1_eia, train_df, match_type)
 
     return connects_ferc1_eia
 
