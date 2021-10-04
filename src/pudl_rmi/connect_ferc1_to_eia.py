@@ -1043,12 +1043,10 @@ def prettyify_best_matches(
         .merge(
             steam_df,
             how='outer',
-            on=['record_id_ferc1', 'report_year',
-                'plant_id_pudl', 'utility_id_pudl'],
+            on=['record_id_ferc1', 'report_year', 'utility_id_pudl', 'plant_id_pudl'],
             suffixes=('_eia', '_ferc1'),
             validate='1:1',
-            indicator=True
-        )
+            indicator=True)
         .assign(
             opex_nonfuel=lambda x: (x.opex_production_total - x.opex_fuel),
             report_date=lambda x: pd.to_datetime(
@@ -1077,7 +1075,7 @@ def prettyify_best_matches(
             logger.info(
                 "jsuk there are some FERC-EIA matches that aren't in the steam \
                 table but this is because they are linked to retired EIA generators.")
-            # raise AssertionError(message)
+            #raise AssertionError(message)
             warnings.warn(message)
 
     _log_match_coverage(connects_ferc1_eia)
