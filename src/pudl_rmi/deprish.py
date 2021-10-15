@@ -46,7 +46,12 @@ IDX_COLS_DEPRISH = [
 IDX_COLS_COMMON = [x for x in IDX_COLS_DEPRISH if x != 'plant_part_name']
 IDX_COLS_OUT = [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']
 
-# extract
+COMMON_SUFFIX = '_common'
+
+DOLLAR_COLS = [
+    'plant_balance', 'book_reserve', 'unaccrued_balance', 'net_salvage',
+    'depreciation_annual_epxns'
+]
 
 
 class Extractor:
@@ -155,7 +160,8 @@ class Transformer:
                 self.extract_df
                 .pipe(pudl.helpers.convert_cols_dtypes,
                       'depreciation', name='depreciation')
-                .pipe(self._convert_rate_cols)
+                .pipe(self.convert_rate_cols)
+                .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
                 .pipe(pudl.helpers.simplify_strings, ['plant_part_name'])
                 .pipe(add_ferc_acct_name)
@@ -179,17 +185,36 @@ class Transformer:
         """
         if clobber or self.reshaped_df is None:
             # common assn's: common id's w/ main id's
-            self.common_assn = get_common_assn()
-
-            data_cols = [
-                'plant_balance', 'book_reserve', 'unaccrued_balance',
-                'net_salvage', 'depreciation_annual_epxns'
+            common_assn = get_common_assn()
+            tidy_df = deepcopy(
+                self.tidy_df
+                .pipe(self.fill_in_df, common_allocated=False)
+            )
+            self.deprish_w_c = self.split_merge_common_records(
+                tidy_df,
+                common_assn,
+                DOLLAR_COLS
+            )
+            # split apart the common records from the main records.
+            deprish_common = (self.deprish_w_c.loc[
+                self.deprish_w_c.line_id.isin(
+                    common_assn.line_id_common.unique())]
+                .assign(common=True))
+            deprish_w_c = self.deprish_w_c.loc[
+                ~self.deprish_w_c.line_id.isin(
+                    common_assn.line_id_common.unique())
             ]
+            logger.info(
+                f"grabbed {len(deprish_common)} common reocrds and "
+                f"{len(deprish_w_c)} atomic records")
 
-            merged = deepcopy(self.tidy_df)
-            for col in data_cols:
-                allocated_df = self.split_allocate_common(split_col=col)
-                new_cols = IDX_COLS_DEPRISH + [f"{col}_w_common"]
+            merged = deepcopy(tidy_df)
+            for col in DOLLAR_COLS:
+                logger.info(f'allocating common for {col}')
+                allocated_df = self.split_allocate_common(
+                    deprish_w_c, deprish_common, split_col=col)
+                new_cols = IDX_COLS_DEPRISH + \
+                    [f"{col}_w_common", f"{col}_common_portion"]
                 merged = pd.merge(
                     merged,
                     allocated_df.drop_duplicates(IDX_COLS_DEPRISH)[new_cols],
@@ -199,7 +224,7 @@ class Transformer:
                 )
             merged['common'] = np.where(
                 merged.line_id.isin(
-                    list(self.common_assn['line_id_common']
+                    list(common_assn['line_id_common']
                          .drop_duplicates())),
                 True, False
             )
@@ -222,6 +247,10 @@ class Transformer:
             filled_df = self.fill_in_df(
                 deepcopy(self.reshape()),
                 common_allocated=True,
+            )
+            filled_df = self.fill_in_df(
+                deepcopy(filled_df),
+                common_allocated=False,
             )
             self.filled_df = filled_df
         return self.filled_df
@@ -254,12 +283,11 @@ class Transformer:
             suffix = "_w_common"
         else:
             suffix = ""
-        for _ in range(2):
+        for _ in range(3):
             filled_df = filled_df.assign(
                 net_salvage_rate=lambda x:
                     # first clean % v num, then net_salvage/book_value
                     x.net_salvage_rate.fillna(
-
                         x[f"net_salvage{suffix}"] /
                         x[f"book_reserve{suffix}"]),
                 reserve_rate=lambda x: x.reserve_rate.fillna(
@@ -268,15 +296,26 @@ class Transformer:
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
-                    filled_df.depreciation_annual_rate *
+                    (filled_df.depreciation_annual_rate) *
                     filled_df[f"plant_balance{suffix}"])
 
             )
             filled_df[f"net_salvage{suffix}"] = (
                 filled_df[f"net_salvage{suffix}"].fillna(
-                    filled_df.net_salvage_rate *
-                    filled_df[f"book_reserve{suffix}"])
+                    filled_df[f"plant_balance{suffix}"] -
+                    filled_df[f"book_reserve{suffix}"] -
+                    filled_df[f"unaccrued_balance{suffix}"])
             )
+            # filled_df[f"net_salvage{suffix}"] = (
+            #     filled_df[f"net_salvage{suffix}"].fillna(
+            #         (filled_df.net_salvage_rate) *
+            #         filled_df[f"book_reserve{suffix}"])
+            # )
+            filled_df[f"net_salvage_option3{suffix}"] = (
+                (filled_df.net_salvage_rate) *
+                filled_df[f"book_reserve{suffix}"]
+            )
+
             filled_df[f"unaccrued_balance{suffix}"] = (
                 filled_df[f"unaccrued_balance{suffix}"].fillna(
                     filled_df[f"plant_balance{suffix}"] -
@@ -286,74 +325,134 @@ class Transformer:
             filled_df[f"unaccrued_balance{suffix}"] = (
                 filled_df[f"unaccrued_balance{suffix}"].fillna(
                     filled_df[f"plant_balance{suffix}"] *
-                    filled_df['depreciation_annual_rate']
+                    (filled_df['depreciation_annual_rate'])
                     * filled_df['remaining_life_avg'])
             )
-            filled_df[f"book_reserve{suffix}"] = (
-                filled_df[f"book_reserve{suffix}"].fillna(
-                    filled_df[f"plant_balance{suffix}"] -
-                    (filled_df[f"depreciation_annual_epxns{suffix}"]
-                     * filled_df.remaining_life_avg))
-            )
-            filled_df[f"book_reserve{suffix}"] = (
-                filled_df[f"book_reserve{suffix}"].fillna(
-                    (1 - filled_df.net_salvage_rate) *
-                    filled_df[f"plant_balance{suffix}"]
-                    - filled_df[f"unaccrued_balance{suffix}"])
-            )
+        filled_df[f"book_reserve_og{suffix}"] = (
+            filled_df[f"book_reserve{suffix}"]
+        )
+        filled_df[f"book_reserve{suffix}"] = (
+            filled_df[f"book_reserve{suffix}"].fillna(
+                ((1 - filled_df.net_salvage_rate) *
+                 filled_df[f"plant_balance{suffix}"])
+                - filled_df[f"unaccrued_balance{suffix}"])
+        )
+        filled_df[f"book_reserve_option2{suffix}"] = (
+            filled_df[f"plant_balance{suffix}"] -
+            (filled_df[f"depreciation_annual_epxns{suffix}"]
+             * filled_df.remaining_life_avg)
+        )
 
         return filled_df
 
-    def _convert_rate_cols(self, tidy_df):
-        """Convert percent columns to numeric."""
-        to_num_cols = ['net_salvage_rate',
-                       'reserve_rate',
-                       'depreciation_annual_rate']
-        for col in to_num_cols:
-            tidy_df[col] = pd.to_numeric(tidy_df[col])
+    def convert_rate_cols(self, tidy_df):
+        """
+        Convert percent columns to rates and FERC $1,000's into $'s.
 
+        The original data has rate/percentage columns that have a combination
+        of whole numbers percentages (i.e. 88.2 for 88.2%) and decimal rates
+        (i.e. .882 for 88.2%). We want all of the values to be in the
+        decimal/rate format. For some of these columns, there are corresponding
+        boolean columns which note whether the data is a whole number
+        percentage or a decimal rate which we use to convert the whole number
+        percentages into rates.
+
+        FERC data is reported in $1,000s. We want to convert everyting to $s.
+        """
         # FERC data is reported in $1,000s. we want to convert everyting to $s
-        cols_dollar = ['plant_balance', 'book_reserve',
-                       'unaccrued_balance', 'net_salvage',
-                       'depreciation_annual_epxns']
+        tidy_df.loc[tidy_df.data_source == "FERC", DOLLAR_COLS] = (
+            tidy_df.loc[tidy_df.data_source == "FERC", DOLLAR_COLS] * 1000)
 
-        tidy_df.loc[tidy_df.data_source == "FERC", cols_dollar] = (
-            tidy_df.loc[tidy_df.data_source == "FERC", cols_dollar] * 1000)
-
-        # convert % columns - which originally are a combination of whole
+        # convert % columns to rates - the original data is scrapped as a
+        # combination of whole numbers percentages (i.e. 88.2 for 88.2%)
+        # and decimal rates (i.e. .882 for 88.2%).
         # numbers of decimals (e.g. 88.2% would either be represented as
         # 88.2 or .882). Some % columns have boolean columns (ending in
         # type_pct) that we fleshed out to know wether the values were
-        # reported as numbers or %s. There is one column that was easy to
-        # clean by checking whether or not the value is greater than 1.
-        tidy_df.loc[~tidy_df['net_salvage_rate_type_pct'],
-                    'net_salvage_rate'] = (
-            tidy_df.loc[~tidy_df['net_salvage_rate_type_pct'],
-                        'net_salvage_rate'] * 100
+        # reported as numbers or %s.
+        to_num_cols = [
+            'net_salvage_rate', 'reserve_rate', 'depreciation_annual_rate'
+        ]
+        for col in to_num_cols:
+            tidy_df[col] = pd.to_numeric(tidy_df[col])
+
+        for rate_col in ['net_salvage_rate', 'depreciation_annual_rate']:
+            tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] = (
+                tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] / 100
+            )
+        # The reserve rate column was easier to clean by checking whether or
+        # not the value is greater than 1.
+        tidy_df.loc[abs(tidy_df.reserve_rate) >= 1, 'reserve_rate'] = (
+            tidy_df.loc[abs(tidy_df.reserve_rate) >= 1, 'reserve_rate'] / 100
         )
-        tidy_df.loc[tidy_df['depreciation_annual_rate_type_pct'],
-                    'depreciation_annual_rate'] = (
-            tidy_df.loc[tidy_df['depreciation_annual_rate_type_pct'],
-                        'depreciation_annual_rate'] / 100
-        )
-        tidy_df.loc[abs(tidy_df.reserve_rate) >= 1,
-                    'reserve_rate'] = tidy_df.loc[
-            abs(tidy_df.reserve_rate) >= 1, 'reserve_rate'] / 100
         logger.info(
-            f"# of reserve_rate over 1 (100%): "
+            "# of reserve_rate over 1 (100%): "
             f"{len(tidy_df.loc[abs(tidy_df.reserve_rate) >= 1])}. "
             "Higher #s here may indicate an issue with the original data "
             "or the fill_in method"
         )
         # get rid of the bool columns we used to clean % columns
-        tidy_df = tidy_df.drop(
-            columns=tidy_df.filter(like='num'))
+        tidy_df = tidy_df.drop(columns=tidy_df.filter(like='num'))
+        return tidy_df
 
-        tidy_df['net_salvage_rate'] = (
-            - tidy_df['net_salvage_rate'].abs()
+    def correct_net_salvage_sign(self, tidy_df):
+        """
+        Correct for net salvage sign and fill in some 0's.
+
+        The PDF scrappers that were used to compile the raw data are not so
+        awesome at picking up `-` signs. We generally assume that most net
+        salvage values should be negative, but we can use the other reported
+        values to find out.
+
+        We do lots of filling in null values in ``fill_in_df()``.. but we found
+        some zeros in the raw data that were probable either supposed to be
+        values or nulls. This method fills those nulls in with their calculated
+        value.
+
+        Args:
+            tidy_df (pandas.DataFrame): result of `convert_rate_cols()`
+        """
+        # Note: we've tried filling in the df before fixing the sign and
+        # it gave us the same outputs.
+
+        # rate check based on the book reserve fill_in calc
+        tidy_df['net_salvage_rate_sign_check'] = (
+            1 - ((tidy_df['book_reserve'] + tidy_df["unaccrued_balance"])
+                 / tidy_df["plant_balance"])
         )
-        tidy_df['net_salvage'] = - tidy_df['net_salvage'].abs()
+        # rate check based on the unaccrued_balance fill_in calc
+        tidy_df["net_salvage_sign_check"] = (
+            tidy_df["plant_balance"] - tidy_df["book_reserve"]
+            - tidy_df["unaccrued_balance"]
+        )
+        salvage_cols = ['net_salvage_rate', 'net_salvage']
+        for col in salvage_cols:
+            #
+            zero_mask = (
+                ~np.isclose(tidy_df[col], tidy_df[f'{col}_sign_check'])
+                & (tidy_df[col] == 0)
+                & tidy_df[col].notnull()
+                & tidy_df[f'{col}_sign_check'].notnull()
+            )
+            logger.info(
+                f"{len(tidy_df[zero_mask])/len(tidy_df):.2%} of records have "
+                f"correctable zero {col}")
+            tidy_df.loc[zero_mask, col] = (
+                tidy_df.loc[zero_mask, f'{col}_sign_check']
+            )
 
+            sign_check_mask = (tidy_df[f'{col}_sign_check'] > 0)
+            logger.info(
+                f"{len(tidy_df[sign_check_mask])/len(tidy_df):.1%} of records "
+                f"have postive {col}"
+            )
+            tidy_df[col] = np.where(
+                sign_check_mask, tidy_df[col].abs(), - tidy_df[col].abs()
+            )
+        # drop the two interim columns bc we don't need them anymore.
+        tidy_df = tidy_df.drop(
+            columns=['net_salvage_rate_sign_check', 'net_salvage_sign_check']
+        )
         return tidy_df
 
     def remove_ferc_acct_duplicates(self, tidy_df):
@@ -404,7 +503,7 @@ class Transformer:
         tidy_df = agg_to_idx(tidy_df, idx_cols=agg_cols)
         return tidy_df
 
-    def split_merge_common_records(self, split_col):
+    def split_merge_common_records(self, tidy_df, common_assn, data_cols):
         """
         Split apart common records and merge back specific columns.
 
@@ -416,16 +515,45 @@ class Transformer:
                 a count of instances of the common records and main records.
 
         """
-        common_pb = self.get_common_split_col(split_col=split_col)
+        # merge back in the ferc acct #
+        common_assn_acct = (
+            pd.merge(
+                common_assn,
+                tidy_df[['line_id', 'ferc_acct']],
+                left_on=['line_id_common'],
+                right_on=['line_id'],
+                how='outer',
+                indicator=True
+            )
+            .drop(columns=['line_id'])
+        )
+
+        common_pb = (
+            pd.merge(
+                common_assn_acct,
+                tidy_df[['line_id', 'ferc_acct'] + data_cols],
+                left_on=['line_id_common', 'ferc_acct'],
+                right_on=['line_id', 'ferc_acct'],
+                how='left'
+            )
+            .drop(columns=['line_id'])
+            .drop_duplicates()
+            .dropna(
+                subset=['line_id_common', 'line_id_main'] + data_cols,
+                how='all')
+            .pipe(self._count_common_assn)
+            .groupby(['line_id_main', 'ferc_acct'], as_index=False)
+            [data_cols].sum()
+        )
 
         deprish_w_c = (
             pd.merge(
-                self.early_tidy(),
+                tidy_df,
                 common_pb,
                 left_on=['line_id', 'ferc_acct'],
                 right_on=['line_id_main', 'ferc_acct'],
                 how='left',
-                suffixes=('', '_common'),
+                suffixes=('', COMMON_SUFFIX),
                 # validate='1:1'
             )
             .drop(columns=['line_id_main'])
@@ -438,38 +566,6 @@ class Transformer:
         #    ~deprish_w_c.line_id.isin(common_pb.line_id_common.unique())]
 
         return deprish_w_c
-
-    def get_common_split_col(self, split_col='plant_balance'):
-        """Get common plant records and their associated plant balance."""
-        # merge back in the ferc acct #
-        common_assn_acct = (
-            pd.merge(
-                self.common_assn,
-                self.early_tidy()[['line_id', 'ferc_acct']],
-                left_on=['line_id_common'],
-                right_on=['line_id'],
-                how='outer',
-                indicator=True
-            )
-            .drop(columns=['line_id'])
-        )
-
-        common_pb = (
-            pd.merge(
-                common_assn_acct,
-                self.early_tidy()[['line_id', 'ferc_acct', split_col]],
-                left_on=['line_id_common', 'ferc_acct'],
-                right_on=['line_id', 'ferc_acct'],
-                how='left'
-            )
-            .drop(columns=['line_id'])
-            .drop_duplicates()
-            .dropna(subset=['line_id_common', 'line_id_main', split_col])
-            .pipe(self._count_common_assn)
-            .groupby(['line_id_main', 'ferc_acct'], as_index=False)
-            [[split_col]].sum()
-        )
-        return common_pb
 
     def _count_common_assn(self, common_pb):
         common_pb_w_counts = (
@@ -493,8 +589,7 @@ class Transformer:
         )
         return common_pb_w_counts
 
-    def split_allocate_common(self,
-                              split_col='plant_balance'):
+    def split_allocate_common(self, deprish_w_c, deprish_common, split_col):
         """
         Split and allocate the common plant depreciation lines.
 
@@ -513,20 +608,8 @@ class Transformer:
                 'plant_balance'.
         """
         # the new  data col we are trying to generate
-        new_data_col = f'{split_col}_w_common'
-        deprish_w_c = self.split_merge_common_records(split_col=split_col)
-        # split apart the common records from the main records.
-        deprish_common = (deprish_w_c.loc[
-            deprish_w_c.line_id.isin(self.common_assn.line_id_common.unique())]
-            .assign(common=True))
-        deprish_w_c = deprish_w_c.loc[
-            ~deprish_w_c.line_id.isin(self.common_assn.line_id_common.unique())
-        ]
+        new_data_col = f'{split_col}_w{COMMON_SUFFIX}'
 
-        logger.info(
-            f"Allocating common records for: {split_col}\n"
-            f"   grabbed {len(deprish_common)} common reocrds and "
-            f"{len(deprish_w_c)} atomic records. of total {len(deprish_w_c)}")
         simple_case_df = self.calc_common_portion_simple(
             deprish_w_c, split_col)
         edge_case_df = self.calc_common_portion_with_no_part_balance(
@@ -551,7 +634,7 @@ class Transformer:
                 "so something went wrong here."
             )
         df_w_check = self._check_common_allocation(
-            deprish_w_common_allocated, split_col, new_data_col)
+            deprish_w_common_allocated, split_col)
 
         # return deprish_w_common_allocated
         return df_w_check
@@ -572,11 +655,16 @@ class Transformer:
         # because we are using a weight_col that might be filled in we're going
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
-
+        # sometimes we are allocating the weight_col so we don't want doubles
+        cols = list(set([weight_col, split_col]))
+        filled_df = (
+            self.fill_in_df(deprish_w_c, common_allocated=False)
+            [IDX_COLS_DEPRISH + cols + [f'{split_col}{COMMON_SUFFIX}']]
+        )
         # exclude the nulls and the 0's
-        simple_case_df = deprish_w_c[
-            (deprish_w_c[weight_col].notnull()) & (
-                deprish_w_c[weight_col] != 0)
+        simple_case_df = filled_df[
+            (filled_df[weight_col].notnull())
+            & (filled_df[weight_col] != 0)
         ]
         logger.debug(
             f"We are calculating the common portion for {len(simple_case_df)} "
@@ -607,14 +695,12 @@ class Transformer:
         # portion is to multiply the ratio (calculated above) with the total
         # common plant balance for the plant/ferc_acct group.
         df_w_tots[f"{split_col}_common_portion"] = (
-            df_w_tots[f'{split_col}_common']
+            df_w_tots[f'{split_col}{COMMON_SUFFIX}']
             * df_w_tots[f"{weight_col}_ratio"])
 
         return df_w_tots
 
-    def calc_common_portion_with_no_part_balance(self,
-                                                 deprish_w_c,
-                                                 split_col):
+    def calc_common_portion_with_no_part_balance(self, deprish_w_c, split_col):
         """
         Calculate portion of common when ``split_col`` is null.
 
@@ -669,19 +755,18 @@ class Transformer:
         # common plant balance will already be distributed amoung those records
         edge_case_df[f"{split_col}_common_portion"] = np.where(
             ~edge_case_df['plant_bal_any'],
-            (edge_case_df[f'{split_col}_common'] /
+            (edge_case_df[f'{split_col}{COMMON_SUFFIX}'] /
              edge_case_df['plant_bal_count']),
             np.nan
         )
 
         return edge_case_df
 
-    def _check_common_allocation(self,
-                                 df_w_tots,
-                                 split_col,
-                                 new_data_col):
+    def _check_common_allocation(self, df_w_tots, split_col):
         """Check to see if the common plant allocation was effective."""
         weight_col = 'unaccrued_balance'
+        # the new  data col we are trying to generate
+        new_data_col = f'{split_col}_w{COMMON_SUFFIX}'
         calc_check = (
             df_w_tots
             # .groupby(by=IDX_COLS_DEPRISH, dropna=False)
@@ -788,28 +873,26 @@ def agg_to_idx(deprish_df, idx_cols):
     # there isn't a built in weighted average gb.agg function, so we need to
     # run it through our own.
 
-    # sum agg section
+    # sum agg section ###
     # enumerate sum cols
-    sum_cols = [
-        'plant_balance', 'book_reserve', 'unaccrued_balance',
-        'net_salvage', 'depreciation_annual_epxns']
+    sum_cols = DOLLAR_COLS
+    # if common lines have been allocated, we need to aggregate those allocated
+    # columns as well
     if 'plant_balance_w_common' in deprish_df.columns:
-        sum_cols = sum_cols + [f"{x}_w_common" for x in sum_cols]
-    # aggregate..
+        sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
+    # aggregate the columns that can be summed..
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
 
-    # weighted average agg section
+    # weighted average agg section ###
     # enumerate wtavg cols
     avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
         [x for x in deprish_df.columns
          if '_rate' in x and 'rate_type_pct' not in x]
     # prep dict with col to average (key) and col to weight on (value)
     # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = {}
-    for col in avg_cols:
-        wtavg_cols[col] = 'unaccrued_balance'
-    # aggregate..
+    wtavg_cols = dict.fromkeys(avg_cols, 'unaccrued_balance')
+    # aggregate the columned that need to be averaged ..
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
             deprish_asset.merge(
@@ -818,19 +901,7 @@ def agg_to_idx(deprish_df, idx_cols):
                     data_col=data_col,
                     weight_col=weight_col,
                     idx_cols=idx_cols),
-                # .rename(columns={data_col: f"{data_col}_wt"})
                 how='outer', on=idx_cols))
-
-    if 'plant_balance_w_common' in deprish_df.columns:
-        deprish_asset = deprish_asset.assign(
-            remaining_life_avg=lambda x:
-                x.unaccrued_balance / x.depreciation_annual_epxns,
-            plant_balance_w_common_check=lambda x:
-                x.book_reserve + x.unaccrued_balance,
-            plant_balance_diff_check=lambda x:
-                x.plant_balance_w_common_check / x.plant_balance_w_common,
-        )
-
     return deprish_asset
 
 
@@ -1190,3 +1261,16 @@ def make_default_common_assn(file_path_deprish):
         .drop_duplicates()
     )
     return common_assn
+
+
+def _check_net_salvage_sign(df):
+    # rate check based on the book reserve fill_in calc
+    df['net_salvage_rate_sign_check'] = (
+        1 - ((df['book_reserve'] + df["unaccrued_balance"])
+             / df["plant_balance"])
+    )
+    # rate check based on the unaccrued_balance fill_in calc
+    df["net_salvage_sign_check"] = (
+        df["plant_balance"] - df["book_reserve"] - df["unaccrued_balance"]
+    )
+    return df

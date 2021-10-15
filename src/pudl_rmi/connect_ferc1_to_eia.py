@@ -150,20 +150,30 @@ class InputManager:
                 # records which are ownership dupes to reflect their "total"
                 # ownership counterparts
                 pd.read_csv(self.file_path_training,)
+                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
+                .drop_duplicates(subset=['record_id_ferc1'])
                 .merge(
                     self.plant_parts_df.reset_index()
                     [['record_id_eia'] + mul_cols],
                     how='left', on=['record_id_eia'],
+                    indicator=True
                 )
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
                 .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-                .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
                 # recordlinkage and sklearn wants MultiIndexs to do the stuff
                 .set_index(['record_id_ferc1', 'record_id_eia', ])
-                .drop(columns=mul_cols)
             )
+            not_in_ppf = self.train_df[self.train_df._merge == 'left_only']
+            if not not_in_ppf.empty:
+                self.not_in_ppf = not_in_ppf
+                raise AssertionError(
+                    "Not all training data is associated with EIA records.\n"
+                    "record_id_ferc1's of bad training data records are: "
+                    f"{list(not_in_ppf.reset_index().record_id_ferc1)}"
+                )
+            self.train_df = self.train_df.drop(columns=mul_cols + ['_merge'])
         return self.train_df
 
     def get_train_index(self):
@@ -651,10 +661,11 @@ class MatchManager:
         """
         self.best = best
         self.train_df = inputs.prep_train_connections()
+        self.all_ferc1 = inputs.get_all_ferc1()
         # get the # of ferc options within the available eia years.
         self.ferc1_options_len = len(
-            inputs.get_all_ferc1()[
-                inputs.get_all_ferc1().report_year.isin(
+            self.all_ferc1[
+                self.all_ferc1.report_year.isin(
                     inputs.get_plant_parts_true().report_date.dt.year.unique())
             ]
         )
@@ -833,7 +844,13 @@ class MatchManager:
         matches_best_df = (
             pd.merge(
                 matches_best_df.reset_index(),
-                train_df.reset_index().dropna(),
+                #     self.all_ferc1.reset_index()[['record_id_ferc1']],
+                #     on=['record_id_ferc1'],
+                #     validate="1:1",
+                #     how='outer'
+                # )
+                # .merge(
+                train_df.reset_index(),
                 on=['record_id_ferc1'],
                 how='outer',
                 suffixes=('_rl', '_trn'))
@@ -952,8 +969,12 @@ class MatchManager:
         return matches_best_df
 
 
-def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
-                           debug=False):
+def prettyify_best_matches(
+        matches_best,
+        plant_parts_true_df,
+        steam_df,
+        train_df,
+        debug=False):
     """
     Make the EIA-FERC best matches usable.
 
@@ -964,7 +985,8 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
     """
     # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
     mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
-        'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh', 'capacity_mw'
+        'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh',
+        'capacity_mw', 'plant_part_id_eia'
     ]
     connects_ferc1_eia = (
         # first merge in the EIA Master Unit List
@@ -1014,10 +1036,11 @@ def prettyify_best_matches(matches_best, plant_parts_true_df, steam_df,
             warnings.warn(message)
             return no_ferc
         else:
-            raise AssertionError(message)
+            warnings.warn(message)
+            # raise AssertionError(message)
     _log_match_coverage(connects_ferc1_eia)
-
-    connects_ferc1_eia = connects_ferc1_eia.drop(columns=['_merge'])
+    for match_type in ['all', 'overrides']:
+        check_match_consistentcy(connects_ferc1_eia, train_df, match_type)
     return connects_ferc1_eia
 
 
@@ -1039,3 +1062,71 @@ def _log_match_coverage(connects_ferc1_eia):
         f"    Fuel type: {fuel_type_coverage:.01%}\n"
         f"    Tech type: {tech_type_coverage:.01%}"
     )
+
+
+def check_match_consistentcy(connects_ferc1_eia, train_df, match_type='all'):
+    """
+    Check how consistent matches are across time.
+
+    Args:
+        connects_ferc1_eia (pandas.DataFrame)
+        train_df (pandas.DataFrame)
+        match_type (string): either 'all' - to check all of the matches - or
+            'overrides' - to check just the overrides. Default is 'all'.
+    """
+    # these are the default
+    consistency = .75
+    consistency_one_cap_ferc = .9
+    mask = connects_ferc1_eia.record_id_eia.notnull()
+
+    if match_type == 'overrides':
+        consistency = .45
+        consistency_one_cap_ferc = .85
+        train_ferc1 = train_df.reset_index()
+        # these bbs were missing from connects_ferc1_eia. not totally sure why
+        missing = [
+            'f1_steam_2018_12_51_0_1', 'f1_steam_2018_12_45_2_2',
+            'f1_steam_2018_12_45_2_1', 'f1_steam_2018_12_45_1_2',
+            'f1_steam_2018_12_45_1_1', 'f1_steam_2018_12_45_1_5',
+            'f1_steam_2018_12_45_1_4', 'f1_steam_2018_12_56_2_3'
+        ]
+        over_f1 = (
+            train_ferc1[
+                train_ferc1.record_id_ferc1.str.contains('_steam_')
+                & ~train_ferc1.record_id_ferc1.isin(missing)
+            ]
+            .set_index('record_id_ferc1').index)
+        over_ferc1_ids = connects_ferc1_eia.set_index(
+            'record_id_ferc1').loc[over_f1].plant_id_ferc1.unique()
+
+        mask = mask & connects_ferc1_eia.plant_id_ferc1.isin(over_ferc1_ids)
+    count = (
+        connects_ferc1_eia[mask]
+        .groupby(['plant_id_ferc1'])
+        [['plant_part_id_eia', 'capacity_mw_ferc1']]
+        .nunique()
+    )
+    consist = len(count[count.plant_part_id_eia == 1]) / len(count)
+    logger.info(
+        f"Matches with consistency across years of {match_type} matches is "
+        f"{consist:.1%}"
+    )
+    if consist < consistency:
+        raise AssertionError(
+            f"Consistency of {match_type} matches across years dipped below "
+            f"{consistency:.1%} to {consist:.1%}"
+        )
+    consist_one_cap_ferc = (
+        (len(count) - len(count[(count.plant_part_id_eia > 1)
+         & (count.capacity_mw_ferc1 == 1)]))
+        / len(count))
+    logger.info(
+        "Matches with completely consistent FERC capacity have a consistency "
+        f"of {consist_one_cap_ferc:.1%}"
+    )
+    if consist_one_cap_ferc < consistency_one_cap_ferc:
+        raise AssertionError(
+            "Consistency of matches with consistent FERC capcity dipped below "
+            f"{consistency_one_cap_ferc:.1%} to {consist_one_cap_ferc:.1%}"
+        )
+    return count
