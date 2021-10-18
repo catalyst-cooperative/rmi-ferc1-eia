@@ -77,7 +77,7 @@ def prep_deprish(plant_parts_df, key_deprish):
             x for x in deprish.IDX_COLS_DEPRISH if x not in ['ferc_acct']] +
             ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1'])
         .assign(report_year=lambda x: x.report_date.dt.year)
-        .astype({'report_year': pd.Int64Dtype()})  # bc it isnt a standard eia col
+        .astype({'report_year': pd.Int64Dtype()})  # bc it isnt an eia col
         .dropna(subset=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
     )
