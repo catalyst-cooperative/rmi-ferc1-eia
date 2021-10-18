@@ -25,6 +25,7 @@ import pandas as pd
 import numpy as np
 
 import pudl
+import pudl_rmi
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,13 @@ DOLLAR_COLS = [
 ]
 
 
+def execute():
+    """Generate cleaned and allocated depreciation studies."""
+    transformer = Transformer(Extractor().execute())
+    deprish_df = transformer.execute()
+    return deprish_df
+
+
 class Extractor:
     """
     Extractor for turning excel based depreciation data into a dataframe.
@@ -66,39 +74,33 @@ class Extractor:
     will want to use a datastore object to handle the path.
     """
 
-    def __init__(self,
-                 file_path,
-                 sheet_name,
-                 skiprows=0):
+    def __init__(self, sheet_name='Depreciation Studies Raw', skiprows=0):
         """
         Initialize a for deprish.Extractor.
 
         Args:
-            file_path (path-like)
             sheet_name (str, int): String used for excel sheet name or
                 integer used for zero-indexed sheet location.
             skiprows (int): rows to skip in zero-indexed column location,
                 default is 0.
         """
-        self.file_path = file_path
         self.sheet_name = sheet_name
         self.skiprows = skiprows
 
     def execute(self):
         """Turn excel-based depreciation data into a dataframe."""
-        logger.info(f"Reading the depreciation data from {self.file_path}")
+        logger.info(
+            "Reading the depreciation data from "
+            f"{pudl_rmi.FILE_PATH_DEPRISH_RAW}"
+        )
         return (
             pd.read_excel(
-                self.file_path,
+                pudl_rmi.FILE_PATH_DEPRISH_RAW,
                 skiprows=self.skiprows,
                 sheet_name=self.sheet_name,
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},
                 na_values=NA_VALUES
             )
-            # for some reason the read_excel is grabbing ALL OF THE COLUMNS
-            # .... in the whole dang sheet
-            .dropna(axis='columns', how='all')
-            .dropna(axis='rows', how='all')
         )
 
 
@@ -375,8 +377,15 @@ class Transformer:
         ]
         for col in to_num_cols:
             tidy_df[col] = pd.to_numeric(tidy_df[col])
-
-        for rate_col in ['net_salvage_rate', 'depreciation_annual_rate']:
+        # convert the mixed rate/percentage columns using the cooresponding
+        # boolean columns that let us know whether a particular record has
+        # data reported as a decimal rates or whole number percentages
+        rate_cols = ['net_salvage_rate', 'depreciation_annual_rate']
+        # ensure the cooresponding boolean columns are actually bools
+        tidy_df = tidy_df.astype(
+            {f"{k}_type_pct": pd.BooleanDtype() for k in rate_cols}
+        )
+        for rate_col in rate_cols:
             tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] = (
                 tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] / 100
             )
@@ -902,6 +911,11 @@ def agg_to_idx(deprish_df, idx_cols):
                     weight_col=weight_col,
                     idx_cols=idx_cols),
                 how='outer', on=idx_cols))
+    deprish_asset = pudl.helpers.convert_cols_dtypes(
+        deprish_asset,
+        'depreciation',
+        name='depreciation'
+    )
     return deprish_asset
 
 

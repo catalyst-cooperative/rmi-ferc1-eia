@@ -173,16 +173,16 @@ record_id_eia,record_id_ferc1,notes,signature_1
 3775_2016_plant_owned_733,f1_steam_2016_12_6_0_1,Cap is off bc a unit retired,CG
 3775_2015_plant_owned_733,f1_steam_2015_12_6_0_1,Cap is off bc a unit retired,CG
 3775_2014_plant_owned_733,f1_steam_2014_12_6_0_1,,CG
-3775_2013_plant_total_733, f1_steam_2013_12_6_0_1,,CG
-3775_2012_plant_total_733, f1_steam_2012_12_6_0_1,,CG
-3775_2011_plant_total_733, f1_steam_2011_12_6_0_1,,CG
-3775_2010_plant_total_733, f1_steam_2010_12_6_0_1,,CG
-3775_2009_plant_total_733, f1_steam_2009_12_6_0_1,,CG
-3775_2008_plant_total_733, f1_steam_2008_12_6_0_1,,CG
-3775_2007_plant_total_733, f1_steam_2007_12_6_0_1,,CG
-3775_2006_plant_total_733, f1_steam_2006_12_6_0_1,,CG
-3775_2005_plant_total_733, f1_steam_2005_12_6_0_1,,CG
-3775_2004_plant_total_733, f1_steam_2004_12_6_0_1,,CG
+3775_2013_plant_total_733,f1_steam_2013_12_6_0_1,,CG
+3775_2012_plant_total_733,f1_steam_2012_12_6_0_1,,CG
+3775_2011_plant_total_733,f1_steam_2011_12_6_0_1,,CG
+3775_2010_plant_total_733,f1_steam_2010_12_6_0_1,,CG
+3775_2009_plant_total_733,f1_steam_2009_12_6_0_1,,CG
+3775_2008_plant_total_733,f1_steam_2008_12_6_0_1,,CG
+3775_2007_plant_total_733,f1_steam_2007_12_6_0_1,,CG
+3775_2006_plant_total_733,f1_steam_2006_12_6_0_1,,CG
+3775_2005_plant_total_733,f1_steam_2005_12_6_0_1,,CG
+3775_2004_plant_total_733,f1_steam_2004_12_6_0_1,,CG
 3777_2018_plant_owned_733,f1_hydro_2018_12_6_0_2,,
 3796_2018_plant_owned_19876,f1_steam_2018_12_186_0_3,,
 3797_5_2018_plant_unit_owned_19876,f1_steam_2018_12_186_5_5,,

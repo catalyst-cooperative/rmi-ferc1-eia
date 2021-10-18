@@ -45,19 +45,22 @@ from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl
 import pudl.helpers
+import pudl_rmi
 from pudl_rmi import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
 
-def ferc1_to_eia(file_path_training, pudl_out, plant_parts_df):
+def execute(pudl_out, plant_parts_df):
     """
     Coordinate the connection between FERC1 steam and EIA master unit list.
 
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
-    inputs = InputManager(file_path_training, pudl_out, plant_parts_df)
+    inputs = InputManager(
+        pudl_rmi.FILE_PATH_TRAINING, pudl_out, plant_parts_df
+    )
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
     features_train = (Features(feature_type='training', inputs=inputs)
@@ -68,6 +71,7 @@ def ferc1_to_eia(file_path_training, pudl_out, plant_parts_df):
     matches_best = matcher.get_best_matches(features_train, features_all)
     connects_ferc1_eia = prettyify_best_matches(
         matches_best,
+        train_df=inputs.train_df,
         plant_parts_true_df=inputs.plant_parts_true_df,
         steam_df=inputs.steam_df
     )
@@ -639,10 +643,12 @@ class ModelTuner:
             # score so we'll lead with that f_score
             self.best = (self.test_model_parameters().sort_values(
                 ['f_score', 'precision', 'accuracy'], ascending=False).head(1))
-            logger.info("Scores from the best model hyperparameters:")
-            logger.info(f"  F-Score:   {self.best.loc[0,'f_score']:.02}")
-            logger.info(f"  Precision: {self.best.loc[0,'precision']:.02}")
-            logger.info(f"  Accuracy:  {self.best.loc[0,'accuracy']:.02}")
+            logger.info(
+                "Scores from the best model hyperparameters:\n"
+                f"    F-Score:   {self.best.loc[0,'f_score']:.02}\n"
+                f"    Precision: {self.best.loc[0,'precision']:.02}\n"
+                f"    Accuracy:  {self.best.loc[0,'accuracy']:.02}\n"
+            )
         return self.best
 
 
@@ -808,12 +814,16 @@ class MatchManager:
         self.ties_df = df[df['rank'] == 1.5]
 
         logger.info(
-            f"""Winning match stats:
-        matches vs ferc:      {len(unique_f)/self.ferc1_options_len:.02%}
-        best match v ferc:    {len(best_match)/self.ferc1_options_len:.02%}
-        best match vs matches:{len(best_match)/len(unique_f):.02%}
-        murk vs matches:      {len(self.murk_df)/len(unique_f):.02%}
-        ties vs matches:      {len(self.ties_df)/2/len(unique_f):.02%}"""
+            "Winning match stats:\n"
+            "    matches vs ferc:      "
+            f"{len(unique_f)/self.ferc1_options_len:.02%}\n"
+            "    best match v ferc:    "
+            f"{len(best_match)/self.ferc1_options_len:.02%}\n"
+            f"    best match vs matches:{len(best_match)/len(unique_f):.02%}\n"
+            f"    murk vs matches:      "
+            f"{len(self.murk_df)/len(unique_f):.02%}\n"
+            "    ties vs matches:      "
+            f"{len(self.ties_df)/2/len(unique_f):.02%}\n"
         )
         return best_match
 
@@ -1024,6 +1034,7 @@ def prettyify_best_matches(
         & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_hydro_'))
         & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_gnrt_plant_'))
     ]
+    connects_ferc1_eia = connects_ferc1_eia.drop(columns=['_merge'])
     if not no_ferc.empty:
         message = (
             "Help. \nI'm trapped in this computer and I can't get out.\n"
@@ -1038,6 +1049,7 @@ def prettyify_best_matches(
         else:
             warnings.warn(message)
             # raise AssertionError(message)
+
     _log_match_coverage(connects_ferc1_eia)
     for match_type in ['all', 'overrides']:
         check_match_consistentcy(connects_ferc1_eia, train_df, match_type)

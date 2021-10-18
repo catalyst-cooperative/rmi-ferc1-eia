@@ -51,7 +51,7 @@ for more details.
 """
 
 
-def main(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
+def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
     """
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
@@ -64,8 +64,7 @@ def main(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
     inputs = InputsManager(
         plant_parts_eia=plant_parts_eia,
         deprish_eia=deprish_eia,
-        ferc1_to_eia=ferc1_to_eia,
-        clobber=clobber
+        ferc1_to_eia=ferc1_to_eia
     )
 
     scaler = Scaler(MatchMaker(inputs))
@@ -95,8 +94,7 @@ class InputsManager():
         self,
         plant_parts_eia,
         deprish_eia,
-        ferc1_to_eia,
-        clobber=False
+        ferc1_to_eia
     ):
         """
         Initialize input manager for connecting depreciation to FERC1.
@@ -112,7 +110,6 @@ class InputsManager():
                 connecting the depreciation records to the EIA master unit list
             file_path_training (path-like): file path to the CSV of training
                 data for the FERC1 to EIA connection.
-            clobber (boolean):
         """
         self.plant_parts_eia = plant_parts_eia
         self.deprish_eia = deprish_eia
