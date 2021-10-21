@@ -100,6 +100,7 @@ class InputManager:
         # whether or not the compiled inputs exist before compilnig
         self.plant_parts_true_df = None
         self.steam_df = None
+        self.all_plants_ferc1_df = None
         self.train_df = None
         self.train_index = None
         self.plant_parts_train_df = None
@@ -155,7 +156,7 @@ class InputManager:
                 # ownership counterparts
                 pd.read_csv(self.file_path_training,)
                 .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
-                .drop_duplicates(subset=['record_id_ferc1'])
+                .drop_duplicates(subset=['record_id_ferc1', 'record_id_eia'])
                 .merge(
                     self.plant_parts_df.reset_index()
                     [['record_id_eia'] + mul_cols],
@@ -164,6 +165,7 @@ class InputManager:
                 )
                 .assign(plant_part=lambda x: x['appro_part_label'],
                         record_id_eia=lambda x: x['appro_record_id_eia'])
+                # .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
                 .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
                 .replace(to_replace="nan", value={'record_id_eia': pd.NA, })
                 # recordlinkage and sklearn wants MultiIndexs to do the stuff
@@ -199,55 +201,44 @@ class InputManager:
             fuel cost data.
 
         """
-        if clobber or self.steam_df is None:
-            fpb_cols_to_use = [
+        if clobber or self.all_plants_ferc1_df is None:
+
+            fbp_cols_to_use = [
                 'report_year', 'utility_id_ferc1', 'plant_name_ferc1',
                 'utility_id_pudl', 'fuel_cost', 'fuel_mmbtu',
                 'primary_fuel_by_mmbtu']
 
-            logger.info("Preparing the FERC1 steam table.")
-            self.steam_df = (
-                pd.merge(
-                    self.pudl_out.plants_steam_ferc1(),
-                    self.pudl_out.fbp_ferc1()[fpb_cols_to_use],
-                    on=['report_year',
-                        'utility_id_ferc1',
-                        'utility_id_pudl',
-                        'plant_name_ferc1',
-                        ],
-                    how='left')
-                .pipe(pudl.helpers.convert_cols_dtypes,
-                      'ferc1', 'ferc1 plant records')
-                # we want the column names to conform to EIA's column names
+            logger.info("Preparing the FERC1 tables.")
+            self.all_plants_ferc1_df = (
+                self.pudl_out.all_plants_ferc1()
+                .merge(self.pudl_out.fbp_ferc1()[fbp_cols_to_use], on=[
+                    'report_year',
+                    'utility_id_ferc1',
+                    'utility_id_pudl',
+                    'plant_name_ferc1',
+                ], how='left')
+                .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1', 'ferc1 plant records')
+                .assign(
+                    installation_year=lambda x: (
+                        x.installation_year.astype('float')),  # need for comparison vectors
+                    plant_id_report_year=lambda x: (
+                        x.plant_id_pudl.map(str) + "_" + x.report_year.map(str)),
+                    plant_id_report_year_util_id=lambda x: (
+                        x.plant_id_report_year + "_" + x.utility_id_pudl.map(str)),
+                    fuel_cost_per_mmbtu=lambda x: (
+                        x.fuel_cost / x.fuel_mmbtu),
+                    heat_rate_mmbtu_mwh=lambda x: (
+                        x.fuel_mmbtu / x.net_generation_mwh))
                 .rename(columns={
+                    'record_id': 'record_id_ferc1',
+                    'opex_plants': 'opex_plant',
                     'fuel_cost': 'total_fuel_cost',
                     'fuel_mmbtu': 'total_mmbtu',
                     'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
-                    'primary_fuel_by_mmbtu': 'fuel_type_code_pudl',
-                    'record_id': 'record_id_ferc1', })
-                .set_index('record_id_ferc1')
-                .assign(
-                    fuel_cost_per_mmbtu=lambda x: (
-                        x.total_fuel_cost / x.total_mmbtu),
-                    heat_rate_mmbtu_mwh=lambda x: (
-                        x.total_mmbtu / x.net_generation_mwh),
-                    plant_id_report_year=lambda x: x.plant_id_pudl.map(
-                        str) + "_" + x.report_year.map(str),
-                    plant_id_report_year_util_id=lambda x:
-                        x.plant_id_report_year + "_" + \
-                    x.utility_id_pudl.map(str)
-                )
-                .astype({'installation_year': 'float'})
-            )
-            if 0.9 > (len(self.steam_df) /
-                      len(self.steam_df.drop_duplicates(
-                          subset=['report_year',
-                                  'utility_id_pudl',
-                                  'plant_id_ferc1'])) < 1.1):
-                raise AssertionError(
-                    'Merge issue w/ pudl_out.plants_steam_ferc1 and fbp_ferc1')
+                    'primary_fuel_by_mmbtu': 'fuel_type_code_pudl'})
+                .set_index('record_id_ferc1'))
 
-        return self.steam_df
+        return self.all_plants_ferc1_df  # self.steam_df
 
     def get_train_records(self, dataset_df, dataset_id_col):
         """
@@ -825,6 +816,10 @@ class MatchManager:
             "    ties vs matches:      "
             f"{len(self.ties_df)/2/len(unique_f):.02%}\n"
         )
+
+        # Add a column to show it was a prediction
+        best_match.loc[:, 'match_type'] = 'prediction'
+
         return best_match
 
     def override_best_match_with_training_df(self, matches_best_df, train_df):
@@ -849,43 +844,67 @@ class MatchManager:
             corresponding training data, matches that had the highest rank
             in their record_id_ferc1, by a wide enough margin.
         """
+        # create an duplicate column to show exactly where there are and aren't
+        # overrides for ferc records. This is necessary because sometimes the
+        # override is a blank so we can't just depend on record_id_eia.notnull()
+        # when we merge on ferc id below.
+        train_df = train_df.reset_index()
+        train_df.loc[:, 'record_id_ferc1_trn'] = train_df['record_id_ferc1']
+
         # we want to override the eia when the training id is
-        # different than the "winning" match from the recrod linkage
+        # different than the "winning" match from the record linkage
         matches_best_df = (
             pd.merge(
                 matches_best_df.reset_index(),
-                #     self.all_ferc1.reset_index()[['record_id_ferc1']],
-                #     on=['record_id_ferc1'],
-                #     validate="1:1",
-                #     how='outer'
-                # )
-                # .merge(
-                train_df.reset_index(),
+                train_df[['record_id_eia', 'record_id_ferc1', 'record_id_ferc1_trn']],
                 on=['record_id_ferc1'],
                 how='outer',
                 suffixes=('_rl', '_trn'))
             .assign(
                 record_id_eia=lambda x: np.where(
-                    x.record_id_eia_trn.notnull(),
+                    x.record_id_ferc1_trn.notnull(),
                     x.record_id_eia_trn,
                     x.record_id_eia_rl)
             )
         )
-        # check how many records were overridden
-        overridden = matches_best_df.loc[
-            (matches_best_df.record_id_eia_trn.notnull())
+
+        overwrite_rules = (
+            (matches_best_df.record_id_ferc1_trn.notnull())
             & (matches_best_df.record_id_eia_rl.notnull())
             & (matches_best_df.record_id_eia_trn !=
                matches_best_df.record_id_eia_rl)
-        ]
+        )
+
+        correct_match_rules = (  # need to update this
+            (matches_best_df.record_id_ferc1_trn.notnull())
+            & (matches_best_df.record_id_eia_trn.notnull())
+            & (matches_best_df.record_id_eia_rl.notnull())
+            & (matches_best_df.record_id_eia_trn ==
+               matches_best_df.record_id_eia_rl)
+        )
+
+        fill_in_the_blank_rules = (
+            (matches_best_df.record_id_eia_trn.notnull())
+            & (matches_best_df.record_id_eia_rl.isnull())
+        )
+
+        # check how many records were overridden
+        overridden = matches_best_df.loc[overwrite_rules]
+
+        # Add flag
+        matches_best_df.loc[overwrite_rules, 'match_type'] = 'overridden'
+        matches_best_df.loc[correct_match_rules, 'match_type'] = 'correct prediction'
+        matches_best_df.loc[fill_in_the_blank_rules,
+                            'match_type'] = 'no prediction; training'
+
         logger.info(
             f"Overridden records:       {len(overridden)/len(train_df):.01%}\n"
             "New best match v ferc:    "
             f"{len(matches_best_df)/self.ferc1_options_len:.02%}"
         )
         # we don't need these cols anymore...
-        # matches_best_df = matches_best_df.drop(
-        #     columns=['record_id_eia_trn', 'record_id_eia_rl'])
+        matches_best_df = matches_best_df.drop(
+            columns=['record_id_eia_trn', 'record_id_eia_rl', 'record_id_ferc1_trn'])
         return matches_best_df
 
     @staticmethod
@@ -995,24 +1014,29 @@ def prettyify_best_matches(
     """
     # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
     mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
-        'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh',
-        'capacity_mw', 'plant_part_id_eia'
+        'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu', 'net_generation_mwh',
+        'capacity_mw', 'capacity_factor', 'total_mmbtu', 'heat_rate_mmbtu_mwh',
+        'fuel_type_code_pudl', 'installation_year', 'plant_part_id_eia'
     ]
     connects_ferc1_eia = (
         # first merge in the EIA Master Unit List
         pd.merge(
             matches_best.reset_index()
-            [['record_id_ferc1', 'record_id_eia']],
+            [['record_id_ferc1', 'record_id_eia', 'match_type']],
             # we only want the identifying columns from the MUL
             plant_parts_true_df.reset_index()[mul_cols_to_grab],
             how='left',
             on=['record_id_eia'],
             validate='m:1'  # multiple FERC records can have the same EIA match
         )
-        .astype({"report_year": pd.Int64Dtype()})
-        # then merge in the FERC data
-        # we want the backbone of this table to be the steam records
-        # so we have all possible steam records, even the unmapped ones
+        # this is necessary in instances where the overrides don't have a record_id_eia
+        # i.e., they override to NO MATCH. These get merged in without a report_year,
+        # so we need to create one for them from the record_id.
+        .assign(report_year=lambda x: (
+            x.record_id_ferc1.str.extract(
+                r"(\d{4})")[0].astype('float').astype('Int64')))
+        # then merge in the FERC data we want the backbone of this table to be the
+        # steam records so we have all possible steam records, even the unmapped ones
         .merge(
             steam_df,
             how='outer',
@@ -1024,15 +1048,16 @@ def prettyify_best_matches(
         )
         .assign(
             opex_nonfuel=lambda x: (x.opex_production_total - x.opex_fuel),
-            report_date=lambda x: pd.to_datetime(x.report_year, format="%Y")
+            report_date=lambda x: pd.to_datetime(
+                x.report_year, format="%Y", errors='coerce')
         )
     )
 
     no_ferc = connects_ferc1_eia[
         (connects_ferc1_eia._merge == 'left_only')
         & (connects_ferc1_eia.record_id_eia.notnull())
-        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_hydro_'))
-        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_gnrt_plant_'))
+        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_hydro_', na=False))
+        & ~(connects_ferc1_eia.record_id_ferc1.str.contains('_gnrt_plant_', na=False))
     ]
     connects_ferc1_eia = connects_ferc1_eia.drop(columns=['_merge'])
     if not no_ferc.empty:
@@ -1047,12 +1072,16 @@ def prettyify_best_matches(
             warnings.warn(message)
             return no_ferc
         else:
-            warnings.warn(message)
+            logger.info(
+                "jsuk there are some FERC-EIA matches that aren't in the steam \
+                table but this is because they are linked to retired EIA generators.")
             # raise AssertionError(message)
+            warnings.warn(message)
 
     _log_match_coverage(connects_ferc1_eia)
     for match_type in ['all', 'overrides']:
         check_match_consistentcy(connects_ferc1_eia, train_df, match_type)
+
     return connects_ferc1_eia
 
 
@@ -1062,6 +1091,9 @@ def _log_match_coverage(connects_ferc1_eia):
     m_eia_years = connects_ferc1_eia[
         (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
         & (connects_ferc1_eia.record_id_eia.notnull())]
+    # get all records from just the EIA working years
+    r_eia_years = connects_ferc1_eia[
+        connects_ferc1_eia.report_date.dt.year.isin(eia_years)]
 
     fuel_type_coverage = (
         len(m_eia_years[m_eia_years.energy_source_code_1.notnull()])
@@ -1069,10 +1101,25 @@ def _log_match_coverage(connects_ferc1_eia):
     tech_type_coverage = (
         len(m_eia_years[m_eia_years.technology_description.notnull()])
         / len(m_eia_years))
+
+    def _get_subtable(table_name):
+        return r_eia_years[r_eia_years.record_id_ferc1.str.contains(f"{table_name}")]
+
+    def _get_match_pct(df):
+        return round((len(df[df['record_id_eia'].notna()]) / len(df) * 100), 1)
+
     logger.info(
         "Coverage for matches during EIA working years:\n"
         f"    Fuel type: {fuel_type_coverage:.01%}\n"
-        f"    Tech type: {tech_type_coverage:.01%}"
+        f"    Tech type: {tech_type_coverage:.01%}\n\n"
+        "Coverage for all steam table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('steam'))}\n\n"
+        f"Coverage for all small gen table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('gnrt_plant'))}\n\n"
+        f"Coverage for all hydro table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('hydro'))}\n\n"
+        f"Coverage for all pumped storage table records during EIA working years:\n"
+        f"    EIA matches: {_get_match_pct(_get_subtable('pumped'))}"
     )
 
 
