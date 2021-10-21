@@ -23,9 +23,11 @@ import pudl
 
 logger = logging.getLogger(__name__)
 
-CONNECT_COLS = ['plant_id_pudl',
-                'utility_id_pudl',
-                'report_date']
+CONNECT_COLS = [
+    'plant_id_pudl',
+    'utility_id_pudl',
+    'report_year'
+]
 
 SPLIT_COLS_STANDARD = [
     'total_fuel_cost',
@@ -130,7 +132,7 @@ class InputsManager():
                 self.deprish_eia.record_id_eia.notnull()]
             .pipe(pudl.helpers.convert_to_date)
             .astype({i: pd.Int64Dtype() for i in
-                     ['plant_id_pudl', 'utility_id_pudl', 'utility_id_ferc1']}
+                     ['plant_id_eia', 'utility_id_pudl', 'utility_id_ferc1']}
                     )
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
@@ -150,7 +152,9 @@ class InputsManager():
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
                 connect_deprish_to_eia.MUL_COLS
-                + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']])
+                + ['plant_id_pudl', 'total_fuel_cost',
+                   'net_generation_mwh', 'capacity_mw']]
+        )
 
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
@@ -204,19 +208,23 @@ class MatchMaker():
         level, we want a gut check of whether or not connects_all_deprish_ferc1
         was connected properly.
         """
+        # grab the plant_id from the merge columns
+        plant_id_col = next(
+            (s for s in CONNECT_COLS if 'plant_id_' in s), None)
         # there was a merge iindicator here and left df was the depreciation
         # data
         connected_plant_ids = candidate_matches_all[
-            candidate_matches_all._merge == 'both'].plant_id_pudl.unique()
+            candidate_matches_all._merge == 'both'][plant_id_col].unique()
         # how many plant_id_pudl's didn't get a corresponding FERC1 record
-        not_in_ferc1_plant_ids = (candidate_matches_all[
-            candidate_matches_all._merge == 'left_only']
-            .plant_id_pudl.unique())
+        not_in_ferc1_plant_ids = (
+            candidate_matches_all[candidate_matches_all._merge == 'left_only']
+            [plant_id_col].unique()
+        )
         # these are a subset of the not_in_ferc1_plant_ids that show up in the
         # steam table
         missing_plant_ids = (self.inputs.connects_ferc1_eia[
-            self.inputs.connects_ferc1_eia.plant_id_pudl.isin(
-                not_in_ferc1_plant_ids)].plant_id_pudl.unique())
+            self.inputs.connects_ferc1_eia[plant_id_col].isin(
+                not_in_ferc1_plant_ids)][plant_id_col].unique())
         logger.info(f"Matched plants:    {len(connected_plant_ids)}")
         logger.info(f"Not connected:       {len(not_in_ferc1_plant_ids)}")
         logger.info(f"Missing connections: {len(missing_plant_ids)}")
@@ -558,7 +566,7 @@ class Scaler(object):
         scaled_df = pd.concat([same_true, same_smol, same_beeg])
 
         self.test_same_true_fraction_owned(same_true)
-        assert(len(scaled_df) == len(self.matches_df))
+        #assert(len(scaled_df) == len(self.matches_df))
         return scaled_df
 
     def scale_by_ownership_fraction(self):

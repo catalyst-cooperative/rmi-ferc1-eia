@@ -30,14 +30,14 @@ import pudl_rmi
 logger = logging.getLogger(__name__)
 
 
-INT_IDS = ['utility_id_ferc1', 'utility_id_pudl',
+INT_IDS = ['utility_id_ferc1', 'utility_id_pudl', 'plant_id_eia',
            'plant_id_pudl', 'report_year']
 
 NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
 
 IDX_COLS_DEPRISH = [
     'report_date',
-    'plant_id_pudl',
+    'plant_id_eia',
     'plant_part_name',
     'ferc_acct',
     'utility_id_pudl',
@@ -131,7 +131,7 @@ class Transformer:
             clobber (bool): if True and dataframe has already been generated,
                 regenergate the datagframe.
             agg_cols (iterable): list of column names to aggregate on. Default
-                is None, which defualts to: ['report_date', 'plant_id_pudl',
+                is None, which defualts to: ['report_date', 'plant_id_eia',
                 'plant_part_name', 'ferc_acct', 'utility_id_pudl',
                 'data_source', 'line_id', 'common', 'utility_name_ferc1']
 
@@ -477,17 +477,17 @@ class Transformer:
         """
         known_dupes = [
             # KCP&L plants
-            294, 306, 314, 534, 263, 335, 780, 389,
+            2079, 6065, 1241, 2080, 6065, 6068, 2098, 2094,
             # Wisconsin Electric Power Company
-            756, 759, 775, 829, 839, 468,
+            1769, 1778, 55742, 1784, 1786,
             # Kansas City Empire
-            458
+            56456
         ]
-        # grab the duplicates (only those that have plant_id_pudl's)
+        # grab the duplicates (only those that have plant_id_eia's)
         # because those are the atomic records we will process
         dupes = tidy_df[
             tidy_df.duplicated(subset=IDX_COLS_DEPRISH, keep=False)
-            & (tidy_df.plant_id_pudl.notnull())
+            & (tidy_df.plant_id_eia.notnull())
         ]
         # we know there are a fair amount of duplicates from FERC.
         # there is nothing to do for these records besides squishing
@@ -495,7 +495,7 @@ class Transformer:
         # and we know about some duplicates that we are trying to fix
         unknown_dupes = dupes[
             (dupes.data_source != 'FERC')
-            & (~dupes.plant_id_pudl.isin(known_dupes))
+            & (~dupes.plant_id_eia.isin(known_dupes))
         ]
         if not unknown_dupes.empty:
             self.unknown_dupes = unknown_dupes
@@ -1014,13 +1014,13 @@ def assign_line_id(df):
     """Make a composite id column."""
     df = df.assign(
         line_id=lambda x:
-        x.report_date.dt.year.astype(pd.Int64Dtype()).map(str) + "_" +
-        x.plant_id_pudl.map(str) + "_" +
-        x.plant_part_name.map(str).str.lower() + "_" +
-        x.ferc_acct_name.fillna("").str.lower() + "_" +
-        # x.note.fillna("") + "_" +
-        x.utility_id_pudl.map(str) + "_" +
-        x.data_source.fillna("")
+            x.report_date.dt.year.astype(pd.Int64Dtype()).map(str) + "_" +
+            x.plant_id_eia.map(str) + "_" +
+            x.plant_part_name.map(str).str.lower() + "_" +
+            x.ferc_acct_name.fillna("").str.lower() + "_" +
+            # x.note.fillna("") + "_" +
+            x.utility_id_pudl.map(str) + "_" +
+            x.data_source.fillna("")
     )
     return df
 
@@ -1130,7 +1130,7 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
                 idx_cols=['line_id', 'utility_name_ferc1'] +
                 [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']),
             plants_pudl,
-            on=['plant_id_pudl', 'report_date'],
+            on=['plant_id_eia', 'report_date'],
             how='left',
             validate='m:1',
             suffixes=('', '_eia')
@@ -1170,7 +1170,7 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
 
 def get_plant_pudl_info(pudl_out):
     """
-    Grab info about plants, aggregated to plant_id_pudl/report_date.
+    Grab info about plants, aggregated to plant_id_eia/report_date.
 
     Args:
         pudl_out (pudl.output.pudltabl.PudlTabl): A PUDL output object that
@@ -1180,10 +1180,10 @@ def get_plant_pudl_info(pudl_out):
         pudl_out.gens_eia860()
         .assign(count='place_holder')
         .sort_values(['plant_name_eia', 'state'])
-        .groupby(['plant_id_pudl', 'report_date'], as_index=False)
+        .groupby(['plant_id_eia', 'report_date'], as_index=False)
         # Must use .join because x.unique() arrays are not hashable
         .agg(
-            {'plant_id_eia':
+            {'plant_id_pudl':
              lambda x: '; '.join([str(x) for x in x.unique() if x]),
              'generator_id': lambda x: '; '.join(x.unique()),
              'count': lambda x: x.count(),
@@ -1195,7 +1195,7 @@ def get_plant_pudl_info(pudl_out):
              'fuel_type_code_pudl':
              lambda x: '; '.join([x for x in x.unique() if x]),
              })
-        .astype({'plant_id_pudl': 'Int64'})
+        .astype({'plant_id_eia': 'Int64'})
     )
     return plants_pudl
 
@@ -1239,8 +1239,7 @@ def make_default_common_assn(file_path_deprish):
     based on IDX_COLS_COMMON.
     """
     transformer = Transformer(
-        extract_df=Extractor(file_path=file_path_deprish,
-                             sheet_name=0).execute()
+        extract_df=Extractor().execute()
     )
     # assume common plant records based on the plant_part_name
     deprish_df = (
@@ -1253,14 +1252,14 @@ def make_default_common_assn(file_path_deprish):
         )
     )
 
-    # if there is no plant_id_pudl, there will be no plant for the common
+    # if there is no plant_id_eia, there will be no plant for the common
     # record to be allocated across, so for now we need to assume these
     # records are not common
     deprish_c_df = deprish_df.loc[
-        deprish_df.common & deprish_df.plant_id_pudl.notnull()
+        deprish_df.common & deprish_df.plant_id_eia.notnull()
     ]
     deprish_df = deprish_df.loc[
-        ~deprish_df.common | deprish_df.plant_id_pudl.isnull()]
+        ~deprish_df.common | deprish_df.plant_id_eia.isnull()]
 
     common_assn = (
         pd.merge(
