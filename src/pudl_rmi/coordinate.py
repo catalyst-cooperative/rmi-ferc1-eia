@@ -235,13 +235,30 @@ class Output():
         """
         Gotta catch em all. Get all of the RMI outputs.
 
-        Get or regenerate all of the RMI outputs.
+        Get or regenerate all of the RMI outputs. This method is mostly for
+        testing purposes because it returns all 5 outputs. To grab individual
+        outputs, it is recommended to use the output-specific method.
 
         Args:
             clobber_all (boolean): Deafult is False, which will grab the
                 outputs if they already exist, or generate them if they don't
                 exist. True will re-generate the outputs whether they exist on
                 disk. Re-generating everything will take ~15 minutes.
+
+        Returns:
+            pandas.DataFrame: EIA plant-part list - table of "plant-parts"
+                which are groups of aggregated EIA generators that coorespond
+                to portions of plants from generators to fuel types to whole
+                plants.
+            pandas.DataFrame: a table of depreciation studies. These records
+                have been cleaned and standardized with plant's "common" lines
+                allocated across their cooresponding plant records.
+            pandas.DataFrame: a table of the connection between the
+                depreciation studies and the EIA plant-parts list.
+            pandas.DataFrame: a table of the connection between the FERC1
+                plants and the EIA plant-parts list.
+            pandas.DataFrame: a table of the conneciton between the
+                depreciation studies and the FERC1 plants.
         """
         ppl = self.grab_plant_part_list(clobber=clobber_all)
         d = self.grab_deprish(clobber=clobber_all)
