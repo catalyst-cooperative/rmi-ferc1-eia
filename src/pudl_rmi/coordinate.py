@@ -105,7 +105,6 @@ class Output():
         self,
         clobber=False,
         clobber_ppl=False,
-        clobber_d=False
     ):
         """
         Generate or grab the connection between the depreciation data and EIA.
@@ -121,11 +120,10 @@ class Output():
                 depreciation data whether or not the output is already pickled.
                 Default is False.
         """
-        clobber_any = any([clobber, clobber_ppl, clobber_d])
+        clobber_any = any([clobber, clobber_ppl])
         if not pudl_rmi.FILE_PATH_DEPRISH_EIA.is_file() or clobber_any:
             deprish_match_df = pudl_rmi.connect_deprish_to_eia.execute(
                 plant_parts_df=self.get_plant_part_list(clobber=clobber_ppl),
-                # deprish_df=self.get_deprish(clobber=clobber_d),
             )
             deprish_match_df.to_pickle(pudl_rmi.FILE_PATH_DEPRISH_EIA)
         else:

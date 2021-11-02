@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 CONNECT_COLS = [
     'plant_id_pudl',
-    'utility_id_pudl',
+    # 'utility_id_pudl',
     'report_year'
 ]
 
@@ -143,17 +143,23 @@ class InputsManager():
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
         # don't show up in the MUL_COLS
+        cols_ppl = (
+            connect_deprish_to_eia.MUL_COLS
+            + ['plant_id_pudl', 'total_fuel_cost',
+               'net_generation_mwh', 'capacity_mw']
+        )
         cols_to_use_deprish_eia = (
             ['record_id_eia'] +
             [c for c in self.connects_deprish_eia.columns
-             if c not in connect_deprish_to_eia.MUL_COLS])
+             if c not in cols_ppl])
 
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
                 connect_deprish_to_eia.MUL_COLS
                 + ['plant_id_pudl', 'total_fuel_cost',
-                   'net_generation_mwh', 'capacity_mw']]
+                   'net_generation_mwh', 'capacity_mw']],
+            on=['record_id_eia']
         )
 
     def prep_inputs(self, clobber=False):
@@ -248,8 +254,10 @@ class MatchMaker():
             unit list records associated).
         """
         candidate_matches_all = pd.merge(
-            self.inputs.connects_deprish_eia,
-            self.inputs.connects_ferc1_eia,
+            self.inputs.connects_deprish_eia.pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
+            self.inputs.connects_ferc1_eia.pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
             on=CONNECT_COLS,
             suffixes=('_deprish', '_ferc1'),
             how='left', indicator=True

@@ -73,7 +73,7 @@ def execute(pudl_out, plant_parts_df):
         matches_best,
         train_df=inputs.train_df,
         plant_parts_true_df=inputs.plant_parts_true_df,
-        steam_df=inputs.steam_df
+        steam_df=inputs.all_plants_ferc1_df
     )
     return connects_ferc1_eia
 
@@ -993,7 +993,7 @@ class MatchManager:
         logger.info("Get the top scoring match for each FERC1 steam record.")
         matches_best_df = (
             self.calc_best_matches(self.matches_model, .02)
-            # .pipe(self.override_best_match_with_training_df, self.train_df)
+            .pipe(self.override_best_match_with_training_df, self.train_df)
         )
         return matches_best_df
 

@@ -40,7 +40,7 @@ MUL_COLS = [
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned', 'ownership_dupe'
+    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status'
 ]
 
 MUL_RENAME = {
