@@ -1,8 +1,8 @@
 """
 Coordinate the acquisition and generation of RMI's interrelated outputs.
 
-The outputs in this repo are depended on one another. See `README` for a
-diagram of the realtions.
+The outputs in this repo are dependent on one another. See `README` for a
+diagram of the relations.
 """
 
 import logging
@@ -46,7 +46,7 @@ class Output():
                 f"Frequency of `pudl_out` must be `AS` but got {pudl_out.freq}"
             )
 
-    def get_plant_part_list(self, clobber=False):
+    def grab_plant_part_list(self, clobber=False):
         """
         Get the master unit list; generate it or get if from a file.
 
@@ -80,9 +80,9 @@ class Output():
             )
         return plant_parts_eia
 
-    def get_deprish(self, clobber=False):
+    def grab_deprish(self, clobber=False):
         """
-        Generate of grab the cleaned deprecaition studies.
+        Generate or grab the cleaned deprecaition studies.
 
         Args:
             clobber (boolean): True if you want to regenerate the depreciation
@@ -101,11 +101,10 @@ class Output():
             deprish_df = pd.read_pickle(pudl_rmi.FILE_PATH_DEPRISH)
         return deprish_df
 
-    def get_deprish_to_eia(
+    def grab_deprish_to_eia(
         self,
         clobber=False,
-        clobber_ppl=False,
-        clobber_d=False
+        clobber_plant_part_list=False,
     ):
         """
         Generate or grab the connection between the depreciation data and EIA.
@@ -114,25 +113,22 @@ class Output():
             clobber (boolean): True if you want to regenerate the connection
                 between the depreciation data and EIA whether or not the output
                 is already pickled. Default is False.
-            clobber_ppl (boolean): True if you want to regenerate the master
-                unit list whether or not the output is already pickled. Default
-                is False.
-            clobber_d (boolean): True if you want to regenerate the
-                depreciation data whether or not the output is already pickled.
-                Default is False.
+            clobber_plant_part_list (boolean): True if you want to regenerate
+                the masterunit list whether or not the output is already
+                pickled. Default is False.
         """
-        clobber_any = any([clobber, clobber_ppl, clobber_d])
+        clobber_any = any([clobber, clobber_plant_part_list])
         if not pudl_rmi.FILE_PATH_DEPRISH_EIA.is_file() or clobber_any:
             deprish_match_df = pudl_rmi.connect_deprish_to_eia.execute(
-                plant_parts_df=self.get_plant_part_list(clobber=clobber_ppl),
-                # deprish_df=self.get_deprish(clobber=clobber_d),
+                plant_parts_df=self.grab_plant_part_list(
+                    clobber=clobber_plant_part_list)
             )
             deprish_match_df.to_pickle(pudl_rmi.FILE_PATH_DEPRISH_EIA)
         else:
             deprish_match_df = pd.read_pickle(pudl_rmi.FILE_PATH_DEPRISH_EIA)
         return deprish_match_df
 
-    def get_ferc1_to_eia(self, clobber=False, clobber_ppl=False):
+    def grab_ferc1_to_eia(self, clobber=False, clobber_plant_part_list=False):
         """
         Generate or grab a connection between FERC1 and EIA.
 
@@ -142,12 +138,12 @@ class Output():
         Args:
             clobber (boolean): True if you want to regenerate the master unit
                 list whether or not it is saved at the file_path_mul
-            clobber_ppl (boolean): Generate and cache a new interim
+            clobber_plant_part_list (boolean): Generate and cache a new interim
                 output of the EIA plant part list and generate a new version of
                 the depreciaiton to FERC1 output. Default is False.
         """
         # if any of the clobbers are on, we want to regenerate the main output
-        clobber_any = any([clobber, clobber_ppl])
+        clobber_any = any([clobber, clobber_plant_part_list])
         if not pudl_rmi.FILE_PATH_FERC1_EIA.is_file() or clobber_any:
             logger.info(
                 "FERC to EIA granular connection not found at "
@@ -155,7 +151,7 @@ class Output():
             )
             connects_ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
                 self.pudl_out,
-                self.get_plant_part_list(clobber=clobber_ppl)
+                self.grab_plant_part_list(clobber=clobber_plant_part_list)
             )
             # export
             connects_ferc1_eia.to_pickle(pudl_rmi.FILE_PATH_FERC1_EIA)
@@ -167,12 +163,12 @@ class Output():
             connects_ferc1_eia = pd.read_pickle(pudl_rmi.FILE_PATH_FERC1_EIA)
         return connects_ferc1_eia
 
-    def get_deprish_to_ferc1(
+    def grab_deprish_to_ferc1(
         self,
         clobber=False,
-        clobber_ppl=False,
-        clobber_de=False,
-        clobber_fe=False
+        clobber_plant_part_list=False,
+        clobber_deprish_eia=False,
+        clobber_ferc_eia=False
     ):
         """
         Generate or grab a connection between deprecaiton data and FERC1.
@@ -185,14 +181,14 @@ class Output():
                 exists on disk. This does not necessarily regenerate the
                 interim inputs - see other `clobber_` arguments. Default is
                 False.
-            clobber_ppl (boolean): Generate and cache a new interim
+            clobber_plant_part_list (boolean): Generate and cache a new interim
                 output of the EIA plant part list and generate a new version of
                 the depreciaiton to FERC1 output. Default is False.
-            clobber_de (boolean): Generate and cache a new interim output of
+            clobber_deprish_eia (boolean): Generate and cache a new interim output of
                 the connection between EIA and depreciation data and generate
                 a new version of the depreciaiton to FERC1 output. Default is
                 False.
-            clobber_fe (boolean): Generate and cache a new interim output of
+            clobber_ferc_eia (boolean): Generate and cache a new interim output of
                 the connection between FERC and EIA and generate a new version
                 of the depreciaiton to FERC1 output. Default is False.
 
@@ -202,16 +198,24 @@ class Output():
             in the depreciaiton studies.
         """
         # if any of the clobbers are on, we want to regenerate the main output
-        clobber_any = any([clobber, clobber_ppl, clobber_de, clobber_fe])
+        clobber_any = any([
+            clobber,
+            clobber_plant_part_list,
+            clobber_deprish_eia,
+            clobber_ferc_eia
+        ])
         if not pudl_rmi.FILE_PATH_DEPRISH_FERC1.is_file() or clobber_any:
             logger.info(
                 "Deprish to FERC1 granular connection not found at "
                 f"{pudl_rmi.FILE_PATH_DEPRISH_FERC1}. Generating a new output."
             )
             connects_deprish_ferc1 = pudl_rmi.connect_deprish_to_ferc1.execute(
-                plant_parts_eia=self.get_plant_part_list(clobber=clobber_ppl),
-                deprish_eia=self.get_deprish_to_eia(clobber=clobber_de),
-                ferc1_to_eia=self.get_ferc1_to_eia(clobber=clobber_fe),
+                plant_parts_eia=self.grab_plant_part_list(
+                    clobber=clobber_plant_part_list),
+                deprish_eia=self.grab_deprish_to_eia(
+                    clobber=clobber_deprish_eia),
+                ferc1_to_eia=self.grab_ferc1_to_eia(
+                    clobber=clobber_ferc_eia),
                 clobber=clobber
             )
             # export
@@ -227,7 +231,7 @@ class Output():
             )
         return connects_deprish_ferc1
 
-    def get_all(self, clobber_all=False):
+    def grab_all(self, clobber_all=False):
         """
         Gotta catch em all. Get all of the RMI outputs.
 
@@ -239,9 +243,9 @@ class Output():
                 exist. True will re-generate the outputs whether they exist on
                 disk. Re-generating everything will take ~15 minutes.
         """
-        ppl = self.get_plant_part_list(clobber=clobber_all)
-        d = self.get_deprish(clobber=clobber_all)
-        de = self.get_deprish_to_eia(clobber=clobber_all)
-        fe = self.get_ferc1_to_eia(clobber=clobber_all)
-        df = self.get_deprish_to_ferc1(clobber=clobber_all)
+        ppl = self.grab_plant_part_list(clobber=clobber_all)
+        d = self.grab_deprish(clobber=clobber_all)
+        de = self.grab_deprish_to_eia(clobber=clobber_all)
+        fe = self.grab_ferc1_to_eia(clobber=clobber_all)
+        df = self.grab_deprish_to_ferc1(clobber=clobber_all)
         return ppl, d, de, fe, df

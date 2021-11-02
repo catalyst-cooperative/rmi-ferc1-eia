@@ -1042,11 +1042,9 @@ def get_common_assn():
         multiple main records and thus are repeted.
     """
     # grab the mannually labeled common records
-    path_common_dc = (
-        pathlib.Path().cwd().parent / 'outputs' / 'deprish_cleaned.xlsx')
     common_mannual = (
         pd.read_excel(
-            path_common_dc,
+            pudl_rmi.FILE_PATH_DEPRISH_COMMON_LABELS,
             skiprows=0,
             sheet_name='common_labeling',
             dtype={i: pd.Int64Dtype() for i in INT_IDS},

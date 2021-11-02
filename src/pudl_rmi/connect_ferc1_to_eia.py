@@ -59,7 +59,7 @@ def execute(pudl_out, plant_parts_df):
     coordinate the connection. May be temporary.
     """
     inputs = InputManager(
-        pudl_rmi.FILE_PATH_TRAINING, pudl_out, plant_parts_df
+        pudl_rmi.FILE_PATH_TRAIN_FERC_EIA, pudl_out, plant_parts_df
     )
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
