@@ -100,8 +100,6 @@ class InputsManager():
         Initialize input manager for connecting depreciation to FERC1.
 
         Args:
-            file_path_mul (path-like): file path to the stored pickled
-                EIA master unit list
             file_path_deprish (path-like): path to the excel workbook which
                contains depreciation data.
             file_path_ferc1_eia (path-like): file path to the pickled table
