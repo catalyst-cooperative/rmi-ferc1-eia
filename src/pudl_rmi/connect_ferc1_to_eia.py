@@ -46,7 +46,7 @@ from sklearn.model_selection import KFold  # , cross_val_score
 import pudl
 import pudl.helpers
 import pudl_rmi
-from pudl_rmi import make_plant_parts_eia
+from pudl_rmi import make_plant_parts_eia, connect_deprish_to_eia
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def execute(pudl_out, plant_parts_df):
     coordinate the connection. May be temporary.
     """
     inputs = InputManager(
-        pudl_rmi.FILE_PATH_TRAIN_FERC_EIA, pudl_out, plant_parts_df
+        pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_df
     )
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
@@ -993,8 +993,8 @@ def prettyify_best_matches(
     comparison vectors (the floats between 0 and 1 that compare the two
     columns from each dataset).
     """
-    # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
-    mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
+    # if utility_id_pudl is not in the `PPL_COLS`,  we need to in include it
+    ppl_cols_to_grab = connect_deprish_to_eia.PPL_COLS + [
         'plant_id_pudl', 'total_fuel_cost', 'net_generation_mwh',
         'capacity_mw', 'plant_part_id_eia'
     ]
@@ -1004,7 +1004,7 @@ def prettyify_best_matches(
             matches_best.reset_index()
             [['record_id_ferc1', 'record_id_eia']],
             # we only want the identifying columns from the MUL
-            plant_parts_true_df.reset_index()[mul_cols_to_grab],
+            plant_parts_true_df.reset_index()[ppl_cols_to_grab],
             how='left',
             on=['record_id_eia'],
             validate='m:1'  # multiple FERC records can have the same EIA match

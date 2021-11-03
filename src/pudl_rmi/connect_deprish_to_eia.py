@@ -34,7 +34,7 @@ STRINGS_TO_CLEAN = {
 
 RESTRICT_MATCH_COLS = ['plant_id_pudl', 'utility_id_pudl', 'report_year']
 
-MUL_COLS = [
+PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
     'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
@@ -200,7 +200,7 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             key_deprish=key_deprish, key_mul=key_mul,
             threshold=75),
         mul_df.drop_duplicates(
-            subset=['report_year', 'plant_name_new'])[MUL_COLS],
+            subset=['report_year', 'plant_name_new'])[PPL_COLS],
         left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
         right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
         # rename the ids so that we have the "true granularity"
@@ -272,7 +272,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
               list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
-                                           for c in MUL_COLS])))
+                                           for c in PPL_COLS])))
     )
 
     first_cols = [
@@ -288,7 +288,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
             deprish_df[RESTRICT_MATCH_COLS].drop_duplicates(),
             on=RESTRICT_MATCH_COLS)
-        .pipe(pudl.helpers.organize_cols, MUL_COLS)
+        .pipe(pudl.helpers.organize_cols, PPL_COLS)
     )
     return deprish_match, possible_matches_mul
 

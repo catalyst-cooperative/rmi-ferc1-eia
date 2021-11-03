@@ -91,11 +91,11 @@ class Extractor:
         """Turn excel-based depreciation data into a dataframe."""
         logger.info(
             "Reading the depreciation data from "
-            f"{pudl_rmi.FILE_PATH_DEPRISH_RAW}"
+            f"{pudl_rmi.PATH_DEPRISH_RAW_XLSX}"
         )
         return (
             pd.read_excel(
-                pudl_rmi.FILE_PATH_DEPRISH_RAW,
+                pudl_rmi.PATH_DEPRISH_RAW_XLSX,
                 skiprows=self.skiprows,
                 sheet_name=self.sheet_name,
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},
@@ -1044,7 +1044,7 @@ def get_common_assn():
     # grab the mannually labeled common records
     common_mannual = (
         pd.read_excel(
-            pudl_rmi.FILE_PATH_DEPRISH_COMMON_LABELS,
+            pudl_rmi.DEPRISH_COMMON_LABELS_XLSX,
             skiprows=0,
             sheet_name='common_labeling',
             dtype={i: pd.Int64Dtype() for i in INT_IDS},

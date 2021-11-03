@@ -135,21 +135,21 @@ class InputsManager():
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
         # we are going to merge the master unit list into this output,
-        # because we want all of the id columns from MUL_COLS.
+        # because we want all of the id columns from PPL_COLS.
         # There are some overlapping columns. We really only want to
         # merge on the 'record_id_eia' and we trust the master unit list
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
-        # don't show up in the MUL_COLS
+        # don't show up in the PPL_COLS
         cols_to_use_deprish_eia = (
             ['record_id_eia'] +
             [c for c in self.connects_deprish_eia.columns
-             if c not in connect_deprish_to_eia.MUL_COLS])
+             if c not in connect_deprish_to_eia.PPL_COLS])
 
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
-                connect_deprish_to_eia.MUL_COLS
+                connect_deprish_to_eia.PPL_COLS
                 + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']])
 
     def prep_inputs(self, clobber=False):
