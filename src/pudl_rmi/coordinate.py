@@ -263,7 +263,8 @@ def is_path_a_good_file(file_path: Path) -> bool:
 
     Raises:
         AssertionError: If the path exists but is not a file - i.e. if the path
-            is a directory,
+            is a directory, this assertion will be raised so the directory
+            isn't wiped out.
     """
     if not file_path.is_file() and file_path.exists():
         raise AssertionError(
