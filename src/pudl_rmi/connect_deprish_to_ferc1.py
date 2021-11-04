@@ -19,7 +19,6 @@ import pandas as pd
 import pathlib
 
 import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 import pudl
 
 logger = logging.getLogger(__name__)
@@ -29,9 +28,9 @@ CONNECT_COLS = ['plant_id_pudl',
                 'report_date']
 
 SPLIT_COLS_STANDARD = [
-    'total_fuel_cost_deprish',
-    'net_generation_mwh_deprish',
-    'capacity_mw_deprish',
+    'total_fuel_cost',
+    'net_generation_mwh',
+    'capacity_mw',
 ]
 """
 list: the standard columns to split ferc1 data columns to be used in
@@ -52,7 +51,33 @@ for more details.
 """
 
 
-class InputsCompiler():
+def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
+    """
+    Connect depreciation data to FERC1 via EIA and scale to depreciation.
+
+    Args:
+        plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        deprish_eia (pandas.DataFrame): table of the connection between the
+            depreciation studies and the EIA plant-parts list.
+        ferc1_to_eia (pandas.DataFrame): a table of the connection between
+            the FERC1 plants and the EIA plant-parts list.
+        clobber (boolean):
+    """
+    inputs = InputsManager(
+        plant_parts_eia=plant_parts_eia,
+        deprish_eia=deprish_eia,
+        ferc1_to_eia=ferc1_to_eia
+    )
+
+    scaler = Scaler(MatchMaker(inputs))
+    scaled_df = scaler.scale()
+    return scaled_df
+
+
+class InputsManager():
     """
     Input manager for matches between FERC 1 and depreciation data.
 
@@ -70,48 +95,42 @@ class InputsCompiler():
         columns (values)
     """
 
-    def __init__(self, file_path_mul, file_path_steam_ferc1,
-                 file_path_ferc1_eia, file_path_deprish_eia, pudl_out):
+    def __init__(
+        self,
+        plant_parts_eia,
+        deprish_eia,
+        ferc1_to_eia
+    ):
         """
         Initialize input manager for connecting depreciation to FERC1.
 
         Args:
-            file_path_mul (path-like): file path to the EIA master unit list
-            file_path_steam_ferc1 (path-like): file path to the compiled FERC1
-                steam table
-            file_path_ferc1_eia (path-like): file path to the table connecting
-                FERC1 steam records to the master unit list
-            file_path_deprish_eia (path-like): file path to the table
-                connecting the depreciation records to the EIA master unit list
+            plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+                "plant-parts" which are groups of aggregated EIA generators
+                that coorespond to portions of plants from generators to fuel
+                types to whole plants.
+            deprish_eia (pandas.DataFrame): table of the connection between the
+                depreciation studies and the EIA plant-parts list.
+            ferc1_to_eia (pandas.DataFrame): a table of the connection between
+                the FERC1 plants and the EIA plant-parts list.
         """
-        self.plant_parts_eia_raw = (
-            make_plant_parts_eia.get_master_unit_list_eia(
-                file_path_mul,
-                pudl_out
-            )
-        )
-        # TODO: This is a bit of a placeholder riht now. I'd like to make
-        # functions like the get_master_unit_list_eia for each of these
-        # components. Right now, the pickled outputs are expected to be there.
-        self.connects_ferc1_eia = pd.read_pickle(
-            file_path_ferc1_eia, compression='gzip')
-        self.connects_deprish_eia_raw = pd.read_pickle(
-            file_path_deprish_eia, compression='gzip')
-
+        self.plant_parts_eia = plant_parts_eia
+        self.deprish_eia = deprish_eia
+        self.connects_ferc1_eia = ferc1_to_eia
         # store a bool which will indicate whether the inputs have been prepped
         self.inputs_prepped = False
 
     def _prep_plant_parts_eia(self):
         self.plant_parts_eia = (
-            self.plant_parts_eia_raw.reset_index()
+            self.plant_parts_eia.reset_index()
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
 
     def _prep_connects_deprish_eia(self):
         self.connects_deprish_eia = (
             # we only want candidate matches that have actually been connected
             # to the MUL
-            self.connects_deprish_eia_raw[
-                self.connects_deprish_eia_raw.record_id_eia.notnull()]
+            self.deprish_eia[
+                self.deprish_eia.record_id_eia.notnull()]
             .pipe(pudl.helpers.convert_to_date)
             .astype({i: pd.Int64Dtype() for i in
                      ['plant_id_pudl', 'utility_id_pudl', 'utility_id_ferc1']}
@@ -119,43 +138,34 @@ class InputsCompiler():
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
         # we are going to merge the master unit list into this output,
-        # because we want all of the id columns from MUL_COLS.
+        # because we want all of the id columns from PPL_COLS.
         # There are some overlapping columns. We really only want to
         # merge on the 'record_id_eia' and we trust the master unit list
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
-        # don't show up in the MUL_COLS
+        # don't show up in the PPL_COLS
         cols_to_use_deprish_eia = (
             ['record_id_eia'] +
             [c for c in self.connects_deprish_eia.columns
-             if c not in connect_deprish_to_eia.MUL_COLS])
+             if c not in connect_deprish_to_eia.PPL_COLS])
 
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
-                connect_deprish_to_eia.MUL_COLS
+                connect_deprish_to_eia.PPL_COLS
                 + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']])
-
-    def _prep_info_from_parts_compiler_eia(self):
-        """
-        Prepare some info from make_plant_parts_eia.CompilePlantParts.
-
-        We need a few things from the class that generates the master unit
-        list; mostly info about the identifying columns for the plant parts.
-        """
-        # we need a dictionary of plant part named (keys) to their
-        # corresponding id columns (values). parts_compilers has the inverse of
-        # that sowe are just going to swap the ks and vs
-        self.parts_to_ids = (
-            pudl.analysis.plant_parts_eia.make_parts_to_ids_dict()
-        )
 
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
         # for later inputs
         if not self.inputs_prepped or clobber:
-            self._prep_info_from_parts_compiler_eia()
+            # we need a dictionary of plant part named (keys) to their
+            # corresponding id columns (values). parts_compilers has the
+            # inverse of that sowe are just going to swap the ks and vs
+            self.parts_to_ids = (
+                pudl.analysis.plant_parts_eia.make_parts_to_ids_dict()
+            )
 
             self._prep_plant_parts_eia()
             self._prep_connects_deprish_eia()
@@ -516,6 +526,9 @@ class Scaler(object):
         """
         Initialize Scaler.
 
+        TODO: Add explicit arguments for the input matches_df into methods
+        instead of accessing the cached df.
+
         Args:
             match_maker (instance): instance of MatchMaker. If `matches_df` has
                 not been generated, then `match()` will be run in this method.
@@ -548,6 +561,7 @@ class Scaler(object):
         scaled_df = pd.concat([same_true, same_smol, same_beeg])
 
         self.test_same_true_fraction_owned(same_true)
+        assert(len(scaled_df) == len(self.matches_df))
         return scaled_df
 
     def scale_by_ownership_fraction(self):

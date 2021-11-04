@@ -21,8 +21,9 @@ from openpyxl import load_workbook
 from xlrd import XLRDError
 
 import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
-import pudl_rmi.deprish as deprish
 import pudl
+import pudl_rmi
+from pudl_rmi import deprish
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ STRINGS_TO_CLEAN = {
 
 RESTRICT_MATCH_COLS = ['plant_id_pudl', 'utility_id_pudl', 'report_year']
 
-MUL_COLS = [
+PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
     'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
@@ -54,7 +55,7 @@ to fuzzy match with all possible MUL records names but only use the true
 granualries."""
 
 IDX_DEPRISH_COLS = [
-    'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1', 'state',
+    'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1',
     'plant_id_pudl', 'plant_part_name', 'report_year']
 
 ###############################################################################
@@ -62,8 +63,7 @@ IDX_DEPRISH_COLS = [
 ###############################################################################
 
 
-def prep_deprish(file_path_deprish, plant_parts_df,
-                 sheet_name_deprish,  key_deprish):
+def prep_deprish(plant_parts_df, key_deprish):
     """
     Prep the depreciation dataframe for use in match_merge.
 
@@ -72,36 +72,37 @@ def prep_deprish(file_path_deprish, plant_parts_df,
     """
     # we could grab the output here instead of the input file...
     deprish_df = (
-        deprish.Transformer(
-            deprish.Extractor(file_path=file_path_deprish,
-                              sheet_name=sheet_name_deprish).execute())
+        deprish.Transformer(deprish.Extractor().execute())
         .execute(agg_cols=[
             x for x in deprish.IDX_COLS_DEPRISH if x not in ['ferc_acct']] +
-            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1',
-             'state'])
+            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1'])
         .assign(report_year=lambda x: x.report_date.dt.year)
+        .astype({'report_year': pd.Int64Dtype()})  # bc it isnt an eia col
         .dropna(subset=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
     )
-    logger.info("we've got the deprish_df now..")
 
     deprish_df.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
         deprish_df.loc[:, key_deprish], str_map=STRINGS_TO_CLEAN)
-
     # because we are comparing to the EIA-based master unit list, we want to
     # only include records which are associated with plant_id_pudl's that are
     # in the master unit list.
-    deprish_ids = (pd.merge(
+    deprish_ids = pd.merge(
         deprish_df,
-        plant_parts_df[RESTRICT_MATCH_COLS].drop_duplicates().dropna(),
-        how='outer', indicator=True, on=RESTRICT_MATCH_COLS)
+        plant_parts_df[RESTRICT_MATCH_COLS]
+        .drop_duplicates().astype({'report_year': pd.Int64Dtype()}),
+        how='outer',
+        indicator=True,
+        on=RESTRICT_MATCH_COLS,
+        validate='m:1'
     )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == 'both']
         .drop_duplicates(subset=['plant_part_name', 'report_date'])
         # there are some records in the depreciation df that have no
         # names.... so they've got to go
-        .dropna(subset=['plant_part_name'])
+        .dropna(subset=['plant_part_name', '_merge'])
+        .drop(columns=['_merge'])
         .pipe(pudl.helpers.convert_cols_dtypes, 'depreciation')
     )
     return deprish_ids
@@ -113,9 +114,12 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
     # RESTRICT_MATCH_COLS
     options_index = (deprish_df[RESTRICT_MATCH_COLS].drop_duplicates()
                      .set_index(RESTRICT_MATCH_COLS).index)
-    plant_parts_df = plant_parts_df.set_index(
-        RESTRICT_MATCH_COLS).loc[options_index].reset_index()
-
+    plant_parts_df = (
+        plant_parts_df
+        .reset_index()  # convert the record_id_eia index to a column
+        .set_index(RESTRICT_MATCH_COLS).loc[options_index]
+        .reset_index())
+    plant_parts_df.record_id_eia
     plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)
     return plant_parts_df
@@ -195,8 +199,8 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             deprish_df, mul_df,
             key_deprish=key_deprish, key_mul=key_mul,
             threshold=75),
-        mul_df.reset_index().drop_duplicates(
-            subset=['report_year', 'plant_name_new'])[MUL_COLS],
+        mul_df.drop_duplicates(
+            subset=['report_year', 'plant_name_new'])[PPL_COLS],
         left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
         right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
         # rename the ids so that we have the "true granularity"
@@ -248,27 +252,19 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
     return deprish_match_full
 
 
-def match_deprish_eia(file_path_mul, file_path_deprish,
-                      sheet_name_deprish, sheet_name_output):
+def match_deprish_eia(plant_parts_df, sheet_name_output):
     """Prepare the depreciation and master unit list and match on name cols."""
     key_deprish = 'plant_part_name'
     key_mul = 'plant_name_new'
-    logger.info('Grab or generate master unit list.')
-    plant_parts_df = (
-        make_plant_parts_eia.get_master_unit_list_eia(file_path_mul)
-        .reset_index()
-    )
     deprish_df = prep_deprish(
-        file_path_deprish,
-        plant_parts_df,
-        sheet_name_deprish=sheet_name_deprish,
+        plant_parts_df=plant_parts_df,
         key_deprish=key_deprish
     )
     mul_df = prep_master_parts_eia(plant_parts_df, deprish_df, key_mul=key_mul)
     deprish_match = (
         match_merge(deprish_df, mul_df,
                     key_deprish=key_deprish, key_mul=key_mul)
-        .pipe(add_overrides, file_path_deprish=file_path_deprish,
+        .pipe(add_overrides, file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
               sheet_name_output=sheet_name_output)
         .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
         .pipe(pudl.helpers.organize_cols,
@@ -276,7 +272,7 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
               list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
-                                           for c in MUL_COLS])))
+                                           for c in PPL_COLS])))
     )
 
     first_cols = [
@@ -289,10 +285,10 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
 
     possible_matches_mul = (
         pd.merge(
-            plant_parts_df.dropna(subset=RESTRICT_MATCH_COLS),
+            plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
             deprish_df[RESTRICT_MATCH_COLS].drop_duplicates(),
             on=RESTRICT_MATCH_COLS)
-        .pipe(pudl.helpers.organize_cols, MUL_COLS)
+        .pipe(pudl.helpers.organize_cols, PPL_COLS)
     )
     return deprish_match, possible_matches_mul
 
@@ -301,12 +297,11 @@ def match_deprish_eia(file_path_mul, file_path_deprish,
 ###############################################################################
 
 
-def generate_depreciation_matches(file_path_mul,
-                                  file_path_deprish,
-                                  sheet_name_deprish,
-                                  sheet_name_output,
-                                  save_to_xls=True,
-                                  ):
+def execute(
+    plant_parts_df,
+    sheet_name_output='EIA to depreciation matches',
+    save_to_xls=True,
+):
     """
     Generate the matched names and save to excel.
 
@@ -317,34 +312,31 @@ def generate_depreciation_matches(file_path_mul,
     depreciation records were pulled from.
 
     Args:
-         file_path_mul (pathlib.Path): path to the master unit list.
-         file_path_deprish (os.PathLike): path to the excel workbook which
-            contains depreciation data.
-         sheet_name_deprish (str): name of the excel tab which contains the
-            plant names from the depreciation data.
-         sheet_name_output (string): name of the excel tab which the matches
-            will be output.
+        plant_parts_df (panda.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        sheet_name_output (string): name of the excel tab which the matches
+            will be output and the place where we will grab the overrides for
+            the matches. Default is: 'EIA to depreciation matches'.
+        save_to_xls (boolean): If True, save the outputs to the workbook.
+            Default is True. If False, the outputs are not saved - it reduces
+            time and the dataframe is still returned.
 
     Returns:
         pandas.DataFrame : dataframe including matched names from depreciation
             data to names in the master unit list, including appropirate id's
             from the master unit list.
     """
-    if not file_path_deprish.is_file():
-        raise FileNotFoundError(
-            f"File does not exist: {file_path_deprish}"
-            "Depretiation file must exist."
-        )
     deprish_match_df, possible_matches_mul_df = match_deprish_eia(
-        file_path_mul, file_path_deprish,
-        sheet_name_deprish=sheet_name_deprish,
+        plant_parts_df,
         sheet_name_output=sheet_name_output
     )
     if save_to_xls:
         sheets_df_dict = {
             sheet_name_output: deprish_match_df,
             "Subset of Master Unit List": possible_matches_mul_df}
-        save_to_workbook(file_path=file_path_deprish,
+        save_to_workbook(file_path=pudl_rmi.DEPRISH_RAW_XLSX,
                          sheets_df_dict=sheets_df_dict)
     return deprish_match_df
 
@@ -359,7 +351,7 @@ def save_to_workbook(file_path, sheets_df_dict):
     before saving.
 
     Args:
-        file_path (path-like): the location of the excel workbook.
+        file_path (pathlib.Path): the location of the excel workbook.
         sheets_df_dict (dict): dictionary of the names of sheets (keys) of
             where their corresponding dataframes (values) should end up in the
             workbook.
@@ -427,7 +419,7 @@ def main():
     """Match depreciation and master unit list records. Save to excel."""
     args = parse_command_line(sys.argv)
 
-    _ = generate_depreciation_matches(
+    _ = execute(
         file_path_mul=pathlib.Path(args.file_path_mul),
         file_path_deprish=pathlib.Path(args.file_path_deprish),
         sheet_name_deprish=args.sheet_name_deprish,
