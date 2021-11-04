@@ -34,7 +34,7 @@ STRINGS_TO_CLEAN = {
 
 RESTRICT_MATCH_COLS = ['plant_id_eia', 'utility_id_pudl', 'report_year']
 
-MUL_COLS = [
+PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
     'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
@@ -214,10 +214,9 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             key_deprish=key_deprish, key_mul=key_mul,
             threshold=75),
         mul_df.drop_duplicates(
-            subset=['report_year', 'plant_name_new'])[MUL_COLS],
-        left_on=['report_year', 'utility_id_pudl', 'plant_name_match', 'plant_id_eia'],
-        right_on=['report_year', 'utility_id_pudl', key_mul, 'plant_id_eia'],
-        how='left')
+            subset=['report_year', 'plant_name_new'])[PPL_COLS],
+        left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
+        right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
         # rename the ids so that we have the "true granularity"
         # Every MUL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
@@ -283,7 +282,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
     deprish_match = (
         match_merge(deprish_df, mul_df,
                     key_deprish=key_deprish, key_mul=key_mul)
-        .pipe(add_overrides, file_path_deprish=pudl_rmi.FILE_PATH_DEPRISH_RAW,
+        .pipe(add_overrides, file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
               sheet_name_output=sheet_name_output)
         .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
         .pipe(pudl.helpers.organize_cols,
@@ -291,7 +290,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
               list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
-                                           for c in MUL_COLS])))
+                                           for c in PPL_COLS])))
     )
 
     first_cols = [
@@ -311,7 +310,7 @@ def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
             deprish_df[RESTRICT_MATCH_COLS].drop_duplicates(),
             on=RESTRICT_MATCH_COLS)
-        .pipe(pudl.helpers.organize_cols, MUL_COLS)
+        .pipe(pudl.helpers.organize_cols, PPL_COLS)
     )
     return possible_matches_mul
 
@@ -335,10 +334,16 @@ def execute(
     depreciation records were pulled from.
 
     Args:
-         file_path_mul (pathlib.Path): path to the master unit list.
-         deprish_df (pandas.DataFrame): table of cleaned depreciation data.
-         sheet_name_output (string): name of the excel tab which the matches
-            will be output.
+        plant_parts_df (panda.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        sheet_name_output (string): name of the excel tab which the matches
+            will be output and the place where we will grab the overrides for
+            the matches. Default is: 'EIA to depreciation matches'.
+        save_to_xls (boolean): If True, save the outputs to the workbook.
+            Default is True. If False, the outputs are not saved - it reduces
+            time and the dataframe is still returned.
 
     Returns:
         pandas.DataFrame : dataframe including matched names from depreciation
@@ -356,7 +361,7 @@ def execute(
         sheets_df_dict = {
             sheet_name_output: deprish_match_df,
             "Subset of Master Unit List": possible_matches_mul_df}
-        save_to_workbook(file_path=pudl_rmi.FILE_PATH_DEPRISH_RAW,
+        save_to_workbook(file_path=pudl_rmi.DEPRISH_RAW_XLSX,
                          sheets_df_dict=sheets_df_dict)
     return deprish_match_df
 

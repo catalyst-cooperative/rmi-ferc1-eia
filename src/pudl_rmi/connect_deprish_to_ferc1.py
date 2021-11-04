@@ -58,9 +58,14 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
     Args:
-        plant_parts_eia (pandas.DataFrame):
-        deprish_eia (pandas.DataFrame):
-        ferc1_to_eia (pandas.DataFrame):
+        plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        deprish_eia (pandas.DataFrame): table of the connection between the
+            depreciation studies and the EIA plant-parts list.
+        ferc1_to_eia (pandas.DataFrame): a table of the connection between
+            the FERC1 plants and the EIA plant-parts list.
         clobber (boolean):
     """
     inputs = InputsManager(
@@ -102,16 +107,14 @@ class InputsManager():
         Initialize input manager for connecting depreciation to FERC1.
 
         Args:
-            file_path_mul (path-like): file path to the stored pickled
-                EIA master unit list
-            file_path_deprish (path-like): path to the excel workbook which
-               contains depreciation data.
-            file_path_ferc1_eia (path-like): file path to the pickled table
-                connecting FERC1 steam records to the master unit list
-            file_path_deprish_eia (path-like): file path to the table
-                connecting the depreciation records to the EIA master unit list
-            file_path_training (path-like): file path to the CSV of training
-                data for the FERC1 to EIA connection.
+            plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+                "plant-parts" which are groups of aggregated EIA generators
+                that coorespond to portions of plants from generators to fuel
+                types to whole plants.
+            deprish_eia (pandas.DataFrame): table of the connection between the
+                depreciation studies and the EIA plant-parts list.
+            ferc1_to_eia (pandas.DataFrame): a table of the connection between
+                the FERC1 plants and the EIA plant-parts list.
         """
         self.plant_parts_eia = plant_parts_eia
         self.deprish_eia = deprish_eia
@@ -137,14 +140,14 @@ class InputsManager():
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
         # we are going to merge the master unit list into this output,
-        # because we want all of the id columns from MUL_COLS.
+        # because we want all of the id columns from PPL_COLS.
         # There are some overlapping columns. We really only want to
         # merge on the 'record_id_eia' and we trust the master unit list
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
         # don't show up in the MUL_COLS
         cols_ppl = (
-            connect_deprish_to_eia.MUL_COLS
+            connect_deprish_to_eia.PPL_COLS
             + ['plant_id_pudl', 'total_fuel_cost',
                'net_generation_mwh', 'capacity_mw']
         )
@@ -156,7 +159,7 @@ class InputsManager():
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
-                connect_deprish_to_eia.MUL_COLS
+                connect_deprish_to_eia.PPL_COLS
                 + ['plant_id_pudl', 'total_fuel_cost',
                    'net_generation_mwh', 'capacity_mw']],
             on=['record_id_eia']

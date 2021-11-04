@@ -46,7 +46,7 @@ from sklearn.model_selection import KFold  # , cross_val_score
 import pudl
 import pudl.helpers
 import pudl_rmi
-from pudl_rmi import make_plant_parts_eia
+from pudl_rmi import make_plant_parts_eia, connect_deprish_to_eia
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def execute(pudl_out, plant_parts_df):
     coordinate the connection. May be temporary.
     """
     inputs = InputManager(
-        pudl_rmi.FILE_PATH_TRAINING, pudl_out, plant_parts_df
+        pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_df
     )
     features_all = (Features(feature_type='all', inputs=inputs)
                     .get_features(clobber=False))
@@ -107,7 +107,7 @@ class InputManager:
         self.steam_train_df = None
 
     def get_plant_parts_true(self, clobber=False):
-        """Get the master unit list with only the unique granularities."""
+        """Get the EIA plant-part list with only the unique granularities."""
         # We want only the records of the master unit list that are "true
         # granularies" and those which are not duplicates based on their
         # ownership  so the model doesn't get confused as to which option to
@@ -1012,8 +1012,8 @@ def prettyify_best_matches(
     comparison vectors (the floats between 0 and 1 that compare the two
     columns from each dataset).
     """
-    # if utility_id_pudl is not in the `MUL_COLS`,  we need to in include it
-    mul_cols_to_grab = make_plant_parts_eia.MUL_COLS + [
+    # if utility_id_pudl is not in the `PPL_COLS`,  we need to in include it
+    ppl_cols_to_grab = make_plant_parts_eia.PPL_COLS + [
         'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu', 'net_generation_mwh',
         'capacity_mw', 'capacity_factor', 'total_mmbtu', 'heat_rate_mmbtu_mwh',
         'fuel_type_code_pudl', 'installation_year', 'plant_part_id_eia'
@@ -1024,7 +1024,7 @@ def prettyify_best_matches(
             matches_best.reset_index()
             [['record_id_ferc1', 'record_id_eia', 'match_type']],
             # we only want the identifying columns from the MUL
-            plant_parts_true_df.reset_index()[mul_cols_to_grab],
+            plant_parts_true_df.reset_index()[ppl_cols_to_grab],
             how='left',
             on=['record_id_eia'],
             validate='m:1'  # multiple FERC records can have the same EIA match
