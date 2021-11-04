@@ -312,10 +312,16 @@ def execute(
     depreciation records were pulled from.
 
     Args:
-         file_path_mul (pathlib.Path): path to the master unit list.
-         deprish_df (pandas.DataFrame): table of cleaned depreciation data.
-         sheet_name_output (string): name of the excel tab which the matches
-            will be output.
+        plant_parts_df (panda.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        sheet_name_output (string): name of the excel tab which the matches
+            will be output and the place where we will grab the overrides for
+            the matches. Default is: 'EIA to depreciation matches'.
+        save_to_xls (boolean): If True, save the outputs to the workbook.
+            Default is True. If False, the outputs are not saved - it reduces
+            time and the dataframe is still returned.
 
     Returns:
         pandas.DataFrame : dataframe including matched names from depreciation

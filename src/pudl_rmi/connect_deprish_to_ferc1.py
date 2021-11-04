@@ -56,9 +56,14 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
     Args:
-        plant_parts_eia (pandas.DataFrame):
-        deprish_eia (pandas.DataFrame):
-        ferc1_to_eia (pandas.DataFrame):
+        plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+            "plant-parts" which are groups of aggregated EIA generators
+            that coorespond to portions of plants from generators to fuel
+            types to whole plants.
+        deprish_eia (pandas.DataFrame): table of the connection between the
+            depreciation studies and the EIA plant-parts list.
+        ferc1_to_eia (pandas.DataFrame): a table of the connection between
+            the FERC1 plants and the EIA plant-parts list.
         clobber (boolean):
     """
     inputs = InputsManager(
