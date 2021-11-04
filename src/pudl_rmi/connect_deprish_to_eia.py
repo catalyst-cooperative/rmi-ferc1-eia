@@ -264,7 +264,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
     deprish_match = (
         match_merge(deprish_df, mul_df,
                     key_deprish=key_deprish, key_mul=key_mul)
-        .pipe(add_overrides, file_path_deprish=pudl_rmi.FILE_PATH_DEPRISH_RAW,
+        .pipe(add_overrides, file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
               sheet_name_output=sheet_name_output)
         .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
         .pipe(pudl.helpers.organize_cols,
@@ -330,7 +330,7 @@ def execute(
         sheets_df_dict = {
             sheet_name_output: deprish_match_df,
             "Subset of Master Unit List": possible_matches_mul_df}
-        save_to_workbook(file_path=pudl_rmi.FILE_PATH_DEPRISH_RAW,
+        save_to_workbook(file_path=pudl_rmi.DEPRISH_RAW_XLSX,
                          sheets_df_dict=sheets_df_dict)
     return deprish_match_df
 

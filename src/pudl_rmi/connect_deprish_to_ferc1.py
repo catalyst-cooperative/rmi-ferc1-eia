@@ -100,14 +100,14 @@ class InputsManager():
         Initialize input manager for connecting depreciation to FERC1.
 
         Args:
-            file_path_deprish (path-like): path to the excel workbook which
-               contains depreciation data.
-            file_path_ferc1_eia (path-like): file path to the pickled table
-                connecting FERC1 steam records to the master unit list
-            file_path_deprish_eia (path-like): file path to the table
-                connecting the depreciation records to the EIA master unit list
-            file_path_training (path-like): file path to the CSV of training
-                data for the FERC1 to EIA connection.
+            plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
+                "plant-parts" which are groups of aggregated EIA generators
+                that coorespond to portions of plants from generators to fuel
+                types to whole plants.
+            deprish_eia (pandas.DataFrame): table of the connection between the
+                depreciation studies and the EIA plant-parts list.
+            ferc1_to_eia (pandas.DataFrame): a table of the connection between
+                the FERC1 plants and the EIA plant-parts list.
         """
         self.plant_parts_eia = plant_parts_eia
         self.deprish_eia = deprish_eia

@@ -91,11 +91,11 @@ class Extractor:
         """Turn excel-based depreciation data into a dataframe."""
         logger.info(
             "Reading the depreciation data from "
-            f"{pudl_rmi.PATH_DEPRISH_RAW_XLSX}"
+            f"{pudl_rmi.DEPRISH_RAW_XLSX}"
         )
         return (
             pd.read_excel(
-                pudl_rmi.PATH_DEPRISH_RAW_XLSX,
+                pudl_rmi.DEPRISH_RAW_XLSX,
                 skiprows=self.skiprows,
                 sheet_name=self.sheet_name,
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},

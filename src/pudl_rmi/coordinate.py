@@ -60,7 +60,8 @@ class Output():
                 False.
         """
         file_path = pudl_rmi.PLANT_PARTS_EIA_PKL
-        if not is_path_a_good_file(file_path) or clobber:
+        check_is_file_or_not_exists(file_path)
+        if not file_path.exists() or clobber:
             logger.info(
                 f"Master unit list not found {file_path} Generating a new "
                 "master unit list. This should take ~10 minutes."
@@ -84,7 +85,8 @@ class Output():
                 False.
         """
         file_path = pudl_rmi.DEPRISH_PKL
-        if not is_path_a_good_file(file_path) or clobber:
+        check_is_file_or_not_exists(file_path)
+        if not file_path.exists() or clobber:
             logger.info("Generating new depreciation study output.")
             deprish_df = pudl_rmi.deprish.execute()
             deprish_df.to_pickle(file_path)
@@ -111,7 +113,8 @@ class Output():
         """
         file_path = pudl_rmi.DEPRISH_EIA_PKL
         clobber_any = any([clobber, clobber_plant_part_list])
-        if not is_path_a_good_file(file_path) or clobber_any:
+        check_is_file_or_not_exists(file_path)
+        if not file_path.exists() or clobber_any:
             deprish_match_df = pudl_rmi.connect_deprish_to_eia.execute(
                 plant_parts_df=self.grab_plant_part_list(
                     clobber=clobber_plant_part_list)
@@ -138,7 +141,8 @@ class Output():
         file_path = pudl_rmi.FERC1_EIA_PKL
         # if any of the clobbers are on, we want to regenerate the main output
         clobber_any = any([clobber, clobber_plant_part_list])
-        if not is_path_a_good_file(file_path) or clobber_any:
+        check_is_file_or_not_exists(file_path)
+        if not file_path.exists() or clobber_any:
             logger.info(
                 f"FERC to EIA granular connection not found at {file_path}... "
                 "Generating a new output."
@@ -179,9 +183,10 @@ class Output():
                 output of the connection between EIA and depreciation data and
                 generate a new version of the depreciaiton to FERC1 output.
                 Default is False.
-            clobber_ferc1_eia (boolean): Generate and cache a new interim output
-                of the connection between FERC and EIA and generate a new
-                version of the depreciaiton to FERC1 output. Default is False.
+            clobber_ferc1_eia (boolean): Generate and cache a new interim
+                output of the connection between FERC and EIA and generate a
+                new version of the depreciaiton to FERC1 output. Default is
+                False.
 
         Returns:
             pandas.DataFrame: depreciation study data connected to FERC1 data
@@ -196,7 +201,9 @@ class Output():
             clobber_deprish_eia,
             clobber_ferc1_eia
         ])
-        if not is_path_a_good_file(file_path) or clobber_any:
+        check_is_file_or_not_exists(file_path)
+
+        if not file_path.exists() or clobber_any:
             logger.info(
                 "Deprish to FERC1 granular connection not found at "
                 f"{file_path}. Generating a new output."
@@ -211,7 +218,7 @@ class Output():
                 clobber=clobber
             )
             # export
-            connects_deprish_ferc1.to_pickle(pudl_rmi.FILE_PATH_DEPRISH_FERC1)
+            connects_deprish_ferc1.to_pickle(pudl_rmi.file_path)
 
         else:
             logger.info(
@@ -249,7 +256,7 @@ class Output():
             pandas.DataFrame: a table of the conneciton between the
                 depreciation studies and the FERC1 plants.
         """
-        ppl = self.grab_plant_part_list(clobber=clobber_all)
+        ppl = self.grab_plant_part_list(clobber=False)
         d = self.grab_deprish(clobber=clobber_all)
         de = self.grab_deprish_to_eia(clobber=clobber_all)
         fe = self.grab_ferc1_to_eia(clobber=clobber_all)
@@ -257,18 +264,17 @@ class Output():
         return ppl, d, de, fe, df
 
 
-def is_path_a_good_file(file_path: Path) -> bool:
+def check_is_file_or_not_exists(file_path: Path):
     """
-    Check if path is a file. If it isn't a file but does exist raise assertion.
+    Raise assertion if the path exists but is not a file. Do nothing if not.
 
     Raises:
         AssertionError: If the path exists but is not a file - i.e. if the path
             is a directory, this assertion will be raised so the directory
             isn't wiped out.
     """
-    if not file_path.is_file() and file_path.exists():
+    if file_path.exists() and not file_path.is_file():
         raise AssertionError(
             f"Path exists but is not a file. Check if {file_path} is a "
             "directory. It should be either a pickled file or nothing."
         )
-    return file_path.is_file()

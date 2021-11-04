@@ -106,7 +106,7 @@ class InputManager:
         self.steam_train_df = None
 
     def get_plant_parts_true(self, clobber=False):
-        """Get the master unit list with only the unique granularities."""
+        """Get the EIA plant-part list with only the unique granularities."""
         # We want only the records of the master unit list that are "true
         # granularies" and those which are not duplicates based on their
         # ownership  so the model doesn't get confused as to which option to

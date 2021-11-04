@@ -31,7 +31,7 @@ and stored as pickled dataframes. If these files do exist,
 
 TRAIN_FERC1_EIA_CSV: Path = INPUTS_DIR / 'train_ferc1_eia.csv'
 """Path to training data for FERC1 plants and EIA plant-part list."""
-PATH_DEPRISH_RAW_XLSX: Path = INPUTS_DIR / 'deprish_raw.xlsx'
+DEPRISH_RAW_XLSX: Path = INPUTS_DIR / 'deprish_raw.xlsx'
 """Path to the raw depreciation data."""
 DEPRISH_COMMON_LABELS_XLSX: Path = INPUTS_DIR / 'deprish_common_labels.xlsx'
 """Path to mannual label of common records in depreciation studies."""
