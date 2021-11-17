@@ -43,7 +43,7 @@ PPL_COLS = [
     'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status'
 ]
 
-MUL_RENAME = {
+PPL_RENAME = {
     'record_id_eia': 'record_id_eia_name_match',
     'appro_record_id_eia': 'record_id_eia_fuzzy',
     'plant_part': 'plant_part_name_match',
@@ -215,13 +215,13 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             threshold=75),
         mul_df.drop_duplicates(
             subset=['report_year', 'plant_name_new'])[PPL_COLS],
-        left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
-        right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
+        left_on=['report_year', 'utility_id_pudl', 'plant_name_match', 'plant_id_eia'],
+        right_on=['report_year', 'utility_id_pudl', key_mul, 'plant_id_eia'], how='left')
         # rename the ids so that we have the "true granularity"
         # Every MUL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
         # true gran columns across the board.
-        .rename(columns=MUL_RENAME)
+        .rename(columns=PPL_RENAME)
     )
     logger.info(f"Matching resulted in {len(match_merge_df)} connections.")
     return match_merge_df
@@ -289,7 +289,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
               # we want to pull the used columns to the front, but there is
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
-              list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
+              list(set(IDX_DEPRISH_COLS + [PPL_RENAME.get(c, c)
                                            for c in PPL_COLS])))
     )
 

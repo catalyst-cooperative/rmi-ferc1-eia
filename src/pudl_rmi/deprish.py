@@ -909,8 +909,12 @@ def agg_to_idx(deprish_df, idx_cols):
                     deprish_df,
                     data_col=data_col,
                     weight_col=weight_col,
-                    idx_cols=idx_cols),
-                how='outer', on=idx_cols))
+                    by=idx_cols
+                ).reset_index(),  # reset_index bc weighted_average returns index of idx_cols
+                how='outer',
+                on=idx_cols
+            )
+        )
     deprish_asset = pudl.helpers.convert_cols_dtypes(
         deprish_asset,
         'depreciation',
