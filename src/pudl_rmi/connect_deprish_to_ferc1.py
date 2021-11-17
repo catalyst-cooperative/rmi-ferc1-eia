@@ -253,6 +253,7 @@ class MatchMaker():
             of the deprecation data and ferc1 (with their respective EIA master
             unit list records associated).
         """
+        # add in a dtype enforcer bc OMIGOSH they keep converting to non-nullables
         candidate_matches_all = pd.merge(
             self.inputs.connects_deprish_eia.pipe(
                 pudl.helpers.convert_cols_dtypes, 'ferc1'),
@@ -574,7 +575,10 @@ class Scaler(object):
         scaled_df = pd.concat([same_true, same_smol, same_beeg])
 
         self.test_same_true_fraction_owned(same_true)
-        #assert(len(scaled_df) == len(self.matches_df))
+        logger.info(
+            f"output is len {len(scaled_df)} while input was "
+            f"{len(self.matches_df)}"
+        )
         return scaled_df
 
     def scale_by_ownership_fraction(self):
