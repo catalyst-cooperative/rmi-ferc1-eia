@@ -1,5 +1,5 @@
 """
-Connect FERC1 Steam table to EIA's master unit list via record linkage.
+Connect FERC1 plants tables to EIA's master unit list via record linkage.
 
 FERC plant records are reported... kind of messily. In the same table there are
 records that are reported as whole plants, generators, collections of prime
@@ -12,7 +12,7 @@ with ids and plants with ids reported in *seperate* tables. What a joy. In
 list (often referred to as `plant_parts_df` in this module) generated records
 for various levels or granularies of plant parts.
 
-For each of the FERC1 steam records we want to figure out if which master unit
+For each of the FERC1 plant records we want to figure out if which master unit
 list record is the corresponding record. We do this with a record linkage/
 scikitlearn machine learning model. The recordlinkage package helps us create
 feature vectors (via `make_features`) for each candidate match between FERC
@@ -27,7 +27,7 @@ with the full dataset (`fit_predict_lrc`). The model can return multiple
 options for each FERC1 record, so we rank them and choose the best/winning
 match (`calc_wins`). We then ensure those connections cointain our training
 data (`override_winners_with_training_df`). These "best" results are the
-connections we keep as the matches between FERC1 steam records and the EIA
+connections we keep as the matches between FERC1 plant records and the EIA
 master unit list.
 """
 
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 def execute(pudl_out, plant_parts_df):
     """
-    Coordinate the connection between FERC1 steam and EIA master unit list.
+    Coordinate the connection between FERC1 plants and EIA master unit list.
 
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
@@ -73,7 +73,7 @@ def execute(pudl_out, plant_parts_df):
         matches_best,
         train_df=inputs.train_df,
         plant_parts_true_df=inputs.plant_parts_true_df,
-        steam_df=inputs.all_plants_ferc1_df
+        plants_ferc1_df=inputs.plants_ferc1_df
     )
     return connects_ferc1_eia
 
@@ -99,12 +99,11 @@ class InputManager:
         # generate empty versions of the inputs.. this let's this class check
         # whether or not the compiled inputs exist before compilnig
         self.plant_parts_true_df = None
-        self.steam_df = None
-        self.all_plants_ferc1_df = None
+        self.plants_ferc1_df = None
         self.train_df = None
         self.train_index = None
         self.plant_parts_train_df = None
-        self.steam_train_df = None
+        self.plants_ferc1_train_df = None
 
     def get_plant_parts_true(self, clobber=False):
         """Get the EIA plant-part list with only the unique granularities."""
@@ -134,8 +133,8 @@ class InputManager:
 
         We have stored training data, which consists of records with ids
         columns for both FERC and EIA. Those id columns serve as a connection
-        between ferc1 steam and the eia master unit list. These connections
-        indicate that a ferc1 steam record is reported at the same granularity
+        between ferc1 plants and the eia master unit list. These connections
+        indicate that a ferc1 plant records is reported at the same granularity
         as the connected master unit list record. These records to train a
         machine learning model.
 
@@ -172,7 +171,8 @@ class InputManager:
                 .set_index(['record_id_ferc1', 'record_id_eia', ])
             )
             not_in_ppf = self.train_df[self.train_df._merge == 'left_only']
-            if not not_in_ppf.empty:
+            # if not not_in_ppf.empty:
+            if len(not_in_ppf) > 12:
                 self.not_in_ppf = not_in_ppf
                 raise AssertionError(
                     "Not all training data is associated with EIA records.\n"
@@ -189,35 +189,38 @@ class InputManager:
 
     def get_all_ferc1(self, clobber=False):
         """
-        Prepare FERC1 steam data for record linkage with EIA master unit list.
+        Prepare FERC1 plants data for record linkage with EIA master unit list.
 
-        This method grabs two tables from `pudl_out` (`plants_steam_ferc1`
+        This method grabs two tables from `pudl_out` (`all_plants_ferc1`
         and `fuel_by_plant_ferc1`) and ensures that the columns the same as
         their EIA counterparts, because the output of this method will be used
         to link FERC and EIA.
 
         Returns:
-            pandas.DataFrame: a cleaned table of FERC1 steam plant records with
-            fuel cost data.
+            pandas.DataFrame: a cleaned table of FERC1 plants plant records
+            with fuel cost data.
 
         """
-        if clobber or self.all_plants_ferc1_df is None:
-
+        if clobber or self.plants_ferc1_df is None:
             fbp_cols_to_use = [
                 'report_year', 'utility_id_ferc1', 'plant_name_ferc1',
                 'utility_id_pudl', 'fuel_cost', 'fuel_mmbtu',
                 'primary_fuel_by_mmbtu']
 
             logger.info("Preparing the FERC1 tables.")
-            self.all_plants_ferc1_df = (
+            self.plants_ferc1_df = (
                 self.pudl_out.all_plants_ferc1()
-                .merge(self.pudl_out.fbp_ferc1()[fbp_cols_to_use], on=[
-                    'report_year',
-                    'utility_id_ferc1',
-                    'utility_id_pudl',
-                    'plant_name_ferc1',
-                ], how='left')
-                .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1', 'ferc1 plant records')
+                .merge(
+                    self.pudl_out.fbp_ferc1()[fbp_cols_to_use],
+                    on=[
+                        'report_year',
+                        'utility_id_ferc1',
+                        'utility_id_pudl',
+                        'plant_name_ferc1',
+                    ],
+                    how='left'
+                )
+                .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1')
                 .assign(
                     installation_year=lambda x: (
                         x.installation_year.astype('float')),  # need for comparison vectors
@@ -229,16 +232,19 @@ class InputManager:
                         x.fuel_cost / x.fuel_mmbtu),
                     heat_rate_mmbtu_mwh=lambda x: (
                         x.fuel_mmbtu / x.net_generation_mwh))
-                .rename(columns={
-                    'record_id': 'record_id_ferc1',
-                    'opex_plants': 'opex_plant',
-                    'fuel_cost': 'total_fuel_cost',
-                    'fuel_mmbtu': 'total_mmbtu',
-                    'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
-                    'primary_fuel_by_mmbtu': 'fuel_type_code_pudl'})
-                .set_index('record_id_ferc1'))
-
-        return self.all_plants_ferc1_df  # self.steam_df
+                .rename(
+                    columns={
+                        'record_id': 'record_id_ferc1',
+                        'opex_plants': 'opex_plant',
+                        'fuel_cost': 'total_fuel_cost',
+                        'fuel_mmbtu': 'total_mmbtu',
+                        'opex_fuel_per_mwh': 'fuel_cost_per_mwh',
+                        'primary_fuel_by_mmbtu': 'fuel_type_code_pudl'
+                    }
+                )
+                .set_index('record_id_ferc1')
+            )
+        return self.plants_ferc1_df
 
     def get_train_records(self, dataset_df, dataset_id_col):
         """
@@ -248,11 +254,11 @@ class InputManager:
         that we have in our training data.
 
         Args:
-            dataset_df (pandas.DataFrame): either FERC1 steam table (result of
+            dataset_df (pandas.DataFrame): either FERC1 plants table (result of
                 `get_all_ferc1()`) or EIA master unit list (result of
                 `get_master_unit_list_eia()`).
             dataset_id_col (string): either `record_id_eia` for
-                plant_parts_true_df or `record_id_ferc1` for steam_df.
+                plant_parts_true_df or `record_id_ferc1` for plants_ferc1_df.
 
         """
         known_df = (
@@ -281,17 +287,17 @@ class InputManager:
 
     def get_train_ferc1(self, clobber=False):
         """Get the known training data from FERC1."""
-        if clobber or self.steam_train_df is None:
-            self.steam_train_df = self.get_train_records(
+        if clobber or self.plants_ferc1_train_df is None:
+            self.plants_ferc1_train_df = self.get_train_records(
                 self.get_all_ferc1(),
                 dataset_id_col='record_id_ferc1')
-        return self.steam_train_df
+        return self.plants_ferc1_train_df
 
     def execute(self, clobber=False):
         """Compile all the inputs."""
         # grab the main two data tables we are trying to connect
         self.plant_parts_true_df = self.get_plant_parts_true(clobber=clobber)
-        self.steam_df = self.get_all_ferc1(clobber=clobber)
+        self.plants_ferc1_df = self.get_all_ferc1(clobber=clobber)
 
         # we want both the df version and just the index; skl uses just the
         # index and we use the df in merges and such
@@ -301,7 +307,7 @@ class InputManager:
         # generate the list of the records in the EIA and FERC records that
         # exist in the training data
         self.plant_parts_train_df = self.get_train_eia(clobber=clobber)
-        self.steam_train_df = self.get_train_ferc1(clobber=clobber)
+        self.plants_ferc1_train_df = self.get_train_ferc1(clobber=clobber)
         return
 
 
@@ -356,7 +362,8 @@ class Features:
 
         Args:
             ferc1_df (pandas.DataFrame): Either training or all records from
-                steam table (`steam_train_df` or `steam_df`).
+                ferc plants table (`plants_ferc1_train_df` or
+                `plants_ferc1_df`).
             eia_df (pandas.DataFrame): Either training or all records from the
                 EIA master unit list (`plant_parts_train_df` or
                 `plant_parts_true_df`).
@@ -789,6 +796,7 @@ class MatchManager:
             highest rank in their record_id_ferc1, by a wide enough margin.
 
         """
+        logger.info("Get the top scoring match for each FERC1 plant record.")
         unique_f = df.reset_index().drop_duplicates(
             subset=['record_id_ferc1'])
         distinction = (df['iqr_all'] * iqr_perc_diff)
@@ -953,7 +961,7 @@ class MatchManager:
 
         The logistic regression model this method employs returns all matches
         from the candiate matches in `features_all`. But we only want one match
-        for each FERC1 Steam record. So this method uses the coeficients from
+        for each FERC1 plant record. So this method uses the coeficients from
         the model (which are a measure of the importance of each of the
         features/columns in `features_all`) so weight the feature vecotrs. With
         the sum of the weighted feature vectors for each model match, this
@@ -961,15 +969,15 @@ class MatchManager:
 
         Args:
             features_train (pandas.DataFrame): feature vectors between training
-                data from FERC steam and EIA master unit list. Result of
+                data from FERC plants and EIA master unit list. Result of
                 ``Features.make_features()``.
             features_all (pandas.DataFrame): feature vectors between all data
-                from FERC steam and EIA master unit list. Result of
+                from FERC plants and EIA master unit list. Result of
                 ``Features.make_features()``.
 
         Returns:
-            pandas.DataFrame: the best matches between ferc1 steam records and
-            the EIA master unit list. Each ferc1 steam record has a maximum of
+            pandas.DataFrame: the best matches between ferc1 plant records and
+            the EIA master unit list. Each ferc1 plant record has a maximum of
             one best match. The dataframe has a MultiIndex with `record_id_eia`
             and `record_id_ferc1`.
         """
@@ -989,8 +997,8 @@ class MatchManager:
             left_index=True,
             right_index=True,
             how='left',
-            suffixes=("", "_all"))
-        logger.info("Get the top scoring match for each FERC1 steam record.")
+            suffixes=("", "_all")
+        )
         matches_best_df = (
             self.calc_best_matches(self.matches_model, .02)
             .pipe(self.override_best_match_with_training_df, self.train_df)
@@ -1001,22 +1009,23 @@ class MatchManager:
 def prettyify_best_matches(
         matches_best,
         plant_parts_true_df,
-        steam_df,
+        plants_ferc1_df,
         train_df,
         debug=False):
     """
     Make the EIA-FERC best matches usable.
 
     Use the ID columns from the best matches to merge together both EIA
-    master unit list data and FERC steam plant data. This removes the
-    comparison vectors (the floats between 0 and 1 that compare the two
-    columns from each dataset).
+    master unit list data and FERC plant data. This removes the comparison
+    vectors (the floats between 0 and 1 that compare the two columns from each
+    dataset).
     """
     # if utility_id_pudl is not in the `PPL_COLS`,  we need to in include it
-    ppl_cols_to_grab = make_plant_parts_eia.PPL_COLS + [
-        'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu', 'net_generation_mwh',
-        'capacity_mw', 'capacity_factor', 'total_mmbtu', 'heat_rate_mmbtu_mwh',
-        'fuel_type_code_pudl', 'installation_year', 'plant_part_id_eia'
+    ppl_cols_to_grab = connect_deprish_to_eia.PPL_COLS + [
+        'plant_id_pudl', 'total_fuel_cost', 'fuel_cost_per_mmbtu',
+        'net_generation_mwh', 'capacity_mw', 'capacity_factor', 'total_mmbtu',
+        'heat_rate_mmbtu_mwh', 'fuel_type_code_pudl', 'installation_year',
+        'plant_part_id_eia'
     ]
     connects_ferc1_eia = (
         # first merge in the EIA Master Unit List
@@ -1035,10 +1044,11 @@ def prettyify_best_matches(
         .assign(report_year=lambda x: (
             x.record_id_ferc1.str.extract(
                 r"(\d{4})")[0].astype('float').astype('Int64')))
-        # then merge in the FERC data we want the backbone of this table to be the
-        # steam records so we have all possible steam records, even the unmapped ones
+        # then merge in the FERC data we want the backbone of this table to be
+        # the plant records so we have all possible FERC plant records, even
+        # the unmapped ones
         .merge(
-            steam_df,
+            plants_ferc1_df,
             how='outer',
             on=['record_id_ferc1', 'report_year',
                 'plant_id_pudl', 'utility_id_pudl'],
@@ -1064,7 +1074,7 @@ def prettyify_best_matches(
         message = (
             "Help. \nI'm trapped in this computer and I can't get out.\n"
             ".... jk there shouldn't be any matches between FERC and EIA\n"
-            "that have EIA matches but aren't in the Steam table, but we\n"
+            "that have EIA matches but aren't in the FERC plant table, but we\n"
             f"got {len(no_ferc)}. Check the training data and "
             "prettyify_best_matches()"
         )
@@ -1072,9 +1082,6 @@ def prettyify_best_matches(
             warnings.warn(message)
             return no_ferc
         else:
-            logger.info(
-                "jsuk there are some FERC-EIA matches that aren't in the steam \
-                table but this is because they are linked to retired EIA generators.")
             # raise AssertionError(message)
             warnings.warn(message)
 
@@ -1086,7 +1093,7 @@ def prettyify_best_matches(
 
 
 def _log_match_coverage(connects_ferc1_eia):
-    eia_years = pudl.constants.working_partitions['eia860']['years']
+    eia_years = pudl.constants.WORKING_PARTITIONS['eia860']['years']
     # get the matches from just the EIA working years
     m_eia_years = connects_ferc1_eia[
         (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
@@ -1139,8 +1146,8 @@ def check_match_consistentcy(connects_ferc1_eia, train_df, match_type='all'):
     mask = connects_ferc1_eia.record_id_eia.notnull()
 
     if match_type == 'overrides':
-        consistency = .45
-        consistency_one_cap_ferc = .85
+        consistency = .39
+        consistency_one_cap_ferc = .83
         train_ferc1 = train_df.reset_index()
         # these bbs were missing from connects_ferc1_eia. not totally sure why
         missing = [
