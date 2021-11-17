@@ -217,23 +217,20 @@ class MatchMaker():
         level, we want a gut check of whether or not connects_all_deprish_ferc1
         was connected properly.
         """
-        # grab the plant_id from the merge columns
-        plant_id_col = next(
-            (s for s in CONNECT_COLS if 'plant_id_' in s), None)
         # there was a merge iindicator here and left df was the depreciation
         # data
         connected_plant_ids = candidate_matches_all[
-            candidate_matches_all._merge == 'both'][plant_id_col].unique()
+            candidate_matches_all._merge == 'both'].plant_id_pudl.unique()
         # how many plant_id_pudl's didn't get a corresponding FERC1 record
         not_in_ferc1_plant_ids = (
             candidate_matches_all[candidate_matches_all._merge == 'left_only']
-            [plant_id_col].unique()
+            .plant_id_pudl.unique()
         )
         # these are a subset of the not_in_ferc1_plant_ids that show up in the
         # steam table
         missing_plant_ids = (self.inputs.connects_ferc1_eia[
-            self.inputs.connects_ferc1_eia[plant_id_col].isin(
-                not_in_ferc1_plant_ids)][plant_id_col].unique())
+            self.inputs.connects_ferc1_eia.plant_id_pudl.isin(
+                not_in_ferc1_plant_ids)].plant_id_pudl.unique())
         logger.info(f"Matched plants:    {len(connected_plant_ids)}")
         logger.info(f"Not connected:       {len(not_in_ferc1_plant_ids)}")
         logger.info(f"Missing connections: {len(missing_plant_ids)}")
