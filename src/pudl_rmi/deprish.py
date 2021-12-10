@@ -893,6 +893,9 @@ def agg_to_idx(deprish_df, idx_cols):
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
 
+    suffix = ""
+    if 'plant_balance_w_common' in deprish_df.columns:
+        suffix = f'_w{COMMON_SUFFIX}'
     # weighted average agg section ###
     # enumerate wtavg cols
     avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
@@ -900,7 +903,7 @@ def agg_to_idx(deprish_df, idx_cols):
          if '_rate' in x and 'rate_type_pct' not in x]
     # prep dict with col to average (key) and col to weight on (value)
     # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = dict.fromkeys(avg_cols, 'unaccrued_balance')
+    wtavg_cols = dict.fromkeys(avg_cols, f'unaccrued_balance{suffix}')
     # aggregate the columned that need to be averaged ..
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
@@ -910,11 +913,18 @@ def agg_to_idx(deprish_df, idx_cols):
                     data_col=data_col,
                     weight_col=weight_col,
                     by=idx_cols
-                ).reset_index(),  # reset_index bc weighted_average returns index of idx_cols
+                ).reset_index(),  # weighted_average returns w/idx_cols index
                 how='outer',
                 on=idx_cols
             )
         )
+    deprish_asset.loc[:, 'remaining_life_avg_old'] = (
+        deprish_asset.loc[:, 'remaining_life_avg']
+    )
+    deprish_asset.loc[:, 'remaining_life_avg'] = (
+        deprish_asset[f"unaccrued_balance{suffix}"]
+        / deprish_asset[f"depreciation_annual_epxns{suffix}"]
+    )
     deprish_asset = pudl.helpers.convert_cols_dtypes(
         deprish_asset,
         'depreciation',

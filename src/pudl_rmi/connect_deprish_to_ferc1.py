@@ -16,9 +16,9 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-import pathlib
 
 import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
+# from pudl_rmi.connect_deprish_to_eia import PPL_COLS
 import pudl
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,8 @@ list: the standard columns to split ferc1 data columns to be used in
 DATA_COLS_TO_SPLIT = {
     'opex_nonfuel': SPLIT_COLS_STANDARD,
     'net_generation_mwh_ferc1': SPLIT_COLS_STANDARD,
+    'capex_total': SPLIT_COLS_STANDARD,
+    'capex_annual_addt': SPLIT_COLS_STANDARD,
 }
 """
 dictionary: FERC1 data columns (keys) that we want to associated with
@@ -52,6 +54,344 @@ columns to weight the split (values). See  ``split_ferc1_data_on_split_cols()``
 for more details.
 """
 
+IDX_STEAM = ['utility_id_ferc1', 'plant_id_ferc1', 'report_date']
+IDX_COLS_FERC1 = ['plant_id_pudl', 'record_id_eia_ferc1']
+
+
+{
+    'plant_id_eia': {1, 1, 1, 2, 2, 3},
+    'generator_id': {'1a', '1b', '1c', '2a', '2b', 'a'},
+    'report_date': {
+        '2020-01-01',
+        '2020-01-01',
+        '2020-01-01',
+        '2020-01-01',
+        '2020-01-01',
+        '2020-01-01'},
+    'operational_status_pudl': {
+        'operating',
+        'operating',
+        'operating',
+        'operating',
+        'operating',
+        'operating'},
+    'utility_id_eia': {1, 1, 1, 1, 1, 1},
+    'ownership': {'total',
+                  'total',
+                  'total',
+                  'total',
+                  'total',
+                  'total'},
+    'record_id_eia': {
+        'record_id_1_1a',
+        'record_id_1_1b',
+        'record_id_1_1c',
+        'record_id_2_2a',
+        'record_id_2_2b',
+        'record_id_3_a'},
+    'record_id_test': {
+        'record_1',
+        'record_1',
+        'record_1',
+        'record_2',
+        'record_2',
+        'record_3'},
+    'record_id_eia_og': {
+        'record_id_1_1a_1b_1c',
+        'record_id_1_1a_1b_1c',
+        'record_id_1_1a_1b_1c',
+        'reocrd_id_2_2a_2b',
+        'reocrd_id_2_2a_2b',
+        'record_id_3_a'},
+    'data_col': {300, 300, 300, 100, 100, 10},
+    'index': {0, 1, 2, 3, 4, 5},
+    'plant_part': {
+        'plant_gen',
+        'plant_gen',
+        'plant_gen',
+        'plant_gen',
+        'plant_gen',
+        'plant_gen'},
+    'ferc_acct_name': {'steam', 'steam', 'steam', 'steam', 'steam', 'steam'},
+    'unit_id_pudl': {pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, },
+    'technology_description': {
+        'Conventional Steam Coal',
+        'Conventional Steam Coal',
+        'Conventional Steam Coal',
+        'Conventional Steam Coal',
+        'Conventional Steam Coal',
+        'Conventional Steam Coal'},
+    'prime_mover_code': {'ST', 'ST', 'ST', 'ST', 'ST', 'ST'},
+    'energy_source_code_1': {'BIT', 'BIT', 'BIT', 'BIT', 'BIT', 'BIT'},
+    'capacity_mw': {50, 30, 20, 10, 10, 100},
+    'net_generation_mwh': {10000, 1000, 100, 250, 200, 5000},
+    'total_fuel_cost': {500, 100, 50, 250, 200, 300},
+    'data_col_scaled': {150, 90, 60, 50, 50, 10}}
+
+
+def str_squish(x):
+    """Squish strings from a groupby into a list."""
+    return '; '.join(list(map(str, [x for x in x.unique() if x is not pd.NA])))
+
+
+def pre_aggregate(
+        df_to_scale: pd.DataFrame,
+        ppl: pd.DataFrame,
+        data_set_idx_cols: list,
+        data_cols: list,
+        other_cols_to_keep: list) -> pd.DataFrame:
+    """
+    Aggregate.
+
+    TODO:
+    * aggregate only the duplicate records and just concat
+    """
+    all_cols = data_set_idx_cols + data_cols + other_cols_to_keep
+    all_sum_cols = [
+        # ferc cols
+        'capex_total',
+        'capex_annual_addt',
+        'opex_nonfuel',
+        'capacity_mw_ferc1',
+        # deprish cols
+        'plant_balance_w_common',
+        'book_reserve_w_common',
+        'unaccrued_balance_w_common',
+        'net_salvage_w_common',
+        'depreciation_annual_epxns_w_common'
+    ]
+    all_wtavg_dict = {
+        # ferc cols
+        'avg_num_employees': 'capacity_mw_ferc1',
+        # deprish cols
+        'net_removal_rate': 'unaccrued_balance_w_common',
+        'depreciation_annual_rate': 'unaccrued_balance_w_common',
+        'remaining_life_avg': 'unaccrued_balance_w_common',
+    }
+    all_str_cols = [
+        'record_id_ferc1',
+        'line_id',
+        'utility_name_ferc1',
+    ]
+
+    sum_cols = [c for c in all_cols if c in all_sum_cols]
+    wtavg_dict = {k: v for (k, v) in all_wtavg_dict.items() if k in all_cols}
+    str_cols = [c for c in all_cols if c in all_str_cols]
+
+    if len(df_to_scale.filter(like='_scaled').columns) > 0:
+        logger.info("Post-scale aggregate.")
+        sum_cols = [f"{x}_scaled" for x in sum_cols]
+        wtavg_dict = {
+            k: f"{v}_scaled" for (k, v) in wtavg_dict.items()
+        }
+        logger.info(f"Summing: {sum_cols}.")
+        logger.info(f"Averaging: {wtavg_dict}.")
+    else:
+        logger.info("Pre-scale aggregate.")
+    by_data_set_cols = ['data_source']
+    by = ['record_id_eia'] + [x for x in by_data_set_cols if x in df_to_scale]
+    # sum and weighted average!
+    df_out = pudl.helpers.sum_and_weighted_average_agg(
+        df_in=df_to_scale,
+        by=by,
+        sum_cols=sum_cols,
+        wtavg_dict=wtavg_dict
+    )
+    # add in the string columns
+    df_out = df_out.merge(
+        (
+            df_to_scale
+            .groupby(by, as_index=False)
+            .agg({k: str_squish for k in str_cols})
+        ),
+        on=by,
+        validate='1:1',
+        how='left'
+    ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+
+    # merge back in the ppl idx columns
+    df_w_ppl = (
+        df_out.set_index('record_id_eia')
+        .merge(
+            ppl,  # [[c for c in PPL_COLS if c != 'record_id_eia']],
+            left_index=True,
+            right_index=True,
+            how='left',
+            validate='m:1',
+        )
+        .reset_index()
+    )
+    return df_w_ppl
+
+
+def many_merge_on_scale_part(
+        plant_part: str,
+        df_to_scale: pd.DataFrame,
+        cols_to_keep: list,
+        ppl: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge a particular EIA plant-part list plant-part onto a dataframe.
+
+    Returns:
+        a table.
+    """
+    ppl_part_df = ppl[ppl.plant_part == plant_part]
+    # convert the date to year start
+    df_to_scale.loc[:, 'report_date'] = (
+        pd.to_datetime(df_to_scale.report_date.dt.year, format='%Y')
+    )
+    scale_parts = []
+    for plant_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
+        idx_part = (
+            pudl.analysis.plant_parts_eia.PLANT_PARTS[plant_part]['id_cols']
+            + pudl.analysis.plant_parts_eia.IDX_TO_ADD
+            + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
+        )
+        # grab just the part of the df that cooresponds to the plant_part
+        part_df = pd.merge(
+            (
+                df_to_scale[df_to_scale.plant_part == plant_part]
+                [idx_part + ['record_id_eia'] + cols_to_keep]
+            ),
+            ppl_part_df,
+            on=idx_part,
+            how='left',
+            validate='m:m',
+            suffixes=('_og', '')
+        )
+        scale_parts.append(part_df)
+    scale_parts_df = pd.concat(scale_parts)
+    return scale_parts_df
+
+
+def split_data_on_split_cols(
+        df_to_scale: pd.DataFrame,
+        merge_cols: list,
+        data_col: str,
+        split_cols: list) -> pd.DataFrame:
+    """
+    Split larger dataset records porportionally by EIA plant-part list columns.
+
+    This method associates slices of a dataset's records - which are larger
+    than their EIA counter parts - via prioritized EIA plant-part list columns.
+
+    Args:
+        df_to_scale (pandas.DataFrame): table of data that has been merged with
+            the EIA plant-part list records of the scale that you want the
+            output to be in.
+        data_col (string): name of the ferc1 data column.
+        merge_cols (list): columns to group by.
+        split_cols (list): ordered list of columns to split porportionally
+            based on. Ordered based on priority: if non-null result from
+            frist column, result will include first column result, then
+            second and so on.
+    Returns:
+        pandas.DataFrame: a modified version of `same_smol` with a new
+            assigned data_col
+
+    """
+    df_gb = (
+        df_to_scale.loc[:, split_cols]
+        .groupby(by=merge_cols, dropna=False)
+        .sum(min_count=1)
+    )
+    df_w_tots = (
+        pd.merge(
+            df_to_scale,
+            df_gb,
+            right_index=True,
+            left_index=True,
+            suffixes=("", "_fgb")
+        )
+    )
+    # for each of the columns we want to split the frc data by
+    # generate the % of the total group, so we can split the data_col
+    new_data_col = f"{data_col}_scaled"
+    df_w_tots[new_data_col] = pd.NA
+    for split_col in split_cols:
+        df_w_tots[f"{split_col}_pct"] = (
+            df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
+        # choose the first non-null option.
+        df_w_tots[new_data_col] = (
+            df_w_tots[new_data_col].fillna(
+                df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
+    return df_w_tots[[new_data_col]]
+
+
+def scale_to_plant_part(
+        scale_part: str,
+        df_to_scale: pd.DataFrame,
+        ppl: pd.DataFrame,
+        data_set_idx_cols: list,
+        data_cols: list,
+        other_cols_to_keep: list,
+        skip_agg: bool = False
+) -> pd.DataFrame:
+    """
+    hi.
+
+    TODO:
+     * only aggregate the actually duplicated records
+    """
+    if skip_agg:
+        pass
+    else:
+        df_to_scale = pre_aggregate(
+            df_to_scale=df_to_scale,
+            ppl=ppl,
+            data_set_idx_cols=data_set_idx_cols,
+            data_cols=data_cols,
+            other_cols_to_keep=other_cols_to_keep
+        )
+    merged_df = many_merge_on_scale_part(
+        plant_part=scale_part,
+        df_to_scale=df_to_scale,
+        cols_to_keep=data_cols + data_set_idx_cols + other_cols_to_keep,
+        ppl=ppl.reset_index()
+    )
+
+    # grab all of the ppl columns, plus data set's id column(s)
+    # this enables us to have a unique index
+    idx_cols = (
+        pudl.analysis.plant_parts_eia.PLANT_PARTS[scale_part]['id_cols']
+        + pudl.analysis.plant_parts_eia.IDX_TO_ADD
+        + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
+        + data_set_idx_cols
+    )
+    scaled_df = merged_df.set_index(idx_cols)
+    for data_col in data_cols:
+        scaled_df.loc[:, f'{data_col}_scaled'] = split_data_on_split_cols(
+            df_to_scale=scaled_df,
+            merge_cols=data_set_idx_cols,
+            data_col=data_col,
+            split_cols=[
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ]
+        )
+    if skip_agg:
+        scaled_df_post_agg = (
+            scaled_df.reset_index(data_set_idx_cols)
+            .set_index(['record_id_eia'], append=True))
+    else:
+        scaled_df_post_agg = pre_aggregate(
+            df_to_scale=scaled_df.reset_index(),
+            ppl=ppl,
+            data_set_idx_cols=data_set_idx_cols,
+            data_cols=data_cols,
+            other_cols_to_keep=other_cols_to_keep
+        )
+        scaled_df_post_agg = (
+            scaled_df_post_agg.set_index(idx_cols + ['record_id_eia'])
+            .reset_index(data_set_idx_cols)
+        )
+    return scaled_df_post_agg
+
+
+######################
+# OLD ################
+######################
 
 def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
     """
@@ -145,7 +485,7 @@ class InputsManager():
         # merge on the 'record_id_eia' and we trust the master unit list
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
-        # don't show up in the MUL_COLS
+        # don't show up in the PPL_COLS
         cols_ppl = (
             connect_deprish_to_eia.PPL_COLS
             + ['plant_id_pudl', 'total_fuel_cost',
@@ -165,6 +505,10 @@ class InputsManager():
             on=['record_id_eia']
         )
 
+    def _prep_connects_ferc1_eia(self):
+        self.connects_ferc1_eia = calc_annual_capital_addts_ferc1(
+            self.connects_ferc1_eia)
+
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
         # the order here is important. We are preping the inputs needed
@@ -179,8 +523,112 @@ class InputsManager():
 
             self._prep_plant_parts_eia()
             self._prep_connects_deprish_eia()
+            self._prep_connects_ferc1_eia()
 
             self.inputs_prepped = True
+
+
+def calc_annual_capital_addts_ferc1(steam_df, window=3):
+    """
+    Calculate annual capital additions for FERC1 steam records.
+
+    Convert the capex_total column into annual capital additons the
+    `capex_total` column is the cumulative capital poured into the plant over
+    time. This function takes the annual difference should generate the annual
+    capial additions. It also want generates a rolling average, to smooth out
+    the big annual fluxuations.
+
+    Args:
+        steam_df (pandas.DataFrame): result of `prep_plants_ferc()`
+
+    Returns:
+        pandas.DataFrame: augemented version of steam_df with two additional
+        columns: `capex_annual_addt` and `capex_annual_addt_rolling`.
+    """
+    # we need to sort the df so it lines up w/ the groupby
+    steam_df = steam_df.sort_values(IDX_STEAM)
+    # we group on everything but the year so the groups are multi-year unique
+    # plants the shift happens within these multi-year plant groups
+    steam_df['capex_total_shifted'] = steam_df.groupby(
+        [x for x in IDX_STEAM if x != 'report_date'])[['capex_total']].shift()
+    steam_df = steam_df.assign(
+        capex_annual_addt=lambda x: x.capex_total - x.capex_total_shifted
+    )
+
+    addts = pudl.helpers.generate_rolling_avg(
+        steam_df,
+        group_cols=[x for x in IDX_STEAM if x != 'report_date'],
+        data_col='capex_annual_addt',
+        window=window
+    ).pipe(pudl.helpers.convert_cols_dtypes, 'ferc1')
+
+    steam_df_w_addts = (
+        pd.merge(
+            steam_df,
+            addts[IDX_STEAM + ['capex_total', 'capex_annual_addt_rolling']],
+            on=IDX_STEAM + ['capex_total'],
+            how='left',
+        )
+        .assign(
+            capex_annual_per_mwh=lambda x:
+                x.capex_annual_addt / x.net_generation_mwh_ferc1,
+            capex_annual_per_mw=lambda x:
+                x.capex_annual_addt / x.capacity_mw_ferc1,
+            capex_annual_per_kw=lambda x:
+                x.capex_annual_addt / x.capacity_mw_ferc1 / 1000,
+            capex_annual_per_mwh_rolling=lambda x:
+                x.capex_annual_addt_rolling / x.net_generation_mwh_ferc1,
+            capex_annual_per_mw_rolling=lambda x:
+                x.capex_annual_addt_rolling / x.capacity_mw_ferc1,
+        )
+    )
+
+    steam_df_w_addts = add_mean_cap_addts(steam_df_w_addts)
+    # bb tests for volumne of negative annual capex
+    neg_cap_addts = len(
+        steam_df_w_addts[steam_df_w_addts.capex_annual_addt_rolling < 0]) \
+        / len(steam_df_w_addts)
+    neg_cap_addts_mw = (
+        steam_df_w_addts[
+            steam_df_w_addts.capex_annual_addt_rolling < 0]
+        .net_generation_mwh_ferc1.sum()
+        / steam_df_w_addts.net_generation_mwh_ferc1.sum())
+    message = (f'{neg_cap_addts:.02%} records have negative capitial additions'
+               f': {neg_cap_addts_mw:.02%} of capacity')
+    if neg_cap_addts > .1:
+        warnings.warn(message)
+    else:
+        logger.info(message)
+    return steam_df_w_addts
+
+
+def add_mean_cap_addts(steam_df):
+    """Add mean capital additions over lifetime of plant (via `IDX_STEAM`)."""
+    idx_steam_no_date = [c for c in IDX_STEAM if c != 'report_year']
+    gb_cap_an = steam_df.groupby(idx_steam_no_date)[['capex_annual_addt']]
+    # calcuate the standard deviatoin of each generator's capex over time
+    df = (
+        steam_df
+        .merge(
+            gb_cap_an.std().add_suffix('_gen_std').reset_index().pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
+            how='left',
+            on=idx_steam_no_date,
+            validate='m:1'  # should this really be 1:1?
+        )
+        .merge(
+            gb_cap_an.mean().add_suffix('_gen_mean').reset_index().pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
+            how='left',
+            on=idx_steam_no_date,
+            validate='m:1'  # should this really be 1:1?
+        )
+        .assign(
+            capex_annual_addt_diff_mean=lambda x: x.capex_annual_addt - \
+            x. capex_annual_addt_gen_mean,
+        )
+    )
+    return df
 
 
 class MatchMaker():
@@ -253,7 +701,7 @@ class MatchMaker():
             of the deprecation data and ferc1 (with their respective EIA master
             unit list records associated).
         """
-        # add in a dtype enforcer bc OMIGOSH they keep converting to non-nullables
+        # add dtype enforcer bc OMIGOSH they keep defauliting to non-nullables
         candidate_matches_all = pd.merge(
             self.inputs.connects_deprish_eia.pipe(
                 pudl.helpers.convert_cols_dtypes, 'ferc1'),
@@ -619,7 +1067,7 @@ class Scaler(object):
             ]
         )
         for data_col in DATA_COLS_TO_SPLIT:
-            new_data_col = self._get_clean_new_data_col(data_col)
+            new_data_col = _get_clean_new_data_col(data_col)
             same_true.loc[:, new_data_col] = (
                 same_true[f"{data_col}_own_frac"]
             )
@@ -645,86 +1093,21 @@ class Scaler(object):
             & (self.matches_df.level_deprish == 'smol')
         ]
 
-        idx_cols_ferc1 = ['plant_id_pudl', 'record_id_eia_ferc1']
         # add a count for the nuber of depreciation records that match to each
         # ferc1 record
-        df_fgb = (
+        same_smol.loc[:, 'record_count_matches_deprish'] = (
             same_smol
-            .groupby(by=idx_cols_ferc1)
-            [['record_id_eia_deprish']].count()
-            .rename(columns={
-                'record_id_eia_deprish': 'record_count_matches_deprish'})
-            .reset_index()
+            .groupby(by=IDX_COLS_FERC1)
+            [['record_id_eia_deprish']].transform('count')
         )
 
-        same_smol = pd.merge(same_smol, df_fgb)
-
         for data_col, split_cols in DATA_COLS_TO_SPLIT.items():
-            same_smol = self.split_ferc1_data_on_split_cols(
+            same_smol = split_ferc1_data_on_split_cols(
                 same_smol,
                 data_col=f"{data_col}_own_frac",
-                idx_cols_ferc1=idx_cols_ferc1,
                 split_cols=split_cols,
             )
         return same_smol
-
-    def split_ferc1_data_on_split_cols(self,
-                                       same_smol,
-                                       data_col,
-                                       idx_cols_ferc1,
-                                       split_cols,):
-        """
-        Split larger ferc1 records porportionally by depreciation columns.
-
-        This method associates slices of ferc1 records - which are larger than
-        their depreciation counter parts - via prioritized columns.
-
-        Args:
-            same_smol (pandas.DataFrame): table with matched records from ferc1
-                and depreciation records.
-            data_col (string): name of the ferc1 data column.
-            idx_cols_ferc1 (list): columns to group by.
-            split_cols (list): ordered list of columns to split porportionally
-                based on. Ordered based on priority: if non-null result from
-                frist column, result will include first column result, then
-                second and so on.
-        Returns:
-            pandas.DataFrame: a modified version of `same_smol` with a new
-                assigned data_col
-
-        """
-        # we want to know the sum of the potential split_cols for each ferc1
-        # option
-        df_fgb = (
-            same_smol.loc[:, idx_cols_ferc1 + split_cols]
-            .groupby(by=idx_cols_ferc1, dropna=False)
-            .sum(min_count=1)
-            .reset_index()
-        )
-        df_w_tots = (
-            pd.merge(same_smol, df_fgb,
-                     on=idx_cols_ferc1,
-                     suffixes=("", "_fgb"))
-        )
-        # for each of the columns we want to split the frc data by
-        # generate the % of the total group, so we can split the data_col
-        new_data_col = self._get_clean_new_data_col(data_col)
-        df_w_tots[new_data_col] = pd.NA
-        for split_col in split_cols:
-            df_w_tots[f"{split_col}_pct"] = (
-                df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
-            # choose the first non-null option.
-            df_w_tots[new_data_col] = (
-                df_w_tots[new_data_col].fillna(
-                    df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
-
-        # merge in the newly generated split/assigned data column
-        df_final = pd.merge(
-            same_smol,
-            df_w_tots[idx_cols_ferc1 + ['record_id_eia_deprish',
-                                        new_data_col]].drop_duplicates(),
-        )
-        return df_final
 
     def agg_ferc_data_cols(self):
         """
@@ -744,7 +1127,7 @@ class Scaler(object):
         rename_dict = {}
         for data_col_of, data_col in zip(data_cols_own_frac,
                                          DATA_COLS_TO_SPLIT):
-            rename_dict[data_col_of] = self._get_clean_new_data_col(data_col)
+            rename_dict[data_col_of] = _get_clean_new_data_col(data_col)
         # sum the data columns at the level of the depreciation records
         same_beeg_sum = (
             same_beeg.groupby('record_id_eia_deprish')
@@ -761,14 +1144,6 @@ class Scaler(object):
                              how='left')
         return same_beeg
 
-    def _get_clean_new_data_col(self, data_col):
-        # some of the data columns already have a ferc1 suffix because the same
-        # column name also shows up in the EIA data... so we want to remove the
-        # double ferc1 if it shows up
-        new_data_col = f"{data_col}_ferc1_deprish"
-        new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
-        return new_data_col
-
     def test_same_true_fraction_owned(self, same_true):
         """
         Test the same_true scaling.
@@ -778,7 +1153,7 @@ class Scaler(object):
             fraction_owned columns.
         """
         for data_col in DATA_COLS_TO_SPLIT:
-            new_data_col = self._get_clean_new_data_col(data_col)
+            new_data_col = _get_clean_new_data_col(data_col)
             not_same = same_true[
                 (same_true.match_method == 'same_true')
                 & ~(same_true[data_col] == same_true[new_data_col])
@@ -797,31 +1172,67 @@ class Scaler(object):
                 )
 
 
-def rmi_output_ify(scaled_df, deprish_df):
-    """Generate the output in RMI's desired format."""
-    add_suffix = ['utility_name_ferc1',
-                  'utility_id_ferc1',
-                  'report_year']
-    deprish_idx_new = [
-        x if x not in add_suffix else x + '_deprish'
-        for x in connect_deprish_to_eia.DEPRISH_COLS]
-    scaled_df2 = pd.merge(
-        scaled_df,
-        deprish_df,
-        left_on=deprish_idx_new,
-        right_on=connect_deprish_to_eia.DEPRISH_COLS,
+def split_ferc1_data_on_split_cols(scale_df, merge_cols, data_col, split_cols):
+    """
+    Split larger ferc1 records porportionally by depreciation columns.
+
+    This method associates slices of ferc1 records - which are larger than
+    their depreciation counter parts - via prioritized columns.
+
+    Args:
+        scale_df (pandas.DataFrame): table with matched records from ferc1
+            and depreciation records.
+        data_col (string): name of the ferc1 data column.
+        merge_cols (list): columns to group by.
+        split_cols (list): ordered list of columns to split porportionally
+            based on. Ordered based on priority: if non-null result from
+            frist column, result will include first column result, then
+            second and so on.
+    Returns:
+        pandas.DataFrame: a modified version of `same_smol` with a new
+            assigned data_col
+
+    """
+    # we want to know the sum of the potential split_cols for each ferc1
+    # option
+    df_fgb = (
+        scale_df.loc[:, merge_cols + split_cols]
+        .groupby(by=merge_cols, dropna=False)
+        .sum(min_count=1)
+        .reset_index()
     )
-    # get the rename dict.. once this is stable, convert/store this as an dict
-    rename = pd.read_excel(
-        pathlib.Path().cwd().parent / 'inputs' / 'rmi_output_formt.xlsx')
-    rename_dict = (
-        rename[rename.pudl_name.notnull()]
-        .set_index('pudl_name').to_dict()['rmi_name']
+    df_w_tots = (
+        pd.merge(scale_df, df_fgb,
+                 on=merge_cols,
+                 suffixes=("", "_fgb"))
     )
-    if [x for x in rename_dict.keys() if x not in scaled_df2]:
-        raise AssertionError('')
-    connected_deprish = (
-        scaled_df2.rename(columns=rename_dict)
-        [rename_dict.values()]
+    # for each of the columns we want to split the frc data by
+    # generate the % of the total group, so we can split the data_col
+    new_data_col = _get_clean_new_data_col(data_col)
+    df_w_tots[new_data_col] = pd.NA
+    for split_col in split_cols:
+        df_w_tots[f"{split_col}_pct"] = (
+            df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
+        # choose the first non-null option.
+        df_w_tots[new_data_col] = (
+            df_w_tots[new_data_col].fillna(
+                df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
+
+    # merge in the newly generated split/assigned data column
+    df_final = pd.merge(
+        scale_df,
+        df_w_tots[
+            merge_cols + ['record_id_eia_deprish', new_data_col]
+        ]
+        .drop_duplicates(),
     )
-    return connected_deprish
+    return df_final
+
+
+def _get_clean_new_data_col(data_col):
+    # some of the data columns already have a ferc1 suffix because the same
+    # column name also shows up in the EIA data... so we want to remove the
+    # double ferc1 if it shows up
+    new_data_col = f"{data_col}_ferc1_deprish"
+    new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
+    return new_data_col

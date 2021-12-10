@@ -36,15 +36,16 @@ RESTRICT_MATCH_COLS = ['plant_id_eia', 'utility_id_pudl', 'report_year']
 
 PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
-    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
-    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+    'report_date', 'ownership', 'plant_name_eia', 'plant_id_eia',
+    'generator_id', 'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status'
+    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status',
+    'operational_status_pudl'
 ]
 
 PPL_RENAME = {
-    'record_id_eia': 'record_id_eia_name_match',
+    # 'record_id_eia': 'record_id_eia_name_match',
     'appro_record_id_eia': 'record_id_eia_fuzzy',
     'plant_part': 'plant_part_name_match',
     'appro_part_label': 'plant_part',
@@ -132,8 +133,9 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
         plant_parts_df
         .reset_index()  # convert the record_id_eia index to a column
         .set_index(RESTRICT_MATCH_COLS).loc[options_index]
-        .reset_index())
-    plant_parts_df.record_id_eia
+        .reset_index()
+        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+    )
     plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)
     return plant_parts_df
@@ -181,6 +183,7 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
     Returns:
         pandas.DataFrame
     """
+    logger.info("Generating fuzzy matches.")
     # get the best match for each valye of the key1 column
     match_tuple_series = deprish_df[key_deprish].apply(
         lambda x: process.extractOne(
@@ -200,31 +203,8 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
     matches_perct = (len(deprish_df[deprish_df.plant_name_match.notnull()])
                      / len(deprish_df))
     logger.info(f"Matches: {matches_perct:.02%}")
+    logger.info(f"Matching resulted in {len(deprish_df)} connections.")
     return deprish_df
-
-
-def match_merge(deprish_df, mul_df, key_deprish, key_mul):
-    """Generate fuzzy matches and merge relevant colums from eia."""
-    logger.info("Merging fuzzy matches.")
-    # we are going to match with all of the names from the
-    # master unit list, but then use the "true granularity"
-    match_merge_df = (pd.merge(
-        get_fuzzy_matches(
-            deprish_df, mul_df,
-            key_deprish=key_deprish, key_mul=key_mul,
-            threshold=75),
-        mul_df.drop_duplicates(
-            subset=['report_year', 'plant_name_new'])[PPL_COLS],
-        left_on=['report_year', 'utility_id_pudl', 'plant_name_match', 'plant_id_eia'],
-        right_on=['report_year', 'utility_id_pudl', key_mul, 'plant_id_eia'], how='left')
-        # rename the ids so that we have the "true granularity"
-        # Every MUL record has identifying columns for it's true granualry,
-        # even when the true granularity is the same record, so we can use the
-        # true gran columns across the board.
-        .rename(columns=PPL_RENAME)
-    )
-    logger.info(f"Matching resulted in {len(match_merge_df)} connections.")
-    return match_merge_df
 
 
 def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
@@ -280,10 +260,34 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
     )
     mul_df = prep_master_parts_eia(plant_parts_df, deprish_df, key_mul=key_mul)
     deprish_match = (
-        match_merge(deprish_df, mul_df,
-                    key_deprish=key_deprish, key_mul=key_mul)
+        get_fuzzy_matches(
+            deprish_df=deprish_df, mul_df=mul_df,
+            key_deprish=key_deprish, key_mul=key_mul,
+            threshold=75)
+        .pipe(add_record_id_fuzzy, plant_parts_df=mul_df, key_mul=key_mul)
         .pipe(add_overrides, file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
               sheet_name_output=sheet_name_output)
+    )
+    # merge in the rest of the ppl columns
+    # we want to have the columns from the PPL, not from the fuzzy merged
+    # option. so we're dropping all of the shared columns before merging
+    ppl_non_id_cols = [c for c in PPL_COLS if c != 'record_id_eia']
+    deprish_match = (
+        deprish_match.set_index('record_id_eia')
+        .drop(columns=[c for c in deprish_match if c in ppl_non_id_cols])
+        .merge(
+            plant_parts_df[ppl_non_id_cols],
+            left_index=True,
+            right_index=True,
+            how='left',
+            validate='m:1',
+        )
+        .reset_index()
+        # rename the ids so that we have the "true granularity"
+        # Every MUL record has identifying columns for it's true granualry,
+        # even when the true granularity is the same record, so we can use the
+        # true gran columns across the board.
+        .rename(columns=PPL_RENAME)
         .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
         .pipe(pudl.helpers.organize_cols,
               # we want to pull the used columns to the front, but there is
@@ -303,8 +307,38 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
     return deprish_match
 
 
+def add_record_id_fuzzy(deprish_df, plant_parts_df, key_mul):
+    """Merge in relevant columns from EIA plant-part list."""
+    left_on = [
+        'report_year',
+        'utility_id_pudl',
+        'plant_name_match',
+        'plant_id_eia']
+    right_on = [
+        'report_year',
+        'utility_id_pudl',
+        key_mul,
+        'plant_id_eia']
+    # we're adding the appro ID and then we'll reassign that column as
+    # record_id_eia_fuzzy below
+    match_merge_df = (
+        pd.merge(
+            deprish_df,
+            plant_parts_df
+            .drop_duplicates(subset=['report_year', 'plant_name_new'])
+            [right_on + ['appro_record_id_eia']],
+            left_on=left_on,
+            right_on=right_on,
+            how='left',
+            validate='m:1'
+        )
+        .rename(columns={'appro_record_id_eia': 'record_id_eia_fuzzy'})
+    )
+    return match_merge_df
+
+
 def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
-    "Docs."
+    """Docs."""
     possible_matches_mul = (
         pd.merge(
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
