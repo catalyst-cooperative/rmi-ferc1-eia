@@ -17,6 +17,7 @@ dependencies:
   # So we can run a notebook server
   - jupyterlab~=3.0
   - jupyter-resource-usage~=0.5.0
+  
 
   # RMI package requirements, also specified in setup.py
   - fuzzywuzzy~=0.18.0
@@ -24,12 +25,15 @@ dependencies:
   - python-levenshtein~=0.12.2
   - pandera~=0.7.2
   - seaborn~=0.11.2
+  - plotly==5.4.0
+  
 
   # Not normal Python packages that come from PyPI
   - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
     - simpledbf~=0.2.6
+#    - jupyterlab-plotly    
     - git+https://github.com/catalyst-cooperative/pudl.git@dev
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
