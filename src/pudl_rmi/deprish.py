@@ -19,7 +19,6 @@ deprish_df = transformer.execute()
 import logging
 from copy import deepcopy
 import warnings
-import pathlib
 
 import pandas as pd
 import numpy as np
@@ -40,6 +39,7 @@ IDX_COLS_DEPRISH = [
     'plant_id_eia',
     'plant_part_name',
     'ferc_acct',
+    'ferc_acct_name',
     'utility_id_pudl',
     'data_source'
 ]
@@ -984,20 +984,20 @@ def fill_in_tech_type(gens):
 ######################
 
 
-def get_ferc_acct_type_map(file_path):
+def get_ferc_acct_type_map():
     """Grab the mapping of the FERC Account numbers to names."""
-    ferc_acct_map = (
-        pd.read_csv(file_path, dtype={'ferc_acct': pd.StringDtype()})
+    ferc_acct_map = pd.read_csv(
+        pudl_rmi.FERC_ACCT_NAMES_CSV,
+        dtype={'ferc_acct': pd.StringDtype()}
     )
+    # ensure there are NO NULLS in the input file
+    assert(ferc_acct_map.notnull().any().any())
     return ferc_acct_map
 
 
 def add_ferc_acct_name(tidy_df):
     """Add the FERC Account name into the tidied deprecation table."""
-    file_path_ferc_acct_names = (
-        pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
-    ferc_acct_names = get_ferc_acct_type_map(
-        file_path_ferc_acct_names)
+    ferc_acct_names = get_ferc_acct_type_map()
     # ensure the ferc_acct column is a string, otherwise the string
     # manipliations won't work
     tidy_df = tidy_df.astype({'ferc_acct': pd.StringDtype()})
