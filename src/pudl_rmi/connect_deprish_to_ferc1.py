@@ -8,6 +8,9 @@ generator records.
 
 Matches are determined to be correct record linkages.
 Candidate matches are potential matches.
+
+Inputs:
+* A
 """
 
 import logging
@@ -178,16 +181,14 @@ def pre_aggregate(
     wtavg_dict = {k: v for (k, v) in all_wtavg_dict.items() if k in all_cols}
     str_cols = [c for c in all_cols if c in all_str_cols]
 
-    if len(df_to_scale.filter(like='_scaled').columns) > 0:
-        logger.info("Post-scale aggregate.")
-        sum_cols = [f"{x}_scaled" for x in sum_cols]
-        wtavg_dict = {
-            k: f"{v}_scaled" for (k, v) in wtavg_dict.items()
-        }
-        logger.info(f"Summing: {sum_cols}.")
-        logger.info(f"Averaging: {wtavg_dict}.")
-    else:
-        logger.info("Pre-scale aggregate.")
+    # if len(df_to_scale.filter(like='_scaled').columns) > 0:
+    #     logger.info("Post-scale aggregate.")
+    #     sum_cols = [f"{x}_scaled" for x in sum_cols]
+    #     wtavg_dict = {
+    #         k: f"{v}_scaled" for (k, v) in wtavg_dict.items()
+    #     }
+    # else:
+    #     logger.info("Pre-scale aggregate.")
     by_data_set_cols = ['data_source']
     by = ['record_id_eia'] + [x for x in by_data_set_cols if x in df_to_scale]
     # sum and weighted average!
@@ -343,13 +344,14 @@ def scale_to_plant_part(
             data_cols=data_cols,
             other_cols_to_keep=other_cols_to_keep
         )
+    logger.info(len(df_to_scale))
     merged_df = many_merge_on_scale_part(
         plant_part=scale_part,
         df_to_scale=df_to_scale,
         cols_to_keep=data_cols + data_set_idx_cols + other_cols_to_keep,
         ppl=ppl.reset_index()
     )
-
+    logger.info(len(merged_df))
     # grab all of the ppl columns, plus data set's id column(s)
     # this enables us to have a unique index
     idx_cols = (
@@ -360,7 +362,7 @@ def scale_to_plant_part(
     )
     scaled_df = merged_df.set_index(idx_cols)
     for data_col in data_cols:
-        scaled_df.loc[:, f'{data_col}_scaled'] = split_data_on_split_cols(
+        scaled_df.loc[:, f"{data_col}_scaled"] = split_data_on_split_cols(
             df_to_scale=scaled_df,
             merge_cols=data_set_idx_cols,
             data_col=data_col,
@@ -370,6 +372,11 @@ def scale_to_plant_part(
                 'total_fuel_cost'
             ]
         )
+    logger.info(len(scaled_df))
+    scaled_df = (
+        scaled_df.drop(columns=data_cols)
+        .rename(columns={
+            c: c.replace('_scaled', '') for c in [c for c in scaled_df.columns if "_scaled" in c]}))
     if skip_agg:
         scaled_df_post_agg = (
             scaled_df.reset_index(data_set_idx_cols)
@@ -386,6 +393,7 @@ def scale_to_plant_part(
             scaled_df_post_agg.set_index(idx_cols + ['record_id_eia'])
             .reset_index(data_set_idx_cols)
         )
+    logger.info(len(scaled_df_post_agg))
     return scaled_df_post_agg
 
 
@@ -1236,3 +1244,91 @@ def _get_clean_new_data_col(data_col):
     new_data_col = f"{data_col}_ferc1_deprish"
     new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
     return new_data_col
+
+
+def fake_duke_deprish_eia_for_mod(de):
+    """Temp function to fake Duke's deprish records for modernization."""
+    logger.info("Adding fake years of Duke data....")
+    # omigosh bc there are double in here some how!
+    if len(de.filter(like='record_id_eia_fuzzy').columns) == 2:
+        de = de.drop(columns=['record_id_eia_fuzzy'])
+    # cols_to_keep = [
+    #     'plant_part_name', 'utility_name_ferc1', 'report_year', 'report_date',
+    #     'plant_name_match', 'record_id_eia', 'line_id', 'utility_id_pudl',
+    #     'data_source'
+    # ]
+    fake_year_dfs = []
+    de_2018 = (
+        de[
+            de.utility_id_pudl.isin([90, 97])
+            & (de.report_date.dt.year == 2018)
+        ]
+    )
+    for fake_year in [2019, 2020]:
+        de_fake_new_year = (
+            de_2018.copy()
+            .assign(
+                report_year=fake_year,
+                report_date=pd.to_datetime(fake_year, format="%Y")
+            )
+            .replace(
+                {"record_id_eia": "_2018_",
+                 "line_id": "2018_", },
+                {"record_id_eia": f"_{fake_year}_",
+                 "line_id": f"{fake_year}_"},
+                regex=True
+            )
+            # [cols_to_keep]
+            .reset_index()
+        )
+        fake_year_dfs.append(de_fake_new_year)
+    de_faked = pd.concat([de] + fake_year_dfs, ignore_index=True)
+    assert (~de_faked[de_faked.report_date.dt.year == 2020].empty)
+    return de_faked
+
+
+def append_non_plant_deprish_records(d, scaled_de):
+    """Add the T&D records into the output with faked record_id_eia."""
+    scaled_append = scaled_de.reset_index()
+    # ensure the depreciation data does not have stray columns that aren't in
+    # the deprish/EIA combo
+    d_non_plant = (
+        d[~d.line_id.isin(scaled_append.line_id.unique())]
+        .assign(
+            report_year=lambda x: x.report_date.dt.year
+        )
+        .pipe(fake_duke_deprish_eia_for_mod)
+    )
+
+    # make up a fake "record_id_eia" for just the T&D records
+    de_w_td = (
+        pd.concat([scaled_append, d_non_plant])
+        .assign(
+            operational_status=lambda x: np.where(
+                (
+                    x.record_id_eia.isnull()
+                    & x.plant_part_name.notnull()
+                    & x.ferc_acct_name.str.lower()
+                    .isin(['distribution', 'general', 'transmission', 'intangible'])
+                ),
+                'existing',
+                x.operational_status
+            ),
+        )
+        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+        .pipe(pudl.helpers.convert_cols_dtypes, 'ferc1')
+    )
+    de_w_td.loc[:, 'faked_id'] = (
+        de_w_td.ferc_acct_name + "_" +
+        de_w_td.utility_id_pudl.astype(str) + "_" +
+        de_w_td.data_source + "_" +
+        de_w_td.plant_part_name + "_" +
+        de_w_td.report_year.astype(str)
+    )
+    de_w_td.loc[:, 'record_id_eia'] = (
+        de_w_td.record_id_eia.fillna(de_w_td.faked_id))
+    de_w_td = (
+        de_w_td.drop(columns=['plant_part_name', 'ferc_acct_name'])
+        .set_index('record_id_eia')
+    )
+    return de_w_td
