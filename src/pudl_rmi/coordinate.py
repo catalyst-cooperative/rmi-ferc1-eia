@@ -218,7 +218,7 @@ class Output():
                 clobber=clobber
             )
             # export
-            connects_deprish_ferc1.to_pickle(pudl_rmi.file_path)
+            connects_deprish_ferc1.to_pickle(file_path)
 
         else:
             logger.info(
@@ -256,7 +256,7 @@ class Output():
             pandas.DataFrame: a table of the conneciton between the
                 depreciation studies and the FERC1 plants.
         """
-        ppl = self.grab_plant_part_list(clobber=False)
+        ppl = self.grab_plant_part_list(clobber=clobber_all)
         d = self.grab_deprish(clobber=clobber_all)
         de = self.grab_deprish_to_eia(clobber=clobber_all)
         fe = self.grab_ferc1_to_eia(clobber=clobber_all)

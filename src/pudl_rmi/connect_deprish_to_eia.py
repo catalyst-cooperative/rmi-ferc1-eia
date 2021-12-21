@@ -32,7 +32,7 @@ STRINGS_TO_CLEAN = {
     "combustion turbine": ["CT"],
 }
 
-RESTRICT_MATCH_COLS = ['plant_id_pudl', 'utility_id_pudl', 'report_year']
+RESTRICT_MATCH_COLS = ['plant_id_eia', 'utility_id_pudl', 'report_year']
 
 PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
@@ -40,10 +40,10 @@ PPL_COLS = [
     'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned', 'ownership_dupe'
+    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status'
 ]
 
-MUL_RENAME = {
+PPL_RENAME = {
     'record_id_eia': 'record_id_eia_name_match',
     'appro_record_id_eia': 'record_id_eia_fuzzy',
     'plant_part': 'plant_part_name_match',
@@ -56,7 +56,7 @@ granualries."""
 
 IDX_DEPRISH_COLS = [
     'utility_id_ferc1', 'utility_id_pudl', 'utility_name_ferc1',
-    'plant_id_pudl', 'plant_part_name', 'report_year']
+    'plant_id_eia', 'plant_part_name', 'report_year']
 
 ###############################################################################
 # Prep the inputs
@@ -96,6 +96,20 @@ def prep_deprish(plant_parts_df, key_deprish):
         on=RESTRICT_MATCH_COLS,
         validate='m:1'
     )
+    # check the number of depreciation records that should have EIA plant-part
+    # matches.
+    # TODO: go through all of these to reassign plant_id_eia!!! and turn down
+    # the acceptable number of baddies
+    baddies = deprish_ids.loc[
+        (deprish_ids._merge != 'both')
+        & (deprish_ids.plant_part_name.notnull())
+    ].drop_duplicates(subset=['plant_part_name'])
+    if len(baddies) > 270:
+        raise AssertionError(
+            f"Found {baddies} depreciation records which don't have "
+            "cooresponding EIA plant-part list records. Check plant_id_eia's "
+            f"in {pudl_rmi.FILE_PATH_DEPRISH_RAW}"
+        )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == 'both']
         .drop_duplicates(subset=['plant_part_name', 'report_date'])
@@ -201,13 +215,22 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             threshold=75),
         mul_df.drop_duplicates(
             subset=['report_year', 'plant_name_new'])[PPL_COLS],
-        left_on=['report_year', 'utility_id_pudl', 'plant_name_match'],
-        right_on=['report_year', 'utility_id_pudl', key_mul], how='left')
+        left_on=[
+            'report_year',
+            'utility_id_pudl',
+            'plant_name_match',
+            'plant_id_eia'],
+        right_on=[
+            'report_year',
+            'utility_id_pudl',
+            key_mul,
+            'plant_id_eia'],
+        how='left')
         # rename the ids so that we have the "true granularity"
         # Every MUL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
         # true gran columns across the board.
-        .rename(columns=MUL_RENAME)
+        .rename(columns=PPL_RENAME)
     )
     logger.info(f"Matching resulted in {len(match_merge_df)} connections.")
     return match_merge_df
@@ -235,14 +258,18 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
         overrides_df = (
             overrides_df[overrides_df.filter(like='record_id_eia_override')
                          .notnull().any(axis='columns')]
-            [IDX_DEPRISH_COLS +
+            [['plant_part_name', 'report_year'] +
              list(overrides_df.filter(like='record_id_eia_override').columns)])
         logger.info(
             f"Adding {len(overrides_df)} overrides from {sheet_name_output}.")
         # concat, sort so the True overrides are at the top and drop dupes
         deprish_match_full = (
-            pd.merge(deprish_match, overrides_df,
-                     on=IDX_DEPRISH_COLS, how='left')
+            pd.merge(
+                deprish_match.pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
+                overrides_df.pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
+                on=['plant_part_name', 'report_year'],
+                how='outer'
+            )
             .assign(record_id_eia=lambda x:
                     x.record_id_eia_override.fillna(x.record_id_eia_fuzzy))
         )
@@ -271,7 +298,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
               # we want to pull the used columns to the front, but there is
               # some overlap in columns from these two datasets. And we have
               # renamed some of the columns from the master unit list.
-              list(set(IDX_DEPRISH_COLS + [MUL_RENAME.get(c, c)
+              list(set(IDX_DEPRISH_COLS + [PPL_RENAME.get(c, c)
                                            for c in PPL_COLS])))
     )
 
@@ -282,7 +309,18 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
     deprish_match = deprish_match.loc[
         :, first_cols + [x for x in deprish_match.columns
                          if x not in first_cols]]
+    return deprish_match
 
+
+def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
+    """
+    Get the part of the EIA plant-part list that could match with depreciation.
+
+    Returns:
+        pandas.DataFrame: A subset of the EIA plant-part list that cooresponds
+        to possible matches for the depreciation data based on the
+        ``RESTRICT_MATCH_COLS``.
+    """
     possible_matches_mul = (
         pd.merge(
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
@@ -290,7 +328,7 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
             on=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.organize_cols, PPL_COLS)
     )
-    return deprish_match, possible_matches_mul
+    return possible_matches_mul
 
 ###############################################################################
 # EXPORT
@@ -328,9 +366,12 @@ def execute(
             data to names in the master unit list, including appropirate id's
             from the master unit list.
     """
-    deprish_match_df, possible_matches_mul_df = match_deprish_eia(
+    deprish_match_df = match_deprish_eia(
         plant_parts_df,
         sheet_name_output=sheet_name_output
+    )
+    possible_matches_mul_df = grab_possible_plant_part_list_matches(
+        plant_parts_df, deprish_match_df
     )
     if save_to_xls:
         sheets_df_dict = {

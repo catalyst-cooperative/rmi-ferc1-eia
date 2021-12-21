@@ -23,9 +23,11 @@ import pudl
 
 logger = logging.getLogger(__name__)
 
-CONNECT_COLS = ['plant_id_pudl',
-                'utility_id_pudl',
-                'report_date']
+CONNECT_COLS = [
+    'plant_id_pudl',
+    # 'utility_id_pudl',
+    'report_year'
+]
 
 SPLIT_COLS_STANDARD = [
     'total_fuel_cost',
@@ -133,7 +135,7 @@ class InputsManager():
                 self.deprish_eia.record_id_eia.notnull()]
             .pipe(pudl.helpers.convert_to_date)
             .astype({i: pd.Int64Dtype() for i in
-                     ['plant_id_pudl', 'utility_id_pudl', 'utility_id_ferc1']}
+                     ['plant_id_eia', 'utility_id_pudl', 'utility_id_ferc1']}
                     )
             .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
         )
@@ -143,17 +145,25 @@ class InputsManager():
         # merge on the 'record_id_eia' and we trust the master unit list
         # more than the spreadsheet based connection for deprish to eia
         # so we are going to only use columns from the deprish_to_eia that
-        # don't show up in the PPL_COLS
+        # don't show up in the MUL_COLS
+        cols_ppl = (
+            connect_deprish_to_eia.PPL_COLS
+            + ['plant_id_pudl', 'total_fuel_cost',
+               'net_generation_mwh', 'capacity_mw']
+        )
         cols_to_use_deprish_eia = (
             ['record_id_eia'] +
             [c for c in self.connects_deprish_eia.columns
-             if c not in connect_deprish_to_eia.PPL_COLS])
+             if c not in cols_ppl])
 
         self.connects_deprish_eia = pd.merge(
             self.connects_deprish_eia[cols_to_use_deprish_eia],
             self.plant_parts_eia[
                 connect_deprish_to_eia.PPL_COLS
-                + ['total_fuel_cost', 'net_generation_mwh', 'capacity_mw']])
+                + ['plant_id_pudl', 'total_fuel_cost',
+                   'net_generation_mwh', 'capacity_mw']],
+            on=['record_id_eia']
+        )
 
     def prep_inputs(self, clobber=False):
         """Prepare all inputs needed for connecting depreciation to FERC1."""
@@ -212,9 +222,10 @@ class MatchMaker():
         connected_plant_ids = candidate_matches_all[
             candidate_matches_all._merge == 'both'].plant_id_pudl.unique()
         # how many plant_id_pudl's didn't get a corresponding FERC1 record
-        not_in_ferc1_plant_ids = (candidate_matches_all[
-            candidate_matches_all._merge == 'left_only']
-            .plant_id_pudl.unique())
+        not_in_ferc1_plant_ids = (
+            candidate_matches_all[candidate_matches_all._merge == 'left_only']
+            .plant_id_pudl.unique()
+        )
         # these are a subset of the not_in_ferc1_plant_ids that show up in the
         # steam table
         missing_plant_ids = (self.inputs.connects_ferc1_eia[
@@ -242,9 +253,12 @@ class MatchMaker():
             of the deprecation data and ferc1 (with their respective EIA master
             unit list records associated).
         """
+        # add in a dtype enforcer bc OMIGOSH they keep converting to non-nullables
         candidate_matches_all = pd.merge(
-            self.inputs.connects_deprish_eia,
-            self.inputs.connects_ferc1_eia,
+            self.inputs.connects_deprish_eia.pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
+            self.inputs.connects_ferc1_eia.pipe(
+                pudl.helpers.convert_cols_dtypes, 'ferc1'),
             on=CONNECT_COLS,
             suffixes=('_deprish', '_ferc1'),
             how='left', indicator=True
@@ -561,7 +575,10 @@ class Scaler(object):
         scaled_df = pd.concat([same_true, same_smol, same_beeg])
 
         self.test_same_true_fraction_owned(same_true)
-        assert(len(scaled_df) == len(self.matches_df))
+        logger.info(
+            f"output is len {len(scaled_df)} while input was "
+            f"{len(self.matches_df)}"
+        )
         return scaled_df
 
     def scale_by_ownership_fraction(self):
