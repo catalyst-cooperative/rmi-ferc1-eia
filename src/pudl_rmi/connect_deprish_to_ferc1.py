@@ -1,16 +1,31 @@
 """
 Connect the depreciation data with FERC1 steam plant records.
 
-This module attempts to connect the depreciation data with FERC1 steam records.
-Both the depreciation records and FERC1 steam has been connected to the EIA
-master unit list, which is a compilation of various possible combinations of
-generator records.
+This module attempts to connect the depreciation data with FERC1 steam records
+through the EIA plant-part list. Both the depreciation records and FERC1 steam
+has been connected to the EIA plant-part list, which is a compilation of
+various possible combinations of generator records.
 
-Matches are determined to be correct record linkages.
-Candidate matches are potential matches.
+Currently Implemented:
+* A scale-to-generator-er.
+    Inputs:
+    * Any dataset that has been connected to the EIA plant-part list. This
+     dataset can have heterogeneous plant-parts (i.e. one record can be
+     associated with a full plant while the next can be associated with a ).
+    * Metadata regarding the input dataset and how to operate on each of the
+     columns.
+    Outputs:
+    * The initial dataset scaled to the generator level.
 
-Inputs:
-* A
+Future Needs:
+* A merger of generator-based records. This is currently implemented in the
+``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
+integrated here.
+* (Possible) Enable the scaler to scale to any plant-part. Right now only
+splitting is integrated and thus we can only scale to the smallest plant-part
+(the generator). Enabling scaling to any plant-part would require both
+splitting and aggregating, as well as labeling which method to apply to each
+record. This labeling is required becuase
 """
 
 import logging
@@ -26,8 +41,7 @@ import pudl
 
 logger = logging.getLogger(__name__)
 
-
-META_DEPRISH_EIA: Dict = {
+META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
     'line_id':
         {
             'data_set_idx_col': True,
@@ -151,7 +165,7 @@ META_FERC1_EIA: Dict = {
 }
 
 
-def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
+def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     """
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
@@ -166,9 +180,42 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
             depreciation studies and the EIA plant-parts list.
         ferc1_to_eia (pandas.DataFrame): a table of the connection between
             the FERC1 plants and the EIA plant-parts list.
-        clobber (boolean):
     """
-    return
+    logger.info("Scaling FERC1-EIA to the generator level.")
+    scaled_fe = (
+        ScaleToPlantParter(**{
+            'columns': META_FERC1_EIA,
+            'eia_pk': ['record_id_eia'],
+            'plant_part': 'plant_gen'
+        })
+        .execute(
+            df_to_scale=ferc1_to_eia,
+            ppl=plant_parts_eia)
+    )
+
+    logger.info("Scaling Depreciation-EIA to the generator level.")
+    scaled_de = (
+        ScaleToPlantParter(**{
+            'columns': META_DEPRISH_EIA,
+            'eia_pk': ['record_id_eia', 'data_source'],
+            'plant_part': 'plant_gen'
+        })
+        .execute(
+            df_to_scale=deprish_eia,
+            ppl=plant_parts_eia)
+    )
+
+    ferc_deprish_eia = (
+        pd.merge(
+            scaled_de,
+            scaled_fe,
+            right_index=True,
+            left_index=True,
+            how='outer',
+            suffixes=('_deprish', '_ferc1'),
+        )
+    )
+    return ferc_deprish_eia
 
 
 class FieldTreatment(BaseModel):
@@ -187,85 +234,148 @@ class FieldTreatment(BaseModel):
     sum_col: Optional[pydantic.StrictBool] = False
     scale_col: Optional[List] = False
     wtavg_col: Optional[str]
-    str_col: Optional[pydantic.StrictBool]
+    str_col: Optional[pydantic.StrictBool] = False
+
+    class Config:
+        """
+        An attempt to stop getting an error on reload.
+
+        The error:
+            ``ValueError: "FieldTreatment" object has no field "__class__"``
+
+        Ref: https://github.com/samuelcolvin/pydantic/issues/288
+        """
+
+        allow_population_by_field_name = True
 
 
-class TableTreatment(BaseModel):
-    """How to process a table."""
+class ScaleToPlantParter(BaseModel):
+    """Scale a table process a table."""
 
     columns: Dict[str, FieldTreatment]
     eia_pk: List[str] = ['record_id_eia']
+    plant_part: str
 
+    class Config:
+        """
+        An attempt to stop getting an error on reload.
 
-class ScaleToPlantParter():
-    """Scale to EIA plant-part."""
+        The error:
+            ``ValueError: "FieldTreatment" object has no field "__class__"``
 
-    def __init__(self, plant_part, metadata):
-        """Initialize scaler of df to plant-part."""
-        self.metadata: TableTreatment = metadata
-        self.plant_part: str = plant_part
-        self.eia_pk: List = metadata.eia_pk
+        Ref: https://github.com/samuelcolvin/pydantic/issues/288
+        """
 
-        # HALP: I couldn't figure out how to use the "columns" in the
-        # TableTreatment to set... anything. If I set it as an empty dict
-        # all of these extracted columns/dictionaries would come up blank but
-        # if I didn't let it = {}, columns wouldn't be set and thus I could
-        # do nothing with columns
+        allow_population_by_field_name = True
 
-        # So here are a much of little functions to extract info from
-        # TableTreatment.columns
-        self.sum_cols: List = self._extract_sum_cols()
-        self.str_cols: List = self._extract_str_cols()
-        self.wtavg_dict: Dict[str, str] = self._extract_wtavg_dict()
-        self.data_set_idx_cols: List = self._extract_data_set_idx_cols()
-        self.scale_cols: Dict[str, List[str]] = self._extract_scale_cols()
+    # def extract_list_of_cols(self, treatment_type):
+    #     """
+    #     Grab the columns which need to be summed from the column meta.
+    #
+    #     HALP: This doesn't work bc "treatments" below is a
+    #     `FieldTreatment` and `'FieldTreatment' object is not subscriptable`.
+    #     Are there ways to extract info from a `FieldTreatment` without the
+    #     name of the element like I'm doing below??
+    #     """
+    #     return [
+    #         col for (col, treatments) in self.columns.items()
+    #         if treatments[treatment_type]
+    #     ]
+    #
+    # def extract_dict_of_col_treatments(self, treatment_type):
+    #     """
+    #     Grab the columns which need to be  from the column meta.
+    #
+    #     Same HALP as above.
+    #     """
+    #     return {
+    #         col: treatments[treatment_type] for (col, treatments)
+    #         in self.columns.items() if treatments[treatment_type]
+    #     }
 
-    def _extract_sum_cols(self):
+    def extract_sum_cols(self):
+        """Grab the columns which need a string treatment from the metadata."""
         return [
-            col for (col, treatments) in self.metadata.columns.items()
+            col for (col, treatments) in self.columns.items()
             if treatments.sum_col
         ]
 
-    def _extract_str_cols(self):
+    def extract_str_cols(self):
+        """Grab the columns which need a string treatment from the metadata."""
         return [
-            col for (col, treatments) in self.metadata.columns.items()
+            col for (col, treatments) in self.columns.items()
             if treatments.str_col
         ]
 
-    def _extract_wtavg_dict(self):
+    def extract_wtavg_dict(self):
+        """Grab the dict of columns that get a weighted average treatment."""
         return {
             col: treatments.wtavg_col for (col, treatments)
-            in self.metadata.columns.items() if treatments.wtavg_col
+            in self.columns.items() if treatments.wtavg_col
         }
 
-    def _extract_data_set_idx_cols(self):
+    def extract_data_set_idx_cols(self):
+        """Grab the data set index/primary_key columns from the metadata."""
         return [
-            col for (col, treatments) in self.metadata.columns.items()
+            col for (col, treatments) in self.columns.items()
             if treatments.data_set_idx_col
         ]
 
-    def _extract_scale_cols(self):
+    def extract_scale_cols(self):
+        """Grab the columns from the metadata which need to be scaled."""
         return {
             col: treatments.scale_col for (col, treatments)
-            in self.metadata.columns.items() if treatments.scale_col
+            in self.columns.items() if treatments.scale_col
         }
 
     def execute(self, df_to_scale: pd.DataFrame, ppl: pd.DataFrame):
-        """Do it."""
+        """
+        Scale a dataframe to a generator-level.
+
+        There are four main steps here:
+        * STEP 1: Aggregate the dataset records that are associated with the
+          same EIA plant-part records. Sometime the original dataset include
+          mulitple records that are associated with the same plant-part record.
+          We are assuming that the duplicate records are not reporting
+          overlapping data (i.e. one depreciation record for a unit and another
+          for the emissions control costs associated with the same unit). We
+          know this isn't always a perfect bet.
+        * STEP 2: Merge in the EIA plant-part list generators. This is
+          generally a one-to-many merge where we cast many generators across
+          each data-set record. Now we have the dataset records associated with
+          generators but duplicated.
+        * STEP 3: This is the splitting/scaling step. Here we take the
+          dataset records that have been duplicated across their mulitple
+          generator components and distribute portions of the data columns
+          based on another weighting column (ex: if there are 2 generators
+          associated with a dataset record and one has a 100 MW capacity while
+          the second has a 200 MW capacity, 1/3 of the data column would be
+          allocated to the first generator while the remaining 2/3 would be
+          allocated to the second generator). At the end of this step, we have
+          generator records with data columns scaled.
+        * STEP 4: Aggregate the generator based records. At this step we
+          sometimes have multiple records representing the same generator. This
+          happens when we have two seperate records reporting overlapping
+          peices of infrastructure (ex: a plant's coal ash pound in one
+          depreciation record and a unit in another). We are assuming here that
+          the records do not contain duplicate data - which we know isn't
+          always a perfect bet.
+        """
         # extract the records that are NOT connected to the EIA plant-part list
         # Note: Right now we are just dropping the non-connected
         # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
         connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
+        # STEP 1
         # Deduplicate when there is more than one source record associated with
         # the same EIA plant-part.
         to_scale = self.aggregate_duplicate_eia(connected_to_scale, ppl)
-
+        # STEP 2
         merged_df = self.many_merge_on_scale_part(
             to_scale=to_scale,
             ppl=ppl.reset_index(),
-            cols_to_keep=list(self.metadata.columns.keys())
+            cols_to_keep=list(self.columns.keys())
         )
-
+        # STEP 3
         # grab all of the ppl columns, plus data set's id column(s)
         # this enables us to have a unique index
         idx_cols = (
@@ -273,13 +383,14 @@ class ScaleToPlantParter():
             [self.plant_part]['id_cols']
             + pudl.analysis.plant_parts_eia.IDX_TO_ADD
             + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
-            + self.data_set_idx_cols
+            + self.extract_data_set_idx_cols()
         )
         scaled_df = merged_df.set_index(idx_cols)
-        for scale_col, split_cols in self.scale_cols.items():
+        scale_col_dict = self.extract_scale_cols()
+        for scale_col, split_cols in scale_col_dict.items():
             scaled_df.loc[:, f"{scale_col}_scaled"] = split_data_on_split_cols(
                 df_to_scale=scaled_df,
-                merge_cols=self.data_set_idx_cols,
+                merge_cols=self.extract_data_set_idx_cols(),
                 data_col=scale_col,
                 split_cols=split_cols
             )
@@ -287,12 +398,13 @@ class ScaleToPlantParter():
         # to the frickin scale_col, but it keeps returning a column of nulls
         # So i'm doing this janky drop and rename
         scaled_df = (
-            scaled_df.drop(columns=self.scale_cols.keys())
+            scaled_df.drop(columns=scale_col_dict.keys())
             .rename(columns={
                 c: c.replace('_scaled', '')
                 for c in [c for c in scaled_df.columns if "_scaled" in c]}
             )
         )
+        # STEP 4
         # second aggregation of the duplicate EIA records.
         scaled_df_post_agg = self.aggregate_duplicate_eia(
             connected_to_scale=scaled_df.reset_index(),
@@ -301,7 +413,7 @@ class ScaleToPlantParter():
         # set the index to be the main EIA plant-part index columns
         scaled_df_post_agg = (
             scaled_df_post_agg.set_index(idx_cols + ['record_id_eia'])
-            .reset_index(self.data_set_idx_cols)
+            .reset_index(self.extract_data_set_idx_cols())
         )
 
         return scaled_df_post_agg
@@ -327,14 +439,14 @@ class ScaleToPlantParter():
         de_duped = pudl.helpers.sum_and_weighted_average_agg(
             df_in=dupes,
             by=self.eia_pk,
-            sum_cols=self.sum_cols,
-            wtavg_dict=self.wtavg_dict
+            sum_cols=self.extract_sum_cols(),
+            wtavg_dict=self.extract_wtavg_dict()
         )
         # add in the string columns
         de_duped = de_duped.merge(
             (
                 dupes.groupby(self.eia_pk, as_index=False)
-                .agg({k: str_squish for k in self.str_cols})
+                .agg({k: str_squish for k in self.extract_str_cols()})
             ),
             on=self.eia_pk,
             validate='1:1',
