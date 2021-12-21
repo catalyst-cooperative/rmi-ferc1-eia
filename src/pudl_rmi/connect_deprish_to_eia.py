@@ -215,8 +215,17 @@ def match_merge(deprish_df, mul_df, key_deprish, key_mul):
             threshold=75),
         mul_df.drop_duplicates(
             subset=['report_year', 'plant_name_new'])[PPL_COLS],
-        left_on=['report_year', 'utility_id_pudl', 'plant_name_match', 'plant_id_eia'],
-        right_on=['report_year', 'utility_id_pudl', key_mul, 'plant_id_eia'], how='left')
+        left_on=[
+            'report_year',
+            'utility_id_pudl',
+            'plant_name_match',
+            'plant_id_eia'],
+        right_on=[
+            'report_year',
+            'utility_id_pudl',
+            key_mul,
+            'plant_id_eia'],
+        how='left')
         # rename the ids so that we have the "true granularity"
         # Every MUL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
@@ -304,7 +313,14 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
 
 
 def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
-    "Docs."
+    """
+    Get the part of the EIA plant-part list that could match with depreciation.
+
+    Returns:
+        pandas.DataFrame: A subset of the EIA plant-part list that cooresponds
+        to possible matches for the depreciation data based on the
+        ``RESTRICT_MATCH_COLS``.
+    """
     possible_matches_mul = (
         pd.merge(
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
