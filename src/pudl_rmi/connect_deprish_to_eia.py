@@ -338,7 +338,14 @@ def add_record_id_fuzzy(deprish_df, plant_parts_df, key_mul):
 
 
 def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
-    """Docs."""
+    """
+    Get the part of the EIA plant-part list that could match with depreciation.
+
+    Returns:
+        pandas.DataFrame: A subset of the EIA plant-part list that cooresponds
+        to possible matches for the depreciation data based on the
+        ``RESTRICT_MATCH_COLS``.
+    """
     possible_matches_mul = (
         pd.merge(
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),

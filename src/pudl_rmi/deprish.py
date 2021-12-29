@@ -29,8 +29,9 @@ import pudl_rmi
 logger = logging.getLogger(__name__)
 
 
-INT_IDS = ['utility_id_ferc1', 'utility_id_pudl', 'plant_id_eia',
-           'plant_id_pudl', 'report_year']
+INT_IDS = [
+    'utility_id_ferc1', 'utility_id_pudl', 'plant_id_eia', 'report_year'
+]
 
 NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
 
@@ -1032,7 +1033,6 @@ def assign_line_id(df):
             x.plant_id_eia.map(str) + "_" +
             x.plant_part_name.map(str).str.lower() + "_" +
             x.ferc_acct_name.fillna("").str.lower() + "_" +
-            # x.note.fillna("") + "_" +
             x.utility_id_pudl.map(str) + "_" +
             x.data_source.fillna("")
     )
