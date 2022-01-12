@@ -6,27 +6,39 @@ through the EIA plant-part list. Both the depreciation records and FERC1 steam
 has been connected to the EIA plant-part list, which is a compilation of
 various possible combinations of generator records.
 
+Some defintions:
+* Scale: Converting record(s) from one set of plant-parts to another.
+* Allocate: A specific implementation of scaling. This is down-scaling. When
+  the original dataset has records that are of a larger granularity than your
+  desired plant-part granularity, we need to allocate or distribute the data
+  from original larger records across the smaller components.
+* Aggregate: A specific implementation of scaling. This is up-scaling. When the
+  original dataset has records that are of a smaller granularity than your
+  desired plant-part granularity, we need to aggregate or sum up the data from
+  the original smaller records to the larger granualry. (This is currently not
+  implemented!)
+
 Currently Implemented:
 * A scale-to-generator-er.
     Inputs:
     * Any dataset that has been connected to the EIA plant-part list. This
-     dataset can have heterogeneous plant-parts (i.e. one record can be
-     associated with a full plant while the next can be associated with a
-     generator or a unit).
+      dataset can have heterogeneous plant-parts (i.e. one record can be
+      associated with a full plant while the next can be associated with a
+      generator or a unit).
     * Information regarding how to transform each of the columns in the input
-     dataset.
+      dataset.
     Outputs:
     * The initial dataset scaled to the generator level.
 
 Future Needs:
 * A merger of generator-based records. This is currently implemented in the
-``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
-integrated here.
+  ``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
+  integrated here.
 * (Possible) Enable the scaler to scale to any plant-part. Right now only
-splitting is integrated and thus we can only scale to the smallest plant-part
-(the generator). Enabling scaling to any plant-part would require both
-splitting and aggregating, as well as labeling which method to apply to each
-record. This labeling is required becuase
+  splitting is integrated and thus we can only scale to the smallest plant-part
+  (the generator). Enabling scaling to any plant-part would require both
+  splitting and aggregating, as well as labeling which method to apply to each
+  record. This labeling is required becuase
 """
 
 import logging
@@ -44,12 +56,12 @@ logger = logging.getLogger(__name__)
 META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
     'line_id':
         {
-            'treat_type': 'str_concat'
+            'treatment_type': 'str_concat'
         },
     'plant_balance_w_common':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -57,8 +69,8 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
         },
     'book_reserve_w_common':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -66,8 +78,8 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
         },
     'unaccrued_balance_w_common':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -75,8 +87,8 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
         },
     'net_salvage_w_common':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -84,8 +96,8 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
         },
     'depreciation_annual_epxns_w_common':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -93,26 +105,26 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
         },
     'net_removal_rate':
         {
-            'treat_type': 'wtavg',
+            'treatment_type': 'wtavg',
             'wtavg_col': 'unaccrued_balance_w_common'
         },
     'depreciation_annual_rate':
         {
-            'treat_type': 'wtavg',
+            'treatment_type': 'wtavg',
             'wtavg_col': 'unaccrued_balance_w_common'
         },
     'remaining_life_avg':
         {
-            'treat_type': 'wtavg',
+            'treatment_type': 'wtavg',
             'wtavg_col': 'unaccrued_balance_w_common'
         },
     'utility_name_ferc1':
         {
-            'treat_type': 'str_concat'
+            'treatment_type': 'str_concat'
         },
     'data_source':
         {
-            'treat_type': 'str_concat'
+            'treatment_type': 'str_concat'
         }
 }
 
@@ -120,12 +132,12 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
 META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
     'record_id_ferc1':
         {
-            'treat_type': 'str_concat'
+            'treatment_type': 'str_concat'
         },
     'capex_total':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -133,8 +145,8 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
         },
     'capex_annual_addt':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -142,8 +154,8 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
         },
     'opex_nonfuel':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -151,8 +163,8 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
         },
     'capacity_mw_ferc1':
         {
-            'treat_type': 'scale',
-            'scale_cols': [
+            'treatment_type': 'scale',
+            'allocator_cols': [
                 'capacity_mw',
                 'net_generation_mwh',
                 'total_fuel_cost'
@@ -160,7 +172,7 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
         },
     'avg_num_employees':
         {
-            'treat_type': 'wtavg',
+            'treatment_type': 'wtavg',
             'wtavg_col': 'capacity_mw_ferc1'
         },
 }
@@ -169,8 +181,6 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
 def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     """
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
-
-    TODO: WIP!! The final output will live here when done.
 
     Args:
         plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
@@ -225,47 +235,45 @@ class FieldTreatment(BaseModel):
     """
     How to process specific a field.
 
-    * data_set_idx_col: primary key column for input dataset
-    * sum_col: a column that will be summed when aggregating
-    * wtavg_col: a column that will be averaged by a weighting column
-    * str_col: a column that will be aggregated by combining unique strings
-    * scale_col: a column that needs to be scaled to the plant-part level
+    The treatment type of scale is currently only being used to allocate
+    because we have not implemented an aggregation scale process. Nonetheless,
+    the columns we will want to aggregate are the same as those we would want
+    to allocate, so we are keeping this more generic treatment name.
+
+    Kwargs:
+        allocator_cols: the prioritized list of columns that should be used
+            when allocating the column.
+        wtavg_col: a column that will be used as a weighting column when
+            applying a weighted average to the column.
+        treatment_type: the name of a treatment type from the following types:
+            ``scale``, ``str_concat``, ``wtavg``.
+
     """
 
-    scale_cols: Optional[List[str]] = []
-    wtavg_col: Optional[str] = []
+    allocator_cols: Optional[List[str]]
+    wtavg_col: Optional[str]
 
-    treat_type: Literal['scale', 'str_concat', 'wtavg']
+    treatment_type: Literal['scale', 'str_concat', 'wtavg']
 
-    @validator('treat_type')
+    @validator('treatment_type')
     def check_treatments(cls, value, values):   # noqa: N805
         """Check treatments that need additional info."""
-        if value == 'scale' and not values.get('scale_cols'):
-            raise AssertionError("Scale column treatment needs scale_cols")
+        if value == 'scale' and not values.get('allocator_cols'):
+            raise AssertionError(
+                "Scale column treatment needs allocator_cols")
         if value == 'wtavg' and not values.get('wtavg_col'):
             raise AssertionError(
                 "Weighted Average column treatment needs wtavg_col")
         return value
 
-    class Config:
-        """
-        An attempt to stop getting an error on reload.
-
-        The error:
-            ``ValueError: "FieldTreatment" object has no field "__class__"``
-
-        Ref: https://github.com/samuelcolvin/pydantic/issues/288
-        """
-
-        allow_population_by_field_name = True
-
 
 class PlantPartScaler(BaseModel):
     """
-    Scale a table process a table.
+    Scale a table to a plant-part.
 
     Args:
-        columns:
+        treatments: a dictionary of column name (keys) with field treatments
+            (values)
         eia_pk:
         data_set_idx_cols:
         plant_part:
@@ -277,39 +285,35 @@ class PlantPartScaler(BaseModel):
     data_set_idx_cols: List[str]
     plant_part: Literal['plant_gen']
 
-    class Config:
-        """
-        An attempt to stop getting an error on reload.
-
-        The error:
-            ``ValueError: "FieldTreatment" object has no field "__class__"``
-
-        Ref: https://github.com/samuelcolvin/pydantic/issues/288
-        """
-
-        allow_population_by_field_name = True
-
-    def get_cols_by_treatment(self, treat_type: str):
+    def get_treatment_cols(self, treatment_type: str) -> list[str]:
         """Grab the columns which need a specific treatment type."""
         return [
             col for (col, treat) in self.treatments.items()
-            if treat.treat_type == treat_type]
+            if treat.treatment_type == treatment_type]
 
     @property
-    def wtavg_dict(self):
+    def wtavg_dict(self) -> Dict:
         """Grab the dict of columns that get a weighted average treatment."""
         return {
             wtavg_col: self.treatments[wtavg_col].wtavg_col
-            for wtavg_col in self.get_cols_by_treatment('wtavg')
+            for wtavg_col in self.get_treatment_cols('wtavg')
         }
 
     @property
-    def scale_cols_dict(self):
-        """Grab the columns from the metadata which need to be scaled."""
+    def allocator_cols_dict(self) -> Dict:
+        """Grab the columns from the metadata which need to be allocated."""
         return {
-            scale_col: self.treatments[scale_col].scale_cols
-            for scale_col in self.get_cols_by_treatment('scale')
+            allocate_col: self.treatments[allocate_col].allocator_cols
+            for allocate_col in self.get_treatment_cols('allocate')
         }
+
+    @property
+    def plant_part_pk_cols(self):
+        """Get the primary keys for a plant-part."""
+        return (pudl.analysis.plant_parts_eia.PLANT_PARTS
+                [self.plant_part]['id_cols']
+                + pudl.analysis.plant_parts_eia.IDX_TO_ADD
+                + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD)
 
     def execute(self, df_to_scale: pd.DataFrame, ppl: pd.DataFrame):
         """
@@ -326,7 +330,7 @@ class PlantPartScaler(BaseModel):
         * STEP 2: Merge in the EIA plant-part list generators. This is
           generally a one-to-many merge where we cast many generators across
           each data-set record. Now we have the dataset records associated with
-          generators but duplicated.
+          generators but duplicated. (Step 2 and 3 are grouped into one method)
         * STEP 3: This is the splitting/scaling step. Here we take the
           dataset records that have been duplicated across their mulitple
           generator components and distribute portions of the data columns
@@ -335,7 +339,7 @@ class PlantPartScaler(BaseModel):
           the second has a 200 MW capacity, 1/3 of the data column would be
           allocated to the first generator while the remaining 2/3 would be
           allocated to the second generator). At the end of this step, we have
-          generator records with data columns scaled.
+          generator records with data columns allocated.
         * STEP 4: Aggregate the generator based records. At this step we
           sometimes have multiple records representing the same generator. This
           happens when we have two seperate records reporting overlapping
@@ -352,43 +356,62 @@ class PlantPartScaler(BaseModel):
         # Aggregate when there is more than one source record associated with
         # the same EIA plant-part.
         to_scale = self.aggregate_duplicate_eia(connected_to_scale, ppl)
+        # STEP 2 & 3
+        allocated = self.allocate(to_scale, ppl)
+        # STEP 4
+        # second aggregation of the duplicate EIA records.
+        scaled_df_post_agg = self.aggregate_duplicate_eia(
+            connected_to_scale=allocated.reset_index(),
+            ppl=ppl
+        )
+        # set the index to be the main EIA plant-part index columns
+        scaled_df_post_agg = scaled_df_post_agg.set_index(
+            self.plant_part_pk_cols + ['record_id_eia']
+        )
+        return scaled_df_post_agg
+
+    def allocate(
+            self,
+            to_allocate: pd.DataFrame,
+            ppl: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Allocate records w/ larger granularities to sub-component plant-parts.
+
+        Implement both steps 2 and 3 as described in
+        :meth:``PlantPartScaler.execute``.
+
+        Args:
+            to_allocate: the dataframe to be allocated.
+            ppl: EIA plant-part list generated from
+                ``pudl.analysis.plant_parts_eia``
+        """
         # STEP 2
         merged_df = self.many_merge_on_scale_part(
-            to_scale=to_scale,
+            to_scale=to_allocate,
             ppl=ppl.reset_index(),
             cols_to_keep=list(self.treatments)
         )
+        # at this stage we have plant-part records with the data columns from
+        # the original dataset broadcast across multiple records: read the data
+        # is duplicated!
+
         # STEP 3
         # grab all of the ppl columns, plus data set's id column(s)
         # this enables us to have a unique index
         idx_cols = (
-            pudl.analysis.plant_parts_eia.PLANT_PARTS
-            [self.plant_part]['id_cols']
-            + pudl.analysis.plant_parts_eia.IDX_TO_ADD
-            + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
+            self.plant_part_pk_cols
             + self.data_set_idx_cols
         )
-        scaled_df = merged_df.set_index(idx_cols)
-        for scale_col, split_cols in self.scale_cols_dict.items():
-            scaled_df.loc[:, scale_col] = split_data_on_split_cols(
-                df_to_scale=scaled_df,
+        allocated = merged_df.set_index(idx_cols)
+        for allocate_col, allocator_cols in self.allocator_cols_dict.items():
+            allocated.loc[:, allocate_col] = _allocate_col(
+                df_to_allocate=allocated,
                 by=self.data_set_idx_cols,
-                data_col=scale_col,
-                split_cols=split_cols
+                allocate_col=allocate_col,
+                allocator_cols=allocator_cols
             )
-        # STEP 4
-        # second aggregation of the duplicate EIA records.
-        scaled_df_post_agg = self.aggregate_duplicate_eia(
-            connected_to_scale=scaled_df.reset_index(),
-            ppl=ppl
-        )
-        # set the index to be the main EIA plant-part index columns
-        scaled_df_post_agg = (
-            scaled_df_post_agg.set_index(idx_cols + ['record_id_eia'])
-            .reset_index(self.data_set_idx_cols)
-        )
-
-        return scaled_df_post_agg
+        return allocated
 
     def aggregate_duplicate_eia(self, connected_to_scale, ppl):
         """Aggregate duplicate EIA plant-part records."""
@@ -411,7 +434,7 @@ class PlantPartScaler(BaseModel):
         de_duped = pudl.helpers.sum_and_weighted_average_agg(
             df_in=dupes,
             by=self.eia_pk,
-            sum_cols=self.get_cols_by_treatment('scale'),
+            sum_cols=self.get_treatment_cols('scale'),
             wtavg_dict=self.wtavg_dict
         )
         # add in the string columns
@@ -420,7 +443,8 @@ class PlantPartScaler(BaseModel):
         de_duped = de_duped.merge(
             (
                 dupes.groupby(self.eia_pk, as_index=False)
-                .agg({k: str_concat for k in self.get_cols_by_treatment('str_concat')})
+                .agg({k: str_concat for k
+                      in self.get_treatment_cols('str_concat')})
             ),
             on=self.eia_pk,
             validate='1:1',
@@ -451,6 +475,9 @@ class PlantPartScaler(BaseModel):
             ppl: pd.DataFrame) -> pd.DataFrame:
         """
         Merge a particular EIA plant-part list plant-part onto a dataframe.
+
+        Note: CG is not sure if we will need this method to aggregate or not.
+        So we are keeping this method with the more generic "scale" verbage.
 
         Returns:
             a table.
@@ -490,50 +517,48 @@ def str_concat(x):
     return '; '.join(list(map(str, [x for x in x.unique() if x is not pd.NA])))
 
 
-def split_data_on_split_cols(
-        df_to_scale: pd.DataFrame,
+def _allocate_col(
+        to_allocate: pd.DataFrame,
         by: list,
-        data_col: str,
-        split_cols: list) -> pd.Series:
+        allocate_col: str,
+        allocator_cols: list[str]) -> pd.Series:
     """
-    Split larger dataset records porportionally by EIA plant-part list columns.
-
-    This method associates slices of a dataset's records - which are larger
-    than their EIA counter parts - via prioritized EIA plant-part list columns.
+    Allocate larger dataset records porportionally by EIA plant-part columns.
 
     Args:
-        df_to_scale: table of data that has been merged with the EIA plant-part
+        to_allocate: table of data that has been merged with the EIA plant-part
             list records of the scale that you want the output to be in.
-        data_col: name of the data column to scale. The data in this column has
-            been broadcast across multiple records in ``df_to_scale``.
+        allocate_col: name of the data column to scale. The data in this column
+            has been broadcast across multiple records in ``df_to_scale``.
         by: columns to group by.
-        split_cols: ordered list of columns to split porportionally
+        allocator_cols: ordered list of columns to allocate porportionally
             based on. Ordered based on priority: if non-null result from
             frist column, result will include first column result, then
             second and so on.
     Returns:
-        a series of the ``data_col`` scaled to the plant-part level.
+        a series of the ``allocate_col`` scaled to the plant-part level.
 
     """
     # add a total column for all of the split cols. This will enable us to
     # determine each records' proportion of the
-    df_to_scale.loc[:, [f"{c}_total" for c in split_cols]] = (
-        df_to_scale.loc[:, split_cols]
+    to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
+        to_allocate.loc[:, allocator_cols]
         .groupby(by=by, dropna=False)
         .transform(sum, min_count=1)
         .add_suffix('_total')
     )
     # for each of the columns we want to split the frc data by
     # generate the % of the total group, so we can split the data_col
-    new_data_col = f"{data_col}_scaled"
-    df_to_scale[new_data_col] = pd.NA
-    for split_col in split_cols:
-        df_to_scale[f"{split_col}_proportion"] = (
-            df_to_scale[split_col] / df_to_scale[f"{split_col}_total"])
+    allocated_col = f"{allocate_col}_allocated"
+    to_allocate[allocated_col] = pd.NA
+    for split_col in allocator_cols:
+        to_allocate[f"{split_col}_proportion"] = (
+            to_allocate[split_col] / to_allocate[f"{split_col}_total"])
         # choose the first non-null option. The order of the split_cols will
         # determine which split_col will be used
-        df_to_scale[new_data_col] = (
-            df_to_scale[new_data_col].fillna(
-                df_to_scale[data_col] * df_to_scale[f"{split_col}_proportion"])
+        to_allocate[allocated_col] = (
+            to_allocate[allocated_col].fillna(
+                to_allocate[allocated_col]
+                * to_allocate[f"{split_col}_proportion"])
         )
-    return df_to_scale[new_data_col]
+    return to_allocate[allocated_col]

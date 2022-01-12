@@ -79,7 +79,6 @@ def prep_deprish(plant_parts_df, key_deprish):
             ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1'])
         .assign(report_year=lambda x: x.report_date.dt.year)
         .astype({'report_year': pd.Int64Dtype()})  # bc it isnt an eia col
-        .dropna(subset=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
     )
 
@@ -101,19 +100,19 @@ def prep_deprish(plant_parts_df, key_deprish):
     # matches.
     # TODO: go through all of these to reassign plant_id_eia!!! and turn down
     # the acceptable number of baddies
-    baddies = deprish_ids.loc[
-        (deprish_ids._merge != 'both')
-        & (deprish_ids.plant_part_name.notnull())
-    ].drop_duplicates(subset=['plant_part_name'])
+    baddies = (
+        deprish_ids.loc[(deprish_ids._merge != 'both')]
+        .dropna(subset=RESTRICT_MATCH_COLS + ['plant_part_name'])
+        .drop_duplicates(subset=['plant_part_name'])
+    )
     if len(baddies) > 270:
         raise AssertionError(
-            f"Found {baddies} depreciation records which don't have "
+            f"Found {len(baddies)} depreciation records which don't have "
             "cooresponding EIA plant-part list records. Check plant_id_eia's "
-            f"in {pudl_rmi.FILE_PATH_DEPRISH_RAW}"
+            f"in {pudl_rmi.DEPRISH_RAW_XLSX}"
         )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == 'both']
-        .drop_duplicates(subset=['plant_part_name', 'report_date'])
         # there are some records in the depreciation df that have no
         # names.... so they've got to go
         .dropna(subset=['plant_part_name', '_merge'])
