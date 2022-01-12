@@ -422,51 +422,53 @@ class PlantPartScaler(BaseModel):
         dupes = connected_to_scale[dupe_mask]
         non_dupes = connected_to_scale[~dupe_mask]
         # If there are no duplicate records, then the following aggs will fail
-        # bc there is nothing to merge. If there is a cleaner way to skip this
-        # without a dangly mid-function retrun LMK!
+        # bc there is nothing to merge. So we're making a new df to output that
+        # is these non_dupes. If ther are dupes, we'll aggregate them!
         if dupes.empty:
-            return non_dupes
-        logger.info(
-            f"Aggergating {len(dupes)} duplicate records "
-            f"({len(dupes)/len(connected_to_scale):.1%})")
+            df_out = non_dupes
+        else:
+            logger.info(
+                f"Aggergating {len(dupes)} duplicate records "
+                f"({len(dupes)/len(connected_to_scale):.1%})")
 
-        # sum and weighted average!
-        de_duped = pudl.helpers.sum_and_weighted_average_agg(
-            df_in=dupes,
-            by=self.eia_pk,
-            sum_cols=self.get_treatment_cols('scale'),
-            wtavg_dict=self.wtavg_dict
-        )
-        # add in the string columns
-        # TODO: add a test to ensure that the str-squish character doesn't show
-        # up in the original data columns
-        de_duped = de_duped.merge(
-            (
-                dupes.groupby(self.eia_pk, as_index=False)
-                .agg({k: str_concat for k
-                      in self.get_treatment_cols('str_concat')})
-            ),
-            on=self.eia_pk,
-            validate='1:1',
-            how='left'
-        ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
-
-        # merge back in the ppl idx columns
-        de_duped_w_ppl = (
-            de_duped.set_index('record_id_eia')
-            .merge(
-                ppl,  # [[c for c in PPL_COLS if c != 'record_id_eia']],
-                left_index=True,
-                right_index=True,
-                how='left',
-                validate='m:1',
+            # sum and weighted average!
+            de_duped = pudl.helpers.sum_and_weighted_average_agg(
+                df_in=dupes,
+                by=self.eia_pk,
+                sum_cols=self.get_treatment_cols('scale'),
+                wtavg_dict=self.wtavg_dict
             )
-            .reset_index()
-        )
-        # merge the non-dupes and de-duplicated records
-        # we're doing an inner merge here bc we don't want columns with
-        # partially null values
-        return pd.concat([non_dupes, de_duped_w_ppl], join='inner')
+            # add in the string columns
+            # TODO: add a test to ensure that the str-squish character doesn't
+            # show up in the original data columns
+            de_duped = de_duped.merge(
+                (
+                    dupes.groupby(self.eia_pk, as_index=False)
+                    .agg({k: str_concat for k
+                          in self.get_treatment_cols('str_concat')})
+                ),
+                on=self.eia_pk,
+                validate='1:1',
+                how='left'
+            ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+
+            # merge back in the ppl idx columns
+            de_duped_w_ppl = (
+                de_duped.set_index('record_id_eia')
+                .merge(
+                    ppl,  # [[c for c in PPL_COLS if c != 'record_id_eia']],
+                    left_index=True,
+                    right_index=True,
+                    how='left',
+                    validate='m:1',
+                )
+                .reset_index()
+            )
+            # merge the non-dupes and de-duplicated records
+            # we're doing an inner merge here bc we don't want columns with
+            # partially null values
+            df_out = pd.concat([non_dupes, de_duped_w_ppl], join='inner')
+        return df_out
 
     def many_merge_on_scale_part(
             self,
