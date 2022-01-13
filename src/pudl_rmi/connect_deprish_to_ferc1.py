@@ -304,7 +304,7 @@ class PlantPartScaler(BaseModel):
         """Grab the columns from the metadata which need to be allocated."""
         return {
             allocate_col: self.treatments[allocate_col].allocator_cols
-            for allocate_col in self.get_treatment_cols('allocate')
+            for allocate_col in self.get_treatment_cols('scale')
         }
 
     @property
@@ -406,7 +406,7 @@ class PlantPartScaler(BaseModel):
         allocated = merged_df.set_index(idx_cols)
         for allocate_col, allocator_cols in self.allocator_cols_dict.items():
             allocated.loc[:, allocate_col] = _allocate_col(
-                df_to_allocate=allocated,
+                to_allocate=allocated,
                 by=self.data_set_idx_cols,
                 allocate_col=allocate_col,
                 allocator_cols=allocator_cols
@@ -453,10 +453,10 @@ class PlantPartScaler(BaseModel):
             ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
 
             # merge back in the ppl idx columns
-            de_duped_w_ppl = (
+            de_duped = (
                 de_duped.set_index('record_id_eia')
                 .merge(
-                    ppl,  # [[c for c in PPL_COLS if c != 'record_id_eia']],
+                    ppl,
                     left_index=True,
                     right_index=True,
                     how='left',
@@ -467,7 +467,7 @@ class PlantPartScaler(BaseModel):
             # merge the non-dupes and de-duplicated records
             # we're doing an inner merge here bc we don't want columns with
             # partially null values
-            df_out = pd.concat([non_dupes, de_duped_w_ppl], join='inner')
+            df_out = pd.concat([non_dupes, de_duped], join='inner')
         return df_out
 
     def many_merge_on_scale_part(
@@ -560,7 +560,11 @@ def _allocate_col(
         # determine which split_col will be used
         to_allocate[allocated_col] = (
             to_allocate[allocated_col].fillna(
-                to_allocate[allocated_col]
+                to_allocate[allocate_col]
                 * to_allocate[f"{split_col}_proportion"])
         )
-    return to_allocate[allocated_col]
+    to_allocate = (
+        to_allocate.drop(columns=allocate_col)
+        .rename(columns={allocated_col: allocate_col})
+    )
+    return to_allocate.loc[:, [allocate_col]]
