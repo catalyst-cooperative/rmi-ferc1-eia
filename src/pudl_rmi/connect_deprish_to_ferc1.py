@@ -42,10 +42,12 @@ Future Needs:
   ``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
   integrated here.
 * (Possible) Enable the scaler to scale to any plant-part. Right now only
-  splitting is integrated and thus we can only scale to the smallest plant-part
-  (the generator). Enabling scaling to any plant-part would require both
-  splitting and aggregating, as well as labeling which method to apply to each
-  record. This labeling is required becuase
+  allocating is integrated and thus we can only scale to the smallest
+  plant-part (the generator). Enabling scaling to any plant-part would require
+  both allocating and aggregating, as well as labeling which method to apply to
+  each record. This labeling is required becuase we'd need to know whether to
+  allocate or aggregate an input record.
+
 """
 
 import logging
@@ -559,7 +561,7 @@ def _allocate_col(
         a series of the ``allocate_col`` scaled to the plant-part level.
 
     """
-    # add a total column for all of the split cols. This will enable us to
+    # add a total column for all of the allocate cols. This will enable us to
     # determine each records' proportion of the
     to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
         to_allocate.loc[:, allocator_cols]
@@ -567,19 +569,19 @@ def _allocate_col(
         .transform(sum, min_count=1)
         .add_suffix('_total')
     )
-    # for each of the columns we want to split the frc data by
-    # generate the % of the total group, so we can split the data_col
+    # for each of the columns we want to allocate the frc data by
+    # generate the % of the total group, so we can allocate the data_col
     allocated_col = f"{allocate_col}_allocated"
     to_allocate[allocated_col] = pd.NA
-    for split_col in allocator_cols:
-        to_allocate[f"{split_col}_proportion"] = (
-            to_allocate[split_col] / to_allocate[f"{split_col}_total"])
-        # choose the first non-null option. The order of the split_cols will
-        # determine which split_col will be used
+    for allocate_col in allocator_cols:
+        to_allocate[f"{allocate_col}_proportion"] = (
+            to_allocate[allocate_col] / to_allocate[f"{allocate_col}_total"])
+        # choose the first non-null option. The order of the allocate_cols will
+        # determine which allocate_col will be used
         to_allocate[allocated_col] = (
             to_allocate[allocated_col].fillna(
                 to_allocate[allocate_col]
-                * to_allocate[f"{split_col}_proportion"])
+                * to_allocate[f"{allocate_col}_proportion"])
         )
     to_allocate = (
         to_allocate.drop(columns=allocate_col)
