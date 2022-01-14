@@ -507,15 +507,16 @@ class PlantPartScaler(BaseModel):
         """
         Broadcast merge a plant-part from the plant-part list onto a dataframe.
 
-        Broadcast merge an input data table that has been connected to the EIA
-        plant-part list with a particular plant-part - in our current
+        This method merges an input data table that has been connected to the
+        EIA plant-part list with a particular plant-part - in our current
         implementation: merge in the EIA plant-part list generators. This
         is generally a one-to-many merge where we broadcast many generators
         across each data-set record.
 
         First, we're grabbing a subset of the plant-part list associated with
         the plant-part (i.e. plants, generators, fuel types, etc.) that this
-        scaler instance is trying to scale to (``PlantPartScaler.plant_part``).
+        scaler instance is trying to scale to (
+        :attr:``PlantPartScaler.plant_part``).
 
         Then, this method merges the plant-part list subset onto ``to_scale``.
         The ``to_scale`` table contains records that are heterogeneous
