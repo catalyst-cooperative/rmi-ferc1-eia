@@ -507,15 +507,16 @@ class PlantPartScaler(BaseModel):
         """
         Broadcast merge a plant-part from the plant-part list onto a dataframe.
 
-        Broadcast merge an input data table that has been connected to the EIA
-        plant-part list with a particular plant-part - in our current
+        This method merges an input data table that has been connected to the
+        EIA plant-part list with a particular plant-part - in our current
         implementation: merge in the EIA plant-part list generators. This
         is generally a one-to-many merge where we broadcast many generators
         across each data-set record.
 
         First, we're grabbing a subset of the plant-part list associated with
         the plant-part (i.e. plants, generators, fuel types, etc.) that this
-        scaler instance is trying to scale to (``PlantPartScaler.plant_part``).
+        scaler instance is trying to scale to (
+        :attr:``PlantPartScaler.plant_part``).
 
         Then, this method merges the plant-part list subset onto ``to_scale``.
         The ``to_scale`` table contains records that are heterogeneous
@@ -532,11 +533,12 @@ class PlantPartScaler(BaseModel):
         So we are keeping this method with the more generic "scale" verbage.
 
         Args:
-            to_scale: a data table where all have been linked to EIA plant-part
-                list but they may be of heterogeneous in its plant-part
+            to_scale: a data table where all records have been linked to EIA
+                plant-part list but they may be heterogeneous in its plant-part
                 granularities (i.e. some records could be of 'plant' plant-part
                 type while others are 'plant_gen' or 'plant_prime_mover').
-                All of the plant-part list columns need to be present.
+                All of the plant-part list columns need to be present in this
+                table.
             cols_to_keep: columns from ``to_scale`` from the original dataset
                 that you want to show up in the output. These should not be
                 columns that show up in the ``ppl``.
