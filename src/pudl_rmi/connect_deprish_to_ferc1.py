@@ -18,6 +18,11 @@ Some defintions:
   desired plant-part granularity, we need to aggregate or sum up the data from
   the original smaller records to the larger granualry. (This is currently not
   implemented!)
+* PK: This module uses PK to denote primary keys of data tables. They are not
+  true primary keys in the database sense, but rather the set of columns that
+  would constitue a composite primary key. You can think of them as index
+  columns, but they are not always found as the index of the DataFrame and thus
+  PK seems like a more apt description.
 
 Currently Implemented:
 
@@ -205,8 +210,8 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     scaled_fe = (
         PlantPartScaler(
             treatments=META_FERC1_EIA,
-            ppl_id=['record_id_eia'],
-            data_set_id_cols=['record_id_ferc1'],
+            ppl_pk=['record_id_eia'],
+            data_set_pk_cols=['record_id_ferc1'],
             plant_part='plant_gen'
         )
         .execute(
@@ -218,8 +223,8 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     scaled_de = (
         PlantPartScaler(
             treatments=META_DEPRISH_EIA,
-            ppl_id=['record_id_eia', 'data_source'],
-            data_set_id_cols=['line_id'],
+            ppl_pk=['record_id_eia', 'data_source'],
+            data_set_pk_cols=['line_id'],
             plant_part='plant_gen'
         )
         .execute(
@@ -287,16 +292,16 @@ class PlantPartScaler(BaseModel):
     Args:
         treatments: a dictionary of column name (keys) with field treatments
             (values)
-        ppl_id: Identifing columns for the EIA plant-part list.
-        data_set_id_cols: Identifing columns for dataset to scale.
+        ppl_pk: Identifing columns for the EIA plant-part list.
+        data_set_pk_cols: Identifing columns for dataset to scale.
         plant_part: name of EIA plant-part to scale to. Current implementation
             only allows for ``plant_gen``.
 
     """
 
     treatments: Dict[str, FieldTreatment]
-    ppl_id: List[str] = ['record_id_eia']
-    data_set_id_cols: List[str]
+    ppl_pk: List[str] = ['record_id_eia']
+    data_set_pk_cols: List[str]
     plant_part: Literal['plant_gen']
 
     def _get_treatment_cols(self, treatment_type: str) -> list[str]:
@@ -322,14 +327,18 @@ class PlantPartScaler(BaseModel):
         }
 
     @property
-    def plant_part_id_cols(self):
+    def plant_part_pk_cols(self):
         """Get the primary keys for a plant-part."""
         return (pudl.analysis.plant_parts_eia.PLANT_PARTS
                 [self.plant_part]['id_cols']
                 + pudl.analysis.plant_parts_eia.IDX_TO_ADD
                 + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD)
 
-    def execute(self, df_to_scale: pd.DataFrame, ppl: pd.DataFrame):
+    def execute(
+        self,
+        df_to_scale: pd.DataFrame,
+        ppl: pd.DataFrame
+    ) -> pd.DataFrame:
         """
         Scale a dataframe to a generator-level.
 
@@ -365,7 +374,7 @@ class PlantPartScaler(BaseModel):
 
         Args:
             df_to_scale: the input data table that you want to scale.
-            ppl:
+            ppl: the EIA plant-part list.
 
         """
         # extract the records that are NOT connected to the EIA plant-part list
@@ -386,7 +395,7 @@ class PlantPartScaler(BaseModel):
         )
         # set the index to be the main EIA plant-part index columns
         scaled_df_post_agg = scaled_df_post_agg.set_index(
-            self.plant_part_id_cols + ['record_id_eia']
+            self.plant_part_pk_cols + ['record_id_eia']
         )
         return scaled_df_post_agg
 
@@ -407,7 +416,7 @@ class PlantPartScaler(BaseModel):
                 ``pudl.analysis.plant_parts_eia``
         """
         # STEP 2
-        merged_df = self.many_merge_on_scale_part(
+        merged_df = self.broadcast_merge_to_plant_part(
             to_scale=to_allocate,
             ppl=ppl.reset_index(),
             cols_to_keep=list(self.treatments)
@@ -419,15 +428,15 @@ class PlantPartScaler(BaseModel):
         # STEP 3
         # grab all of the ppl columns, plus data set's id column(s)
         # this enables us to have a unique index
-        idx_cols = (
-            self.plant_part_id_cols
-            + self.data_set_id_cols
+        pk_cols = (
+            self.plant_part_pk_cols
+            + self.data_set_pk_cols
         )
-        allocated = merged_df.set_index(idx_cols)
+        allocated = merged_df.set_index(pk_cols)
         for allocate_col, allocator_cols in self.allocator_cols_dict.items():
             allocated.loc[:, allocate_col] = _allocate_col(
                 to_allocate=allocated,
-                by=self.data_set_id_cols,
+                by=self.data_set_pk_cols,
                 allocate_col=allocate_col,
                 allocator_cols=allocator_cols
             )
@@ -436,7 +445,7 @@ class PlantPartScaler(BaseModel):
     def aggregate_duplicate_eia(self, connected_to_scale, ppl):
         """Aggregate duplicate EIA plant-part records."""
         dupe_mask = connected_to_scale.duplicated(
-            subset=self.ppl_id, keep=False
+            subset=self.ppl_pk, keep=False
         )
         # two dfs
         dupes = connected_to_scale[dupe_mask]
@@ -454,7 +463,7 @@ class PlantPartScaler(BaseModel):
             # sum and weighted average!
             de_duped = pudl.helpers.sum_and_weighted_average_agg(
                 df_in=dupes,
-                by=self.ppl_id,
+                by=self.ppl_pk,
                 sum_cols=self._get_treatment_cols('scale'),
                 wtavg_dict=self.wtavg_dict
             )
@@ -463,11 +472,11 @@ class PlantPartScaler(BaseModel):
             # show up in the original data columns
             de_duped = de_duped.merge(
                 (
-                    dupes.groupby(self.ppl_id, as_index=False)
+                    dupes.groupby(self.ppl_pk, as_index=False)
                     .agg({k: str_concat for k
                           in self._get_treatment_cols('str_concat')})
                 ),
-                on=self.ppl_id,
+                on=self.ppl_pk,
                 validate='1:1',
                 how='left'
             ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
@@ -490,28 +499,67 @@ class PlantPartScaler(BaseModel):
             df_out = pd.concat([non_dupes, de_duped], join='inner')
         return df_out
 
-    def many_merge_on_scale_part(
+    def broadcast_merge_to_plant_part(
             self,
             to_scale: pd.DataFrame,
             cols_to_keep: list,
             ppl: pd.DataFrame) -> pd.DataFrame:
         """
-        Merge a particular EIA plant-part list plant-part onto a dataframe.
+        Broadcast merge a plant-part from the plant-part list onto a dataframe.
+
+        Broadcast merge an input data table that has been connected to the EIA
+        plant-part list with a particular plant-part - in our current
+        implementation: merge in the EIA plant-part list generators. This
+        is generally a one-to-many merge where we broadcast many generators
+        across each data-set record.
+
+        First, we're grabbing a subset of the plant-part list associated with
+        the plant-part (i.e. plants, generators, fuel types, etc.) that this
+        scaler instance is trying to scale to (``PlantPartScaler.plant_part``).
+
+        Then, this method merges the plant-part list subset onto ``to_scale``.
+        The ``to_scale`` table contains records that are heterogeneous
+        in its plant-part granularities. Each plant-part granularity has
+        different primary keys that need to be used to merge on. Because of
+        that heterogeneity, we must iteratively merge subsets of ``to_scale``
+        that coorespond to different plant-part granularities with different
+        merge columns.
+
+        This method is implementing Step 2 enumerated in
+        :meth:`PlantPartScaler.execute`.
 
         Note: CG is not sure if we will need this method to aggregate or not.
         So we are keeping this method with the more generic "scale" verbage.
 
+        Args:
+            to_scale: a data table where all have been linked to EIA plant-part
+                list but they may be of heterogeneous in its plant-part
+                granularities (i.e. some records could be of 'plant' plant-part
+                type while others are 'plant_gen' or 'plant_prime_mover').
+                All of the plant-part list columns need to be present.
+            cols_to_keep: columns from ``to_scale`` from the original dataset
+                that you want to show up in the output. These should not be
+                columns that show up in the ``ppl``.
+            ppl: the EIA plant-part list.
+
         Returns:
-            a table.
+            A table which records coorespond to
+            :attr:``PlantPartScaler.plant_part`` (in this current
+            implementation: the records all coorespond to EIA generators!).
+            This is an intermediate table because the data columns from the
+            original dataset are duplicated.
+
         """
+        # grab only the plant-part records that we are trying to scale to
         ppl_part_df = ppl[ppl.plant_part == self.plant_part]
-        # convert the date to year start
+        # convert the date to year start - this is necessary because the
+        # depreciation data is often reported as EOY and the ppl is always SOY
         to_scale.loc[:, 'report_date'] = (
             pd.to_datetime(to_scale.report_date.dt.year, format='%Y')
         )
         scale_parts = []
         for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
-            idx_part = (
+            pk_part = (
                 pudl.analysis.plant_parts_eia.PLANT_PARTS
                 [merge_part]['id_cols']
                 + pudl.analysis.plant_parts_eia.IDX_TO_ADD
@@ -521,11 +569,16 @@ class PlantPartScaler(BaseModel):
             part_df = pd.merge(
                 (
                     to_scale[to_scale.plant_part == merge_part]
-                    [idx_part + ['record_id_eia'] + cols_to_keep]
+                    [pk_part + ['record_id_eia'] + cols_to_keep]
                 ),
                 ppl_part_df,
-                on=idx_part,
+                on=pk_part,
                 how='left',
+                # this unfortunately needs to be a m:m bc sometimes the df
+                # to_scale has multiple record associated with the same
+                # record_id_eia but are unique records and are not aggregated
+                # in aggregate_duplicate_eia. For instance, the depreciation
+                # data has both PUC and FERC studies.
                 validate='m:m',
                 suffixes=('_og', '')
             )
@@ -557,6 +610,7 @@ def _allocate_col(
             based on. Ordered based on priority: if non-null result from
             frist column, result will include first column result, then
             second and so on.
+
     Returns:
         a series of the ``allocate_col`` scaled to the plant-part level.
 
