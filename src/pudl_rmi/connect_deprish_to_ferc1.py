@@ -1,827 +1,650 @@
 """
 Connect the depreciation data with FERC1 steam plant records.
 
-This module attempts to connect the depreciation data with FERC1 steam records.
-Both the depreciation records and FERC1 steam has been connected to the EIA
-master unit list, which is a compilation of various possible combinations of
-generator records.
+This module attempts to connect the depreciation data with FERC1 steam records
+through the EIA plant-part list. Both the depreciation records and FERC1 steam
+has been connected to the EIA plant-part list, which is a compilation of
+various possible combinations of generator records.
 
-Matches are determined to be correct record linkages.
-Candidate matches are potential matches.
+Some defintions:
+
+* Scale: Converting record(s) from one set of plant-parts to another.
+* Allocate: A specific implementation of scaling. This is down-scaling. When
+  the original dataset has records that are of a larger granularity than your
+  desired plant-part granularity, we need to allocate or distribute the data
+  from original larger records across the smaller components.
+* Aggregate: A specific implementation of scaling. This is up-scaling. When the
+  original dataset has records that are of a smaller granularity than your
+  desired plant-part granularity, we need to aggregate or sum up the data from
+  the original smaller records to the larger granualry. (This is currently not
+  implemented!)
+* PK: This module uses PK to denote primary keys of data tables. They are not
+  true primary keys in the database sense, but rather the set of columns that
+  would constitue a composite primary key. You can think of them as index
+  columns, but they are not always found as the index of the DataFrame and thus
+  PK seems like a more apt description.
+
+Currently Implemented:
+
+* An allocate-to-generator-er.
+
+    * Inputs:
+
+       * Any dataset that has been connected to the EIA plant-part list. This
+         dataset can have heterogeneous plant-parts (i.e. one record can be
+         associated with a full plant while the next can be associated with a
+         generator or a unit).
+       * Information regarding how to transform each of the columns in the
+         input dataset.
+
+    * Outputs:
+
+       * The initial dataset scaled to the generator level.
+
+Future Needs:
+
+* A merger of generator-based records. This is currently implemented in the
+  ``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
+  integrated here.
+* (Possible) Enable the scaler to scale to any plant-part. Right now only
+  allocating is integrated and thus we can only scale to the smallest
+  plant-part (the generator). Enabling scaling to any plant-part would require
+  both allocating and aggregating, as well as labeling which method to apply to
+  each record. This labeling is required becuase we'd need to know whether to
+  allocate or aggregate an input record.
+
 """
 
 import logging
-import warnings
-from copy import deepcopy
 
-import numpy as np
+
+from typing import List, Optional, Dict, Literal
+from pydantic import BaseModel, validator
+
 import pandas as pd
-import pathlib
 
-import pudl_rmi.connect_deprish_to_eia as connect_deprish_to_eia
 import pudl
 
 logger = logging.getLogger(__name__)
 
-CONNECT_COLS = [
-    'plant_id_pudl',
-    # 'utility_id_pudl',
-    'report_year'
-]
-
-SPLIT_COLS_STANDARD = [
-    'total_fuel_cost',
-    'net_generation_mwh',
-    'capacity_mw',
-]
-"""
-list: the standard columns to split ferc1 data columns to be used in
-``DATA_COLS_TO_SPLIT``.
-"""
-
-DATA_COLS_TO_SPLIT = {
-    'opex_nonfuel': SPLIT_COLS_STANDARD,
-    'net_generation_mwh_ferc1': SPLIT_COLS_STANDARD,
+META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
+    'line_id':
+        {
+            'treatment_type': 'str_concat'
+        },
+    'plant_balance_w_common':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'book_reserve_w_common':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'unaccrued_balance_w_common':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'net_salvage_w_common':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'depreciation_annual_epxns_w_common':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'net_removal_rate':
+        {
+            'treatment_type': 'wtavg',
+            'wtavg_col': 'unaccrued_balance_w_common'
+        },
+    'depreciation_annual_rate':
+        {
+            'treatment_type': 'wtavg',
+            'wtavg_col': 'unaccrued_balance_w_common'
+        },
+    'remaining_life_avg':
+        {
+            'treatment_type': 'wtavg',
+            'wtavg_col': 'unaccrued_balance_w_common'
+        },
+    'utility_name_ferc1':
+        {
+            'treatment_type': 'str_concat'
+        },
+    'data_source':
+        {
+            'treatment_type': 'str_concat'
+        }
 }
-"""
-dictionary: FERC1 data columns (keys) that we want to associated with
-depreciation records. When the FERC1 record is larger than the depreciation
-record (e.g. a group of depreciation generators matched with a FERC1 plant),
-this module attemps to split the depreciation record based on the list of
-columns to weight the split (values). See  ``split_ferc1_data_on_split_cols()``
-for more details.
-"""
 
 
-def execute(plant_parts_eia, deprish_eia, ferc1_to_eia, clobber=False):
+META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
+    'record_id_ferc1':
+        {
+            'treatment_type': 'str_concat'
+        },
+    'capex_total':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'capex_annual_addt':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'opex_nonfuel':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'capacity_mw_ferc1':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': [
+                'capacity_mw',
+                'net_generation_mwh',
+                'total_fuel_cost'
+            ],
+        },
+    'avg_num_employees':
+        {
+            'treatment_type': 'wtavg',
+            'wtavg_col': 'capacity_mw_ferc1'
+        },
+}
+
+
+def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     """
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
     Args:
         plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
             "plant-parts" which are groups of aggregated EIA generators
-            that coorespond to portions of plants from generators to fuel
+            that correspond to portions of plants from generators to fuel
             types to whole plants.
         deprish_eia (pandas.DataFrame): table of the connection between the
             depreciation studies and the EIA plant-parts list.
         ferc1_to_eia (pandas.DataFrame): a table of the connection between
             the FERC1 plants and the EIA plant-parts list.
-        clobber (boolean):
     """
-    inputs = InputsManager(
-        plant_parts_eia=plant_parts_eia,
-        deprish_eia=deprish_eia,
-        ferc1_to_eia=ferc1_to_eia
+    logger.info("Scaling FERC1-EIA to the generator level.")
+    scaled_fe = (
+        PlantPartScaler(
+            treatments=META_FERC1_EIA,
+            ppl_pk=['record_id_eia'],
+            data_set_pk_cols=['record_id_ferc1'],
+            plant_part='plant_gen'
+        )
+        .execute(
+            df_to_scale=ferc1_to_eia,
+            ppl=plant_parts_eia)
     )
 
-    scaler = Scaler(MatchMaker(inputs))
-    scaled_df = scaler.scale()
-    return scaled_df
-
-
-class InputsManager():
-    """
-    Input manager for matches between FERC 1 and depreciation data.
-
-    This input mananger reads in and stores data from four sources. The data is
-    prepared, which generally involved ensuring that all output tables have
-    all of the neccesary columns from the master unit list to determine if
-    candidate matches are indeed true matches.
-
-    The outputs that are generated from this class and used later on are:
-    * connects_deprish_eia: a connection between the depreciation data and
-        eia's master unit list
-    * connects_ferc1_eia.
-    * plant_parts_ordered: list of ordered plant parts for the master unit list
-    * parts_to_ids: dictionary of plant part names (keys) to identifying
-        columns (values)
-    """
-
-    def __init__(
-        self,
-        plant_parts_eia,
-        deprish_eia,
-        ferc1_to_eia
-    ):
-        """
-        Initialize input manager for connecting depreciation to FERC1.
-
-        Args:
-            plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
-                "plant-parts" which are groups of aggregated EIA generators
-                that coorespond to portions of plants from generators to fuel
-                types to whole plants.
-            deprish_eia (pandas.DataFrame): table of the connection between the
-                depreciation studies and the EIA plant-parts list.
-            ferc1_to_eia (pandas.DataFrame): a table of the connection between
-                the FERC1 plants and the EIA plant-parts list.
-        """
-        self.plant_parts_eia = plant_parts_eia
-        self.deprish_eia = deprish_eia
-        self.connects_ferc1_eia = ferc1_to_eia
-        # store a bool which will indicate whether the inputs have been prepped
-        self.inputs_prepped = False
-
-    def _prep_plant_parts_eia(self):
-        self.plant_parts_eia = (
-            self.plant_parts_eia.reset_index()
-            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia']))
-
-    def _prep_connects_deprish_eia(self):
-        self.connects_deprish_eia = (
-            # we only want candidate matches that have actually been connected
-            # to the MUL
-            self.deprish_eia[
-                self.deprish_eia.record_id_eia.notnull()]
-            .pipe(pudl.helpers.convert_to_date)
-            .astype({i: pd.Int64Dtype() for i in
-                     ['plant_id_eia', 'utility_id_pudl', 'utility_id_ferc1']}
-                    )
-            .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
+    logger.info("Scaling Depreciation-EIA to the generator level.")
+    scaled_de = (
+        PlantPartScaler(
+            treatments=META_DEPRISH_EIA,
+            ppl_pk=['record_id_eia', 'data_source'],
+            data_set_pk_cols=['line_id'],
+            plant_part='plant_gen'
         )
-        # we are going to merge the master unit list into this output,
-        # because we want all of the id columns from PPL_COLS.
-        # There are some overlapping columns. We really only want to
-        # merge on the 'record_id_eia' and we trust the master unit list
-        # more than the spreadsheet based connection for deprish to eia
-        # so we are going to only use columns from the deprish_to_eia that
-        # don't show up in the MUL_COLS
-        cols_ppl = (
-            connect_deprish_to_eia.PPL_COLS
-            + ['plant_id_pudl', 'total_fuel_cost',
-               'net_generation_mwh', 'capacity_mw']
-        )
-        cols_to_use_deprish_eia = (
-            ['record_id_eia'] +
-            [c for c in self.connects_deprish_eia.columns
-             if c not in cols_ppl])
+        .execute(
+            df_to_scale=deprish_eia,
+            ppl=plant_parts_eia)
+    )
 
-        self.connects_deprish_eia = pd.merge(
-            self.connects_deprish_eia[cols_to_use_deprish_eia],
-            self.plant_parts_eia[
-                connect_deprish_to_eia.PPL_COLS
-                + ['plant_id_pudl', 'total_fuel_cost',
-                   'net_generation_mwh', 'capacity_mw']],
-            on=['record_id_eia']
-        )
-
-    def prep_inputs(self, clobber=False):
-        """Prepare all inputs needed for connecting depreciation to FERC1."""
-        # the order here is important. We are preping the inputs needed
-        # for later inputs
-        if not self.inputs_prepped or clobber:
-            # we need a dictionary of plant part named (keys) to their
-            # corresponding id columns (values). parts_compilers has the
-            # inverse of that sowe are just going to swap the ks and vs
-            self.parts_to_ids = (
-                pudl.analysis.plant_parts_eia.make_parts_to_ids_dict()
-            )
-
-            self._prep_plant_parts_eia()
-            self._prep_connects_deprish_eia()
-
-            self.inputs_prepped = True
-
-
-class MatchMaker():
-    """
-    Generate matches between depreciation and FERC1 steam records.
-
-    The coordinating method in this class is `connect` - see it for additional
-    details.
-    """
-
-    def __init__(self, inputs):
-        """
-        Initialize MatchMaker.
-
-        Store instance of InputsCompiler so we can use the prepared
-        dataframes.
-
-        Args:
-            inputs (object): an instance of InputsCompiler
-
-        """
-        self.inputs = inputs
-        inputs.prep_inputs()
-
-    def check_all_candidate_matches(self, candidate_matches_all):
-        """
-        Check the candidate matches between depreciation data and ferc1.
-
-        This method explores the generation of matches between depreciation
-        and ferc1 records. We want to know how many depreciation records aren't
-        associated with any ferc1 record. We want to know if there are any
-        plant ids that show up in the depreciation data and aren't mapped to
-        ferc records but do show up in the ferc data somewhere. At a high
-        level, we want a gut check of whether or not connects_all_deprish_ferc1
-        was connected properly.
-        """
-        # there was a merge iindicator here and left df was the depreciation
-        # data
-        connected_plant_ids = candidate_matches_all[
-            candidate_matches_all._merge == 'both'].plant_id_pudl.unique()
-        # how many plant_id_pudl's didn't get a corresponding FERC1 record
-        not_in_ferc1_plant_ids = (
-            candidate_matches_all[candidate_matches_all._merge == 'left_only']
-            .plant_id_pudl.unique()
-        )
-        # these are a subset of the not_in_ferc1_plant_ids that show up in the
-        # steam table
-        missing_plant_ids = (self.inputs.connects_ferc1_eia[
-            self.inputs.connects_ferc1_eia.plant_id_pudl.isin(
-                not_in_ferc1_plant_ids)].plant_id_pudl.unique())
-        logger.info(f"Matched plants:    {len(connected_plant_ids)}")
-        logger.info(f"Not connected:       {len(not_in_ferc1_plant_ids)}")
-        logger.info(f"Missing connections: {len(missing_plant_ids)}")
-        # Investigation of 3 missing connections [1204, 1147, 1223] determined
-        # that these plants are missing from ferc because there was no
-        # reporting for the specific years in question
-        if len(missing_plant_ids) > 3:
-            warnings.warn(
-                f'There are {len(missing_plant_ids)} missing plant records.')
-
-    def get_candidate_matches(self):
-        """
-        Prepare all candidate matches between depreciation and ferc1 steam.
-
-        Before choosing the specific match between depreciation and ferc1, we
-        need to compile all possible options - or candidate links.
-
-        Returns:
-            pandas.DataFrame: a dataframe with all of the possible combinations
-            of the deprecation data and ferc1 (with their respective EIA master
-            unit list records associated).
-        """
-        # add in a dtype enforcer bc OMIGOSH they keep converting to non-nullables
-        candidate_matches_all = pd.merge(
-            self.inputs.connects_deprish_eia.pipe(
-                pudl.helpers.convert_cols_dtypes, 'ferc1'),
-            self.inputs.connects_ferc1_eia.pipe(
-                pudl.helpers.convert_cols_dtypes, 'ferc1'),
-            on=CONNECT_COLS,
+    ferc_deprish_eia = (
+        pd.merge(
+            scaled_de,
+            scaled_fe,
+            right_index=True,
+            left_index=True,
+            how='outer',
             suffixes=('_deprish', '_ferc1'),
-            how='left', indicator=True
         )
-        # reorder cols so they are easier to see, maybe remove later
-        first_cols = ['plant_part_deprish', 'plant_part_ferc1',
-                      'record_id_eia_deprish', 'record_id_eia_ferc1',
-                      'plant_part_name', 'plant_name_match',
-                      'fraction_owned_deprish', 'fraction_owned_ferc1',
-                      'record_count_deprish', 'record_count_ferc1'
-                      ]
-        candidate_matches_all = candidate_matches_all[
-            first_cols + [x for x in candidate_matches_all.columns
-                          if x not in first_cols]]
+    )
+    return ferc_deprish_eia
 
-        self.check_all_candidate_matches(candidate_matches_all)
 
-        # rename dict with the ordered plant part names with numbered prefixes
-        replace_dict = {
-            x:
-            f"{pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED.index(x)}_{x}"
-            for x in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED
+class FieldTreatment(BaseModel):
+    """
+    How to process specific a field.
+
+    The treatment type of scale is currently only being used to allocate
+    because we have not implemented an aggregation scale process. Nonetheless,
+    the columns we will want to aggregate are the same as those we would want
+    to allocate, so we are keeping this more generic treatment name.
+
+    Args:
+        allocator_cols: an ordered list of columns that should be used when
+            allocating the column. The list should be orderd based on priority
+            of which column should attempted to be used as an allocator first.
+            If the first column is null, it won't be able to be used as an
+            allocator and the second column will be attempted to be used as an
+            allocator and so on.
+        wtavg_col: a column that will be used as a weighting column when
+            applying a weighted average to the column.
+        treatment_type: the name of a treatment type from the following types:
+            ``scale``, ``str_concat``, ``wtavg``.
+
+    """
+
+    allocator_cols: Optional[List[str]]
+    wtavg_col: Optional[str]
+
+    treatment_type: Literal['scale', 'str_concat', 'wtavg']
+
+    @validator('treatment_type')
+    def check_treatments(cls, value, values):   # noqa: N805
+        """Check treatments that need additional info."""
+        if value == 'scale' and not values.get('allocator_cols'):
+            raise AssertionError(
+                "Scale column treatment needs allocator_cols")
+        if value == 'wtavg' and not values.get('wtavg_col'):
+            raise AssertionError(
+                "Weighted Average column treatment needs wtavg_col")
+        return value
+
+
+class PlantPartScaler(BaseModel):
+    """
+    Scale a table to a plant-part.
+
+    Args:
+        treatments: a dictionary of column name (keys) with field treatments
+            (values)
+        ppl_pk: Identifing columns for the EIA plant-part list.
+        data_set_pk_cols: Identifing columns for dataset to scale.
+        plant_part: name of EIA plant-part to scale to. Current implementation
+            only allows for ``plant_gen``.
+
+    """
+
+    treatments: Dict[str, FieldTreatment]
+    ppl_pk: List[str] = ['record_id_eia']
+    data_set_pk_cols: List[str]
+    plant_part: Literal['plant_gen']
+
+    def _get_treatment_cols(self, treatment_type: str) -> list[str]:
+        """Grab the columns which need a specific treatment type."""
+        return [
+            col for (col, treat) in self.treatments.items()
+            if treat.treatment_type == treatment_type]
+
+    @property
+    def wtavg_dict(self) -> Dict:
+        """Grab the dict of columns that get a weighted average treatment."""
+        return {
+            wtavg_col: self.treatments[wtavg_col].wtavg_col
+            for wtavg_col in self._get_treatment_cols('wtavg')
         }
-        # we're going to add a column level_deprish, which indicates the
-        # relative size of the plant part granularity between deprecaition and
-        # ferc1
-        candidate_matches_all = (
-            candidate_matches_all.assign(
-                part_no_deprish=lambda x:
-                    x.plant_part_deprish.replace(replace_dict),
-                part_no_ferc1=lambda x:
-                    x.plant_part_ferc1.replace(replace_dict),
-                level_deprish=lambda x:
-                    np.where(x.part_no_deprish == x.part_no_ferc1,
-                             'samezies', None),)
-            .assign(
-                level_deprish=lambda x:
-                    np.where(x.part_no_deprish < x.part_no_ferc1,
-                             'beeg', x.level_deprish),)
-            .assign(
-                level_deprish=lambda x:
-                    np.where(x.part_no_deprish > x.part_no_ferc1,
-                             'smol', x.level_deprish))
-            .drop(columns=['part_no_deprish', 'part_no_ferc1'])
-        )
-        # we are going to make a count_ferc1 column to know how many possible
-        # ferc1 connections are possible.
-        candidate_matches_all = pd.merge(
-            candidate_matches_all,
-            candidate_matches_all.groupby(['record_id_eia_deprish'])
-            .agg({'record_id_ferc1': 'count'})
-            .rename(columns={'record_id_ferc1': 'count_ferc1', })
-            .reset_index(),
-        )
-        return candidate_matches_all
 
-    def get_same_true(self, candidate_matches):
-        """
-        Grab the obvious matches which have the same record_id_eia.
-
-        If an candidation match has the same id from both the depreciation
-        records and ferc1.... then we have found a match.
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the matches
-                of possible matches between the ferc1 and deprecation.
-
-        Returns:
-            pandas.DataFrame: dataframe of matches that have the same EIA
-                record id
-
-        """
-        return candidate_matches[
-            candidate_matches.record_id_eia_deprish ==
-            candidate_matches.record_id_eia_ferc1]
-
-    def get_matches_at_diff_ownership(self, candidate_matches):
-        """
-        Get matches when the record_id_eia matches except for the ownership.
-
-        The master unit list includes various levels of ownership associated
-        with each record. Some are labeled "owned" (for the utilty's owned
-        portion of the plant part) and some are labeled "total" (for the full
-        plant part).
-
-        The method selects the matches where the potential matches have the
-        same EIA record id expect for the ownership level (owned vs total).
-
-        Note: Is there a cleaner way to do this??
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the matches
-                of possible matches between the ferc1 and deprecation.
-        """
-        diff_own = (
-            candidate_matches[
-                candidate_matches.record_id_eia_deprish.str.replace(
-                    '(owned|total)', "", regex=True) ==
-                candidate_matches.record_id_eia_ferc1.str.replace(
-                    '(owned|total)', "", regex=True)
-            ]
-        )
-        return diff_own
-
-    def get_only_ferc1_matches(self, candidate_matches):
-        """
-        Get the matches when there is only one FERC1 match.
-
-        If there is only one optioin from FERC1, then we have no other choices,
-        so we are going to assume the one match is the right match. We've
-        alredy generated a `count_ferc1` column in `get_candidate_matches`, so
-        we can use that here.
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the canidate
-                matches between the ferc1 and depreciation.
-        """
-        return candidate_matches[
-            (candidate_matches.count_ferc1 == 1)
-            & (candidate_matches.plant_part_ferc1.notnull())
-        ]
-
-    def get_matches_same_qualifiers_ids_by_source(
-            self, candidate_matches, source):
-        """
-        Get matches that have the same qualifier ids part level by source.
-
-        See `get_matches_same_qualifiers_ids` for details.
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the canidate
-                matches between the ferc1 and depreciation.
-            source (string): either `ferc1` or `deprish`
-        """
-        df = pd.DataFrame()
-        for part_name in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
-            part_df = candidate_matches[
-                candidate_matches[f"plant_part_{source}"] == part_name]
-            # add the slice of the df for this part if the id columns for
-            # both contain the same values
-            df = df.append(part_df[
-                part_df[f"{self.inputs.parts_to_ids[part_name]}_deprish"]
-                ==
-                part_df[f"{self.inputs.parts_to_ids[part_name]}_ferc1"]])
-        df = df.assign(match_method=f"same_qualifiers_{source}")
-        return df
-
-    def get_matches_same_qualifiers_ids(self, candidate_matches):
-        """
-        Get the matches that have the same plant part id columns.
-
-        The master unit list is make up of records which correspond to
-        different levels or granularies of plants. These records are all
-        cobbled together at different levels from generator records. When a
-        certain record is compiled from generators that have a consistent
-        identifyier for another plant part, that record is associated with the
-        record (ie. if a prime move level record was compiled from generators
-        that all have the same unit id).
-
-        Each of the datasets that we are connecting are now associated with
-        master unit list records. If one dataset reports at the level of a
-        prime mover and another dataset reports at the level of units, when
-        the prime mover of the prime mover record matches the prime mover of
-        the units, then these units are parts of that prime mover and we can
-        associate them together.
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the canidate
-                matches between the ferc1 and depreciation.
-        """
-        # we are going to check if things are consistent from both "directions"
-        # meaning from each of our data sets
-        same_quals = pd.DataFrame()
-        for source in ['ferc1', 'deprish']:
-            same_quals = same_quals.append(
-                self.get_matches_same_qualifiers_ids_by_source(
-                    candidate_matches, source))
-        return same_quals
-
-    def remove_matches_from_candidates(self,
-                                       candidate_matches_current, matches_df):
-        """
-        Remove the matches from the candidate matches.
-
-        Because we are iteratively generating matches, we want to remove
-        the matches we've determined from the candidate matches for future
-        iterations.
-
-        Args:
-            candidate_matches (pandas.DataFrame): dataframe of the canidate
-                matches between the ferc1 and depreciation.
-            matches_df (pandas.DataFrame): the known matches which
-                will be removed as possibilities for future matches
-        Returns:
-            pandas.DataFrame:
-        """
-        # if the record_id_eia_deprish shows up in the candidates, remove it
-        # the only candidates left are the ones that do not show up in the
-        # matches
-        candidate_matches_remainder = candidate_matches_current[
-            ~candidate_matches_current.record_id_eia_deprish
-            .isin(matches_df.record_id_eia_deprish.unique())]
-        return candidate_matches_remainder
-
-    def match(self):
-        """
-        Connect depreciation records with ferc1 steam records.
-
-        TODO: This is a big messy WIP function right now. The returns below is
-        where this is going, not what is currently happening...
-
-        Returns:
-            pandas.DataFrame: a dataframe of records from the depreciation data
-            with ferc1 steam data associated in a many to many relationship.
-        """
-        # matches are known to be connected records and candidate matches are
-        # the options for matches
-        candidate_matches_all = self.get_candidate_matches()
-
-        # we are going to go through various methods for grabbing the true
-        # matches out of the candidate matches. we will then label those
-        # candidate matches with a match_method column. we are going to
-        # continually remove the known matches from the candidates
-
-        methods = {
-            "same_true": self.get_same_true,
-            "same_diff_own": self.get_matches_at_diff_ownership,
-            "same_quals": self.get_matches_same_qualifiers_ids,
-            "one_ferc1_opt": self.get_only_ferc1_matches,
+    @property
+    def allocator_cols_dict(self) -> Dict:
+        """Grab the columns from the metadata which need to be allocated."""
+        return {
+            allocate_col: self.treatments[allocate_col].allocator_cols
+            for allocate_col in self._get_treatment_cols('scale')
         }
-        # compile the connected dfs in a dictionary
-        matches_dfs = {}
-        candidate_matches = deepcopy(candidate_matches_all)
-        for method in methods:
-            connects_method_df = (
-                methods[method](candidate_matches)
-                .assign(match_method=method)
+
+    @property
+    def plant_part_pk_cols(self):
+        """Get the primary keys for a plant-part."""
+        return (pudl.analysis.plant_parts_eia.PLANT_PARTS
+                [self.plant_part]['id_cols']
+                + pudl.analysis.plant_parts_eia.IDX_TO_ADD
+                + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD)
+
+    def execute(
+        self,
+        df_to_scale: pd.DataFrame,
+        ppl: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Scale a dataframe to a generator-level.
+
+        There are four main steps here:
+
+        * STEP 1: Aggregate the dataset records that are associated with the
+          same EIA plant-part records. Sometime the original dataset include
+          mulitple records that are associated with the same plant-part record.
+          We are assuming that the duplicate records are not reporting
+          overlapping data (i.e. one depreciation record for a unit and another
+          for the emissions control costs associated with the same unit). We
+          know this isn't always a perfect bet.
+        * STEP 2: Merge in the EIA plant-part list generators. This is
+          generally a one-to-many merge where we cast many generators across
+          each data-set record. Now we have the dataset records associated with
+          generators but duplicated. (Step 2 and 3 are grouped into one method)
+        * STEP 3: This is the scaling step (only allocaiton is currently
+          implemented). Here we take the dataset records that have been
+          duplicated across their mulitple generator components and distribute
+          portions of the data columns based on another weighting column (ex:
+          if there are 2 generators associated with a dataset record and one
+          has a 100 MW capacity while the second has a 200 MW capacity, 1/3 of
+          the data column would be allocated to the first generator while the
+          remaining 2/3 would be allocated to the second generator). At the end
+          of this step, we have generator records with data columns allocated.
+        * STEP 4: Aggregate the generator based records. At this step we
+          sometimes have multiple records representing the same generator. This
+          happens when we have two seperate records reporting overlapping
+          peices of infrastructure (ex: a plant's coal ash pound in one
+          depreciation record and a unit in another). We are assuming here that
+          the records do not contain duplicate data - which we know isn't
+          always a perfect bet.
+
+        Args:
+            df_to_scale: the input data table that you want to scale.
+            ppl: the EIA plant-part list.
+
+        """
+        # extract the records that are NOT connected to the EIA plant-part list
+        # Note: Right now we are just dropping the non-connected
+        # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
+        connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
+        # STEP 1
+        # Aggregate when there is more than one source record associated with
+        # the same EIA plant-part.
+        to_scale = self.aggregate_duplicate_eia(connected_to_scale, ppl)
+        # STEP 2 & 3
+        allocated = self.allocate(to_scale, ppl)
+        # STEP 4
+        # second aggregation of the duplicate EIA records.
+        scaled_df_post_agg = self.aggregate_duplicate_eia(
+            connected_to_scale=allocated.reset_index(),
+            ppl=ppl
+        )
+        # set the index to be the main EIA plant-part index columns
+        scaled_df_post_agg = scaled_df_post_agg.set_index(
+            self.plant_part_pk_cols + ['record_id_eia']
+        )
+        return scaled_df_post_agg
+
+    def allocate(
+            self,
+            to_allocate: pd.DataFrame,
+            ppl: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Allocate records w/ larger granularities to sub-component plant-parts.
+
+        Implement both steps 2 and 3 as described in
+        :meth:`PlantPartScaler.execute`.
+
+        Args:
+            to_allocate: the dataframe to be allocated.
+            ppl: EIA plant-part list generated from
+                ``pudl.analysis.plant_parts_eia``
+        """
+        # STEP 2
+        merged_df = self.broadcast_merge_to_plant_part(
+            data_to_scale=to_allocate,
+            ppl=ppl.reset_index(),
+            cols_to_keep=list(self.treatments)
+        )
+        # at this stage we have plant-part records with the data columns from
+        # the original dataset broadcast across multiple records: read the data
+        # is duplicated!
+
+        # STEP 3
+        # grab all of the ppl columns, plus data set's id column(s)
+        # this enables us to have a unique index
+        pk_cols = (
+            self.plant_part_pk_cols
+            + self.data_set_pk_cols
+        )
+        allocated = merged_df.set_index(pk_cols)
+        for allocate_col, allocator_cols in self.allocator_cols_dict.items():
+            allocated.loc[:, allocate_col] = _allocate_col(
+                to_allocate=allocated,
+                by=self.data_set_pk_cols,
+                allocate_col=allocate_col,
+                allocator_cols=allocator_cols
             )
+        return allocated
+
+    def aggregate_duplicate_eia(self, connected_to_scale, ppl):
+        """Aggregate duplicate EIA plant-part records."""
+        dupe_mask = connected_to_scale.duplicated(
+            subset=self.ppl_pk, keep=False
+        )
+        # two dfs
+        dupes = connected_to_scale[dupe_mask]
+        non_dupes = connected_to_scale[~dupe_mask]
+        # If there are no duplicate records, then the following aggs will fail
+        # bc there is nothing to merge. So we're making a new df to output that
+        # is these non_dupes. If ther are dupes, we'll aggregate them!
+        if dupes.empty:
+            df_out = non_dupes
+        else:
             logger.info(
-                f"Matches for {method}:   {len(connects_method_df)}")
-            candidate_matches = self.remove_matches_from_candidates(
-                candidate_matches, connects_method_df)
-            matches_dfs[method] = connects_method_df
-        # squish all of the known matches together
-        matches_df = pd.concat(matches_dfs.values())
+                f"Aggergating {len(dupes)} duplicate records "
+                f"({len(dupes)/len(connected_to_scale):.1%})")
 
-        ###########################################
-        # everything below here is just for logging
-        ###########################################
-        ids_to_match = (candidate_matches_all[
-            candidate_matches_all.record_id_eia_ferc1.notnull()]
-            .record_id_eia_deprish.unique())
-        ids_connected = matches_df.record_id_eia_deprish.unique()
-        ids_no_match = (candidate_matches[
-            candidate_matches.record_id_eia_ferc1.notnull()]
-            .plant_id_pudl.unique())
-        logger.info("Portion of unique depreciation records:")
-        logger.info(
-            f"    Matched:   {len(ids_connected)/len(ids_to_match):.02%}")
-        logger.info(
-            f"    No link:   {len(ids_no_match)/len(ids_to_match):.02%}")
-        logger.info(f"""Connected:
-{matches_df.match_method.value_counts(dropna=False)}""")
-        logger.info(f"""Connection Levels:
-{matches_df.level_deprish.value_counts(dropna=False)}""")
-        logger.debug(f"""Only one ferc1 match levels:
-{matches_dfs['one_ferc1_opt'].level_deprish.value_counts(dropna=False)}""")
+            # sum and weighted average!
+            de_duped = pudl.helpers.sum_and_weighted_average_agg(
+                df_in=dupes,
+                by=self.ppl_pk,
+                sum_cols=self._get_treatment_cols('scale'),
+                wtavg_dict=self.wtavg_dict
+            )
+            # add in the string columns
+            # TODO: add a test to ensure that the str-squish character doesn't
+            # show up in the original data columns
+            de_duped = de_duped.merge(
+                (
+                    dupes.groupby(self.ppl_pk, as_index=False)
+                    .agg({k: str_concat for k
+                          in self._get_treatment_cols('str_concat')})
+                ),
+                on=self.ppl_pk,
+                validate='1:1',
+                how='left'
+            ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
 
-        # for debugging return all outputs.. remove when this all feels stable
-        # return candidate_matches_all, candidate_matches, matches_df
-        self.matches_df = matches_df
-        return self.matches_df
+            # merge back in the ppl idx columns
+            de_duped = (
+                de_duped.set_index('record_id_eia')
+                .merge(
+                    ppl,
+                    left_index=True,
+                    right_index=True,
+                    how='left',
+                    validate='m:1',
+                )
+                .reset_index()
+            )
+            # merge the non-dupes and de-duplicated records
+            # we're doing an inner merge here bc we don't want columns with
+            # partially null values
+            df_out = pd.concat([non_dupes, de_duped], join='inner')
+        return df_out
 
-
-class Scaler(object):
-    """Scales FERC1 data to matching depreciation records."""
-
-    def __init__(self, match_maker):
+    def broadcast_merge_to_plant_part(
+            self,
+            data_to_scale: pd.DataFrame,
+            cols_to_keep: List[str],
+            ppl: pd.DataFrame) -> pd.DataFrame:
         """
-        Initialize Scaler.
+        Broadcast data with a variety of granularities to a single plant-part.
 
-        TODO: Add explicit arguments for the input matches_df into methods
-        instead of accessing the cached df.
+        This method merges an input dataframe (``data_to_scale``) containing
+        data that has a heterogeneous set of plant-part granularities with a
+        subset of the EIA plant-part list that has a single granularity.
+        (Currently this single granularity must be generators). In general this
+        will be a one-to-many merge in which values from single records in the
+        input data end up associated with several records from the plant part
+        list.
+
+        First, we select a subset of the full EIA plant-part list corresponding
+        to the plant-part of the :class:`PlantPartScaler` instance.  (specified
+        by its :attr:`plant_part`). In theory this could be the plant,
+        generator, fuel type, etc. Currently only generators are supported.
+
+        Then, we iterate over all the possible plant parts, selecting the
+        subset of records in ``data_to_scale`` that have that granularity, and
+        merge the homogeneous subset of the plant part list that we selected
+        above onto that subset of the input data. Each iteration uses a
+        different set of columns to merge on -- the columns which define the
+        primary key for the plant part being merged. Each iteration creates a
+        separate dataframe, corresponding to a particular plant part, and at
+        the end they are all concatenated together and returned.
+
+        This method is implementing Step 2 enumerated in :meth:`execute`.
+
+        Note: :user:`cmgosnell` thinks this method might apply to both
+        aggretation and allocation, so it is using the more generic "scale"
+        verb.
 
         Args:
-            match_maker (instance): instance of MatchMaker. If `matches_df` has
-                not been generated, then `match()` will be run in this method.
-        """
-        try:
-            self.matches_df = deepcopy(match_maker.matches_df)
-        except AttributeError:
-            self.matches_df = deepcopy(match_maker.match())
-
-    def scale(self):
-        """
-        WIP. Scale ferc1 data to the depreciation records.
-
-        Note: the following return is the aspirational desire for where this
-        method is going.
+            data_to_scale: a data table where all records have been linked to
+                EIA plant-part list but they may be heterogeneous in its
+                plant-part granularities (i.e. some records could be of 'plant'
+                plant-part type while others are 'plant_gen' or
+                'plant_prime_mover').  All of the plant-part list columns need
+                to be present in this table.
+            cols_to_keep: columns from the original data ``data_to_scale`` that
+                you want to show up in the output. These should not be columns
+                that show up in the ``ppl``.
+            ppl: the EIA plant-part list.
 
         Returns:
-            pandas.DataFrame: FERC1 steam data has been either aggregated
-            or disaggregated to match the level of the depreciation records.
-            The data columns properly scaled will be labled as
-            "{data_col}_ferc1_deprish".
-        """
-        self.scale_by_ownership_fraction()
-        same_true = self.assign_ferc1_data_cols_same()
-        same_smol = self.split_ferc1_data_cols()
-        same_beeg = self.agg_ferc_data_cols()
-        logger.info(f"Scaled via same/true: {len(same_true)}")
-        logger.info(f"Scaled via same/smol: {len(same_smol)}")
-        logger.info(f"Scaled via same/beeg: {len(same_beeg)}")
-        scaled_df = pd.concat([same_true, same_smol, same_beeg])
+            A dataframe in which records correspond to :attr:`plant_part` (in
+            the current implementation: the records all correspond to EIA
+            generators!). This is an intermediate table that cannot be used
+            directly for analysis because the data columns from the original
+            dataset are duplicated and still need to be scaled up/down.
 
-        self.test_same_true_fraction_owned(same_true)
-        logger.info(
-            f"output is len {len(scaled_df)} while input was "
-            f"{len(self.matches_df)}"
+        """
+        # select only the plant-part records that we are trying to scale to
+        ppl_part_df = ppl[ppl.plant_part == self.plant_part]
+        # convert the date to year start - this is necessary because the
+        # depreciation data is often reported as EOY and the ppl is always SOY
+        data_to_scale.loc[:, 'report_date'] = (
+            pd.to_datetime(data_to_scale.report_date.dt.year, format='%Y')
         )
-        return scaled_df
-
-    def scale_by_ownership_fraction(self):
-        """
-        Scale the data columns by the fraction owned ratio in matches_df.
-
-        This method makes new columns in matches_df for each of the data
-        columns in `DATA_COLS_TO_SPLIT` that scale the ferc1 data based on the
-        ownership fractions of the depreciation and ferc1 records.
-        """
-        for data_col in DATA_COLS_TO_SPLIT:
-            self.matches_df.loc[:, f"{data_col}_own_frac"] = (
-                self.matches_df[data_col]
-                * (self.matches_df.fraction_owned_deprish
-                   / self.matches_df.fraction_owned_ferc1)
+        out_dfs = []
+        for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
+            pk_cols = (
+                pudl.analysis.plant_parts_eia.PLANT_PARTS
+                [merge_part]['id_cols']
+                + pudl.analysis.plant_parts_eia.IDX_TO_ADD
+                + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
             )
-
-    def assign_ferc1_data_cols_same(self):
-        """
-        Assign FERC1 data cols to deprecation when records are the same.
-
-        For matched depreciation and FERC1 records are exactly the same, this
-        method simply assigns the original data column to the new associated
-        data column (with the format of "{data_col}_ferc1_deprish"). This
-        method scales ferc1 data for both the `same_true` match method and the
-        `same_diff_own` method - it uses the scaled `{data_col}_own_frac`
-        generated in `scale_by_ownership_fraction()`.
-
-        Relies on:
-        * matches_df (pandas.DataFrame): a dataframe of records from the
-            depreciation data with ferc1 steam data associated in a many to
-            many relationship.
-        """
-        same_true = deepcopy(
-            self.matches_df.loc[
-                (self.matches_df.match_method == 'same_true')
-                | (self.matches_df.match_method == 'same_diff_own')
-            ]
-        )
-        for data_col in DATA_COLS_TO_SPLIT:
-            new_data_col = self._get_clean_new_data_col(data_col)
-            same_true.loc[:, new_data_col] = (
-                same_true[f"{data_col}_own_frac"]
+            part_df = pd.merge(
+                (
+                    # select just the records that correspond to merge_part
+                    data_to_scale[data_to_scale.plant_part == merge_part]
+                    [pk_cols + ['record_id_eia'] + cols_to_keep]
+                ),
+                ppl_part_df,
+                on=pk_cols,
+                how='left',
+                # this unfortunately needs to be a m:m bc sometimes the df
+                # data_to_scale has multiple record associated with the same
+                # record_id_eia but are unique records and are not aggregated
+                # in aggregate_duplicate_eia. For instance, the depreciation
+                # data has both PUC and FERC studies.
+                validate='m:m',
+                suffixes=('_og', '')
             )
-        return same_true
-
-    def split_ferc1_data_cols(self):
-        """
-        Split and assign portions of FERC1 columns to depreciation records.
-
-        For each FERC1 data column that we want to associated with depreciation
-        records, this method splits the FERC1 data based on a prioritized list
-        of columns to weight and split the FERC1 data on.
-
-        Relies on:
-        * matches_df (pandas.DataFrame): a dataframe of records from the
-            depreciation data with ferc1 steam data associated in a many to
-            many relationship.
-        """
-        # get the records that are matches with the same qualifier records and
-        # the deprecation records are at a smaller level than the FERC1 records
-        same_smol = self.matches_df.loc[
-            (self.matches_df.match_method == 'same_quals')
-            & (self.matches_df.level_deprish == 'smol')
-        ]
-
-        idx_cols_ferc1 = ['plant_id_pudl', 'record_id_eia_ferc1']
-        # add a count for the nuber of depreciation records that match to each
-        # ferc1 record
-        df_fgb = (
-            same_smol
-            .groupby(by=idx_cols_ferc1)
-            [['record_id_eia_deprish']].count()
-            .rename(columns={
-                'record_id_eia_deprish': 'record_count_matches_deprish'})
-            .reset_index()
-        )
-
-        same_smol = pd.merge(same_smol, df_fgb)
-
-        for data_col, split_cols in DATA_COLS_TO_SPLIT.items():
-            same_smol = self.split_ferc1_data_on_split_cols(
-                same_smol,
-                data_col=f"{data_col}_own_frac",
-                idx_cols_ferc1=idx_cols_ferc1,
-                split_cols=split_cols,
-            )
-        return same_smol
-
-    def split_ferc1_data_on_split_cols(self,
-                                       same_smol,
-                                       data_col,
-                                       idx_cols_ferc1,
-                                       split_cols,):
-        """
-        Split larger ferc1 records porportionally by depreciation columns.
-
-        This method associates slices of ferc1 records - which are larger than
-        their depreciation counter parts - via prioritized columns.
-
-        Args:
-            same_smol (pandas.DataFrame): table with matched records from ferc1
-                and depreciation records.
-            data_col (string): name of the ferc1 data column.
-            idx_cols_ferc1 (list): columns to group by.
-            split_cols (list): ordered list of columns to split porportionally
-                based on. Ordered based on priority: if non-null result from
-                frist column, result will include first column result, then
-                second and so on.
-        Returns:
-            pandas.DataFrame: a modified version of `same_smol` with a new
-                assigned data_col
-
-        """
-        # we want to know the sum of the potential split_cols for each ferc1
-        # option
-        df_fgb = (
-            same_smol.loc[:, idx_cols_ferc1 + split_cols]
-            .groupby(by=idx_cols_ferc1, dropna=False)
-            .sum(min_count=1)
-            .reset_index()
-        )
-        df_w_tots = (
-            pd.merge(same_smol, df_fgb,
-                     on=idx_cols_ferc1,
-                     suffixes=("", "_fgb"))
-        )
-        # for each of the columns we want to split the frc data by
-        # generate the % of the total group, so we can split the data_col
-        new_data_col = self._get_clean_new_data_col(data_col)
-        df_w_tots[new_data_col] = pd.NA
-        for split_col in split_cols:
-            df_w_tots[f"{split_col}_pct"] = (
-                df_w_tots[split_col] / df_w_tots[f"{split_col}_fgb"])
-            # choose the first non-null option.
-            df_w_tots[new_data_col] = (
-                df_w_tots[new_data_col].fillna(
-                    df_w_tots[data_col] * df_w_tots[f"{split_col}_pct"]))
-
-        # merge in the newly generated split/assigned data column
-        df_final = pd.merge(
-            same_smol,
-            df_w_tots[idx_cols_ferc1 + ['record_id_eia_deprish',
-                                        new_data_col]].drop_duplicates(),
-        )
-        return df_final
-
-    def agg_ferc_data_cols(self):
-        """
-        Aggregate smaller level FERC1 data columns to depreciation records.
-
-        When the depreciation matches are at a higher level than the FERC1,
-        this method aggregates the many FERC1 records into the level of the
-        depreciation records.
-        """
-        data_cols_own_frac = [f"{col}_own_frac" for col in DATA_COLS_TO_SPLIT]
-        same_beeg = self.matches_df.loc[
-            (self.matches_df.match_method == 'same_quals')
-            & (self.matches_df.level_deprish == 'beeg')
-        ]
-
-        # dict to rename the summed data columns to their new name
-        rename_dict = {}
-        for data_col_of, data_col in zip(data_cols_own_frac,
-                                         DATA_COLS_TO_SPLIT):
-            rename_dict[data_col_of] = self._get_clean_new_data_col(data_col)
-        # sum the data columns at the level of the depreciation records
-        same_beeg_sum = (
-            same_beeg.groupby('record_id_eia_deprish')
-            [data_cols_own_frac]
-            .sum()
-            .reset_index()
-            .rename(columns=rename_dict)
-        )
-
-        # squish the new summed columns back into the og df
-        same_beeg = pd.merge(same_beeg,
-                             same_beeg_sum,
-                             on=['record_id_eia_deprish'],
-                             how='left')
-        return same_beeg
-
-    def _get_clean_new_data_col(self, data_col):
-        # some of the data columns already have a ferc1 suffix because the same
-        # column name also shows up in the EIA data... so we want to remove the
-        # double ferc1 if it shows up
-        new_data_col = f"{data_col}_ferc1_deprish"
-        new_data_col = new_data_col.replace("ferc1_ferc1", "ferc1")
-        return new_data_col
-
-    def test_same_true_fraction_owned(self, same_true):
-        """
-        Test the same_true scaling.
-
-        Raises:
-            AssertionError: If there is some error in the standard scaling with
-            fraction_owned columns.
-        """
-        for data_col in DATA_COLS_TO_SPLIT:
-            new_data_col = self._get_clean_new_data_col(data_col)
-            not_same = same_true[
-                (same_true.match_method == 'same_true')
-                & ~(same_true[data_col] == same_true[new_data_col])
-                & (same_true[data_col].notnull())
-                & (same_true[new_data_col].notnull())
-            ]
-            if not not_same.empty:
-                raise AssertionError(
-                    "Scaling for same_true match method errored with "
-                    f"{len(not_same)}. Check fraction owned split in "
-                    "scale_by_ownership_fraction."
-                )
-            else:
-                logger.debug(
-                    f"testing the same_true match method passed for {data_col}"
-                )
+            out_dfs.append(part_df)
+        out_df = pd.concat(out_dfs)
+        return out_df
 
 
-def rmi_output_ify(scaled_df, deprish_df):
-    """Generate the output in RMI's desired format."""
-    add_suffix = ['utility_name_ferc1',
-                  'utility_id_ferc1',
-                  'report_year']
-    deprish_idx_new = [
-        x if x not in add_suffix else x + '_deprish'
-        for x in connect_deprish_to_eia.DEPRISH_COLS]
-    scaled_df2 = pd.merge(
-        scaled_df,
-        deprish_df,
-        left_on=deprish_idx_new,
-        right_on=connect_deprish_to_eia.DEPRISH_COLS,
+def str_concat(x):
+    """Concatenate list of strings with a semicolon-space delimiter."""
+    return '; '.join(list(map(str, [x for x in x.unique() if x is not pd.NA])))
+
+
+def _allocate_col(
+        to_allocate: pd.DataFrame,
+        by: list,
+        allocate_col: str,
+        allocator_cols: List[str]) -> pd.Series:
+    """
+    Allocate larger dataset records porportionally by EIA plant-part columns.
+
+    Args:
+        to_allocate: table of data that has been merged with the EIA plant-part
+            list records of the scale that you want the output to be in.
+        allocate_col: name of the data column to scale. The data in this column
+            has been broadcast across multiple records in
+            :meth:`broadcast_merge_to_plant_part`.
+        by: columns to group by.
+        allocator_cols: ordered list of columns to allocate porportionally
+            based on. Ordered based on priority: if non-null result from
+            frist column, result will include first column result, then
+            second and so on.
+
+    Returns:
+        a series of the ``allocate_col`` scaled to the plant-part level.
+
+    """
+    # add a total column for all of the allocate cols. This will enable us to
+    # determine each records' proportion of the
+    to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
+        to_allocate.loc[:, allocator_cols]
+        .groupby(by=by, dropna=False)
+        .transform(sum, min_count=1)
+        .add_suffix('_total')
     )
-    # get the rename dict.. once this is stable, convert/store this as an dict
-    rename = pd.read_excel(
-        pathlib.Path().cwd().parent / 'inputs' / 'rmi_output_formt.xlsx')
-    rename_dict = (
-        rename[rename.pudl_name.notnull()]
-        .set_index('pudl_name').to_dict()['rmi_name']
+    # for each of the columns we want to allocate the frc data by
+    # generate the % of the total group, so we can allocate the data_col
+    allocated_col = f"{allocate_col}_allocated"
+    to_allocate[allocated_col] = pd.NA
+    for allocate_col in allocator_cols:
+        to_allocate[f"{allocate_col}_proportion"] = (
+            to_allocate[allocate_col] / to_allocate[f"{allocate_col}_total"])
+        # choose the first non-null option. The order of the allocate_cols will
+        # determine which allocate_col will be used
+        to_allocate[allocated_col] = (
+            to_allocate[allocated_col].fillna(
+                to_allocate[allocate_col]
+                * to_allocate[f"{allocate_col}_proportion"])
+        )
+    to_allocate = (
+        to_allocate.drop(columns=allocate_col)
+        .rename(columns={allocated_col: allocate_col})
     )
-    if [x for x in rename_dict.keys() if x not in scaled_df2]:
-        raise AssertionError('')
-    connected_deprish = (
-        scaled_df2.rename(columns=rename_dict)
-        [rename_dict.values()]
-    )
-    return connected_deprish
+    return to_allocate.loc[:, [allocate_col]]

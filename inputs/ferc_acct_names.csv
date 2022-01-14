@@ -1,7 +1,7 @@
 ferc_acct,ferc_acct_description,ferc_acct_category,ferc_acct_name
-301,Organization.,Intangible Plant,
-302,Franchises and consents.,Intangible Plant,
-303,Miscellaneous intangible plant.,Intangible Plant,
+301,Organization.,Intangible Plant,intangible
+302,Franchises and consents.,Intangible Plant,intangible
+303,Miscellaneous intangible plant.,Intangible Plant,intangible
 310,Land and land rights.,Production Plant,steam
 311,Structures and improvements.,Production Plant,steam
 312,Boiler plant equipment.,Production Plant,steam

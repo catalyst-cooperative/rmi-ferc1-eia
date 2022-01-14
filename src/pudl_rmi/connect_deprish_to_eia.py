@@ -1,21 +1,21 @@
 """
-Connect the master unit list with depreciation records from PUCs and FERC1.
+Connect the EIA plant-part list with depreciation records from PUCs and FERC1.
 
 This module connects the records from the depreciation data to their
-appropirate ids in the EIA master unit list. The master unit list is generated
+appropirate ids in the EIA plant-part list. The plant-part list is generated
 via `make_plant_parts_eia.py`; see the documenation there for additional
-details about the master unit list. The depreciation data is annual
+details about the plant-part list. The depreciation data is annual
 depreciation studies from PUC and FERC1 data that have been compiled into an
-excel spreadsheet. The master unit list is a compilation of various slices of
+excel spreadsheet. The plant-part list is a compilation of various slices of
 EIA records.
 """
 
 import argparse
 import logging
-import pathlib
 import sys
 
 import pandas as pd
+import sqlalchemy as sa
 from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
 from xlrd import XLRDError
@@ -23,7 +23,6 @@ from xlrd import XLRDError
 import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 import pudl
 import pudl_rmi
-from pudl_rmi import deprish
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +35,26 @@ RESTRICT_MATCH_COLS = ['plant_id_eia', 'utility_id_pudl', 'report_year']
 
 PPL_COLS = [
     'record_id_eia', 'plant_name_new', 'plant_part', 'report_year',
-    'ownership', 'plant_name_eia', 'plant_id_eia', 'generator_id',
-    'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
+    'report_date', 'ownership', 'plant_name_eia', 'plant_id_eia',
+    'generator_id', 'unit_id_pudl', 'prime_mover_code', 'energy_source_code_1',
     'technology_description', 'ferc_acct_name', 'utility_id_eia',
     'utility_id_pudl', 'true_gran', 'appro_part_label', 'appro_record_id_eia',
-    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status'
+    'record_count', 'fraction_owned', 'ownership_dupe', 'operational_status',
+    'operational_status_pudl'
 ]
 
 PPL_RENAME = {
-    'record_id_eia': 'record_id_eia_name_match',
+    # 'record_id_eia': 'record_id_eia_name_match',
+    # this rename doesn't have huge downstream implications, but i don't know
+    # if this first rename is correct.... (if it is determined to be unecessary
+    # and removed, we also need to remove a .drop(columns in match_deprish_eia)
     'appro_record_id_eia': 'record_id_eia_fuzzy',
     'plant_part': 'plant_part_name_match',
     'appro_part_label': 'plant_part',
     'true_gran': 'true_gran_name_match'
 }
 """dict: to rename the columns from the master unit list. Because we want
-to fuzzy match with all possible MUL records names but only use the true
+to fuzzy match with all possible PPL records names but only use the true
 granualries."""
 
 IDX_DEPRISH_COLS = [
@@ -63,7 +66,7 @@ IDX_DEPRISH_COLS = [
 ###############################################################################
 
 
-def prep_deprish(plant_parts_df, key_deprish):
+def prep_deprish(deprish_df, plant_parts_df, key_deprish):
     """
     Prep the depreciation dataframe for use in match_merge.
 
@@ -72,13 +75,8 @@ def prep_deprish(plant_parts_df, key_deprish):
     """
     # we could grab the output here instead of the input file...
     deprish_df = (
-        deprish.Transformer(deprish.Extractor().execute())
-        .execute(agg_cols=[
-            x for x in deprish.IDX_COLS_DEPRISH if x not in ['ferc_acct']] +
-            ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1'])
-        .assign(report_year=lambda x: x.report_date.dt.year)
+        deprish_df.assign(report_year=lambda x: x.report_date.dt.year)
         .astype({'report_year': pd.Int64Dtype()})  # bc it isnt an eia col
-        .dropna(subset=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
     )
 
@@ -100,19 +98,19 @@ def prep_deprish(plant_parts_df, key_deprish):
     # matches.
     # TODO: go through all of these to reassign plant_id_eia!!! and turn down
     # the acceptable number of baddies
-    baddies = deprish_ids.loc[
-        (deprish_ids._merge != 'both')
-        & (deprish_ids.plant_part_name.notnull())
-    ].drop_duplicates(subset=['plant_part_name'])
+    baddies = (
+        deprish_ids.loc[(deprish_ids._merge != 'both')]
+        .dropna(subset=RESTRICT_MATCH_COLS + ['plant_part_name'])
+        .drop_duplicates(subset=['plant_part_name'])
+    )
     if len(baddies) > 270:
         raise AssertionError(
-            f"Found {baddies} depreciation records which don't have "
+            f"Found {len(baddies)} depreciation records which don't have "
             "cooresponding EIA plant-part list records. Check plant_id_eia's "
-            f"in {pudl_rmi.FILE_PATH_DEPRISH_RAW}"
+            f"in {pudl_rmi.DEPRISH_RAW_XLSX}"
         )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == 'both']
-        .drop_duplicates(subset=['plant_part_name', 'report_date'])
         # there are some records in the depreciation df that have no
         # names.... so they've got to go
         .dropna(subset=['plant_part_name', '_merge'])
@@ -122,7 +120,7 @@ def prep_deprish(plant_parts_df, key_deprish):
     return deprish_ids
 
 
-def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
+def prep_master_parts_eia(plant_parts_df, deprish_df, key_ppl):
     """Prepare the EIA master plant parts."""
     # restrict the possible matches to only those that match on the
     # RESTRICT_MATCH_COLS
@@ -132,10 +130,11 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
         plant_parts_df
         .reset_index()  # convert the record_id_eia index to a column
         .set_index(RESTRICT_MATCH_COLS).loc[options_index]
-        .reset_index())
-    plant_parts_df.record_id_eia
-    plant_parts_df.loc[:, key_mul] = pudl.helpers.cleanstrings_series(
-        plant_parts_df[key_mul], str_map=STRINGS_TO_CLEAN)
+        .reset_index()
+        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+    )
+    plant_parts_df.loc[:, key_ppl] = pudl.helpers.cleanstrings_series(
+        plant_parts_df[key_ppl], str_map=STRINGS_TO_CLEAN)
     return plant_parts_df
 
 
@@ -144,7 +143,7 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_mul):
 ###############################################################################
 
 
-def get_plant_year_util_list(plant_name, deprish_df, mul_df, key_mul):
+def get_plant_year_util_list(plant_name, deprish_df, ppl_df, key_ppl):
     """
     Get the possible key matches from df2 a plant_id_pudl and report_year.
 
@@ -158,12 +157,12 @@ def get_plant_year_util_list(plant_name, deprish_df, mul_df, key_mul):
         .drop_duplicates().set_index(RESTRICT_MATCH_COLS).index)
 
     # get the set of possible names
-    names = (mul_df.set_index(RESTRICT_MATCH_COLS)
-             .loc[options_index, key_mul].to_list())
+    names = (ppl_df.set_index(RESTRICT_MATCH_COLS)
+             .loc[options_index, key_ppl].to_list())
     return names
 
 
-def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
+def get_fuzzy_matches(deprish_df, ppl_df, key_deprish, key_ppl, threshold=75):
     """
     Get fuzzy matches on df1 using token_sort_ratio and extractOne.
 
@@ -172,19 +171,20 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
 
     Args:
         deprish_df (pandas.Dataframe): is the left table to join
-        mul_df (pandas.Dataframe): is the right table to join
+        ppl_df (pandas.Dataframe): is the right table to join
         key_deprish (str): is the key column of the left table
-        key_mul (str): is the key column of the right table
+        key_ppl (str): is the key column of the right table
         threshold (int): is how close the matches should be to return a match,
             based on Levenshtein distance. Range between 0 and 100.
 
     Returns:
         pandas.DataFrame
     """
+    logger.info("Generating fuzzy matches.")
     # get the best match for each valye of the key1 column
     match_tuple_series = deprish_df[key_deprish].apply(
         lambda x: process.extractOne(
-            x, get_plant_year_util_list(x, deprish_df, mul_df, key_mul),
+            x, get_plant_year_util_list(x, deprish_df, ppl_df, key_ppl),
             scorer=fuzz.token_sort_ratio)
     )
     # process.extractOne returns a tuple with the matched name and the
@@ -200,40 +200,8 @@ def get_fuzzy_matches(deprish_df, mul_df, key_deprish, key_mul, threshold=75):
     matches_perct = (len(deprish_df[deprish_df.plant_name_match.notnull()])
                      / len(deprish_df))
     logger.info(f"Matches: {matches_perct:.02%}")
+    logger.info(f"Matching resulted in {len(deprish_df)} connections.")
     return deprish_df
-
-
-def match_merge(deprish_df, mul_df, key_deprish, key_mul):
-    """Generate fuzzy matches and merge relevant colums from eia."""
-    logger.info("Merging fuzzy matches.")
-    # we are going to match with all of the names from the
-    # master unit list, but then use the "true granularity"
-    match_merge_df = (pd.merge(
-        get_fuzzy_matches(
-            deprish_df, mul_df,
-            key_deprish=key_deprish, key_mul=key_mul,
-            threshold=75),
-        mul_df.drop_duplicates(
-            subset=['report_year', 'plant_name_new'])[PPL_COLS],
-        left_on=[
-            'report_year',
-            'utility_id_pudl',
-            'plant_name_match',
-            'plant_id_eia'],
-        right_on=[
-            'report_year',
-            'utility_id_pudl',
-            key_mul,
-            'plant_id_eia'],
-        how='left')
-        # rename the ids so that we have the "true granularity"
-        # Every MUL record has identifying columns for it's true granualry,
-        # even when the true granularity is the same record, so we can use the
-        # true gran columns across the board.
-        .rename(columns=PPL_RENAME)
-    )
-    logger.info(f"Matching resulted in {len(match_merge_df)} connections.")
-    return match_merge_df
 
 
 def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
@@ -279,29 +247,50 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
     return deprish_match_full
 
 
-def match_deprish_eia(plant_parts_df, sheet_name_output):
+def match_deprish_eia(deprish_df, plant_parts_df, sheet_name_output):
     """Prepare the depreciation and master unit list and match on name cols."""
     key_deprish = 'plant_part_name'
-    key_mul = 'plant_name_new'
+    key_ppl = 'plant_name_new'
     deprish_df = prep_deprish(
+        deprish_df=deprish_df,
         plant_parts_df=plant_parts_df,
         key_deprish=key_deprish
     )
-    mul_df = prep_master_parts_eia(plant_parts_df, deprish_df, key_mul=key_mul)
+    ppl_df = prep_master_parts_eia(plant_parts_df, deprish_df, key_ppl=key_ppl)
     deprish_match = (
-        match_merge(deprish_df, mul_df,
-                    key_deprish=key_deprish, key_mul=key_mul)
+        get_fuzzy_matches(
+            deprish_df=deprish_df, ppl_df=ppl_df,
+            key_deprish=key_deprish, key_ppl=key_ppl,
+            threshold=75)
+        .pipe(add_record_id_fuzzy, plant_parts_df=ppl_df, key_ppl=key_ppl)
         .pipe(add_overrides, file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
               sheet_name_output=sheet_name_output)
-        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-        .pipe(pudl.helpers.organize_cols,
-              # we want to pull the used columns to the front, but there is
-              # some overlap in columns from these two datasets. And we have
-              # renamed some of the columns from the master unit list.
-              list(set(IDX_DEPRISH_COLS + [PPL_RENAME.get(c, c)
-                                           for c in PPL_COLS])))
     )
-
+    # merge in the rest of the ppl columns
+    # we want to have the columns from the PPL, not from the fuzzy merged
+    # option. so we're dropping all of the shared columns before merging
+    ppl_non_id_cols = [c for c in PPL_COLS if c != 'record_id_eia']
+    deprish_match = (
+        deprish_match.set_index('record_id_eia')
+        .drop(columns=[c for c in deprish_match if c in ppl_non_id_cols])
+        .merge(
+            plant_parts_df[ppl_non_id_cols],
+            left_index=True,
+            right_index=True,
+            how='left',
+            validate='m:1',
+        )
+        .reset_index()
+        # rename the ids so that we have the "true granularity"
+        # Every PPL record has identifying columns for it's true granualry,
+        # even when the true granularity is the same record, so we can use the
+        # true gran columns across the board.
+        # we first want to remove this fuzzy id before we rename the
+        # appropirate ID column so we don't have duplicate columns
+        .drop(columns=['record_id_eia_fuzzy'])
+        .rename(columns=PPL_RENAME)
+        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
+    )
     first_cols = [
         'plant_part_name', 'utility_name_ferc1', 'report_year',
         'plant_name_match', 'record_id_eia', 'record_id_eia_fuzzy',
@@ -310,6 +299,36 @@ def match_deprish_eia(plant_parts_df, sheet_name_output):
         :, first_cols + [x for x in deprish_match.columns
                          if x not in first_cols]]
     return deprish_match
+
+
+def add_record_id_fuzzy(deprish_df, plant_parts_df, key_ppl):
+    """Merge in relevant columns from EIA plant-part list."""
+    left_on = [
+        'report_year',
+        'utility_id_pudl',
+        'plant_name_match',
+        'plant_id_eia']
+    right_on = [
+        'report_year',
+        'utility_id_pudl',
+        key_ppl,
+        'plant_id_eia']
+    # we're adding the appro ID and then we'll reassign that column as
+    # record_id_eia_fuzzy below
+    match_merge_df = (
+        pd.merge(
+            deprish_df,
+            plant_parts_df
+            .drop_duplicates(subset=['report_year', 'plant_name_new'])
+            [right_on + ['appro_record_id_eia']],
+            left_on=left_on,
+            right_on=right_on,
+            how='left',
+            validate='m:1'
+        )
+        .rename(columns={'appro_record_id_eia': 'record_id_eia_fuzzy'})
+    )
+    return match_merge_df
 
 
 def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
@@ -321,14 +340,14 @@ def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
         to possible matches for the depreciation data based on the
         ``RESTRICT_MATCH_COLS``.
     """
-    possible_matches_mul = (
+    possible_matches_ppl = (
         pd.merge(
             plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
             deprish_df[RESTRICT_MATCH_COLS].drop_duplicates(),
             on=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.organize_cols, PPL_COLS)
     )
-    return possible_matches_mul
+    return possible_matches_ppl
 
 ###############################################################################
 # EXPORT
@@ -336,6 +355,7 @@ def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
 
 
 def execute(
+    deprish_df,
     plant_parts_df,
     sheet_name_output='EIA to depreciation matches',
     save_to_xls=True,
@@ -367,16 +387,17 @@ def execute(
             from the master unit list.
     """
     deprish_match_df = match_deprish_eia(
+        deprish_df,
         plant_parts_df,
         sheet_name_output=sheet_name_output
     )
-    possible_matches_mul_df = grab_possible_plant_part_list_matches(
+    possible_matches_ppl_df = grab_possible_plant_part_list_matches(
         plant_parts_df, deprish_match_df
     )
     if save_to_xls:
         sheets_df_dict = {
             sheet_name_output: deprish_match_df,
-            "Subset of Master Unit List": possible_matches_mul_df}
+            "Subset of Master Unit List": possible_matches_ppl_df}
         save_to_workbook(file_path=pudl_rmi.DEPRISH_RAW_XLSX,
                          sheets_df_dict=sheets_df_dict)
     return deprish_match_df
@@ -432,39 +453,50 @@ def parse_command_line(argv):
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        'file_path_deprish',
-        type=str,
-        help='path to the excel workbook which contains depreciation data.')
+        'clobber',
+        '-c',
+        '--clobber',
+        action='store_true',
+        default=False,
+        help="Clobber existing depreciation/EIA pickled output if it exists.")
     parser.add_argument(
-        '--file_path_mul',
-        default=pathlib.Path('master_unit_list.pkl.gz'),
-        type=str,
-        help='path to the master unit list. Default: master_unit_list.csv.gz')
+        'clobber_deprish',
+        '-c',
+        '--clobber',
+        action='store_true',
+        default=False,
+        help="Clobber existing interim pickled output of depreciation data.")
     parser.add_argument(
         '--sheet_name_deprish',
         default='Depreciation Studies Raw',
         type=str,
-        help="""name of the excel tab which contains the plant names from the
-        depreciation data. Default: Depreciation Studies Raw""")
-    parser.add_argument(
-        '--sheet_name_output',
-        default='EIA to depreciation matches',
-        type=str,
-        help="""name of the excel tab which the matches will be output.
-        Default: EIA to depreciation matches""")
+        help="Clobber existing interim pickled output of EIA plant-part list.")
     arguments = parser.parse_args(argv[1:])
     return arguments
 
 
 def main():
-    """Match depreciation and master unit list records. Save to excel."""
+    """Match depreciation and EIA plant-part list records. Save to excel."""
     args = parse_command_line(sys.argv)
 
-    _ = execute(
-        file_path_mul=pathlib.Path(args.file_path_mul),
-        file_path_deprish=pathlib.Path(args.file_path_deprish),
-        sheet_name_deprish=args.sheet_name_deprish,
-        sheet_name_output=args.sheet_name_output)
+    pudl_settings = pudl.workspace.setup.get_defaults()
+    pudl_engine = sa.create_engine(pudl_settings["pudl_db"])
+
+    pudl_out = pudl.output.pudltabl.PudlTabl(
+        pudl_engine,
+        freq='AS',
+        fill_fuel_cost=True,
+        roll_fuel_cost=True,
+        fill_net_gen=False
+    )
+
+    rmi_out = pudl_rmi.coordinate.Output(pudl_out)
+
+    _ = rmi_out.grab_deprish_to_eia(
+        clobber=args.clobber,
+        clobber_deprish=args.clobber_deprish,
+        clobber_plant_part_list=args.clobber_plant_part_list,
+    )
 
 
 if __name__ == '__main__':

@@ -97,25 +97,35 @@ class Output():
 
     def grab_deprish_to_eia(
         self,
-        clobber=False,
-        clobber_plant_part_list=False,
+        clobber: bool = False,
+        clobber_deprish: bool = False,
+        clobber_plant_part_list: bool = False,
     ):
         """
         Generate or grab the connection between the depreciation data and EIA.
 
         Args:
-            clobber (boolean): True if you want to regenerate the connection
-                between the depreciation data and EIA whether or not the output
-                is already pickled. Default is False.
-            clobber_plant_part_list (boolean): True if you want to regenerate
-                the masterunit list whether or not the output is already
+            clobber: True if you want to regenerate the connection between the
+                depreciation data and EIA whether or not the output is already
                 pickled. Default is False.
+            clobber_deprish : True if you want to regenerate the depreciation
+                data whether or not the output is already pickled. The
+                deprecaition data is an interim input to make the connection
+                between depreciation and EIA. Default is False.
+            clobber_plant_part_list: True if you want to regenerate the EIA
+                plant-part list whether or not the output is already pickled.
+                Default is False.
         """
+        clobber_any = any([
+            clobber,
+            clobber_deprish,
+            clobber_plant_part_list
+        ])
         file_path = pudl_rmi.DEPRISH_EIA_PKL
-        clobber_any = any([clobber, clobber_plant_part_list])
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber_any:
             deprish_match_df = pudl_rmi.connect_deprish_to_eia.execute(
+                deprish_df=self.grab_deprish(clobber=clobber_deprish),
                 plant_parts_df=self.grab_plant_part_list(
                     clobber=clobber_plant_part_list)
             )

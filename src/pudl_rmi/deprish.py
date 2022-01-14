@@ -19,7 +19,6 @@ deprish_df = transformer.execute()
 import logging
 from copy import deepcopy
 import warnings
-import pathlib
 
 import pandas as pd
 import numpy as np
@@ -41,6 +40,7 @@ IDX_COLS_DEPRISH = [
     'plant_id_eia',
     'plant_part_name',
     'ferc_acct',
+    'ferc_acct_name',
     'utility_id_pudl',
     'data_source'
 ]
@@ -116,8 +116,6 @@ class Transformer:
             extract_df (pandas.DataFrame): dataframe of extracted depreciation
                 studies from ``Extractor.execute()``
         """
-        # Note: should I pass in an instance of Extractor and make this call:
-        # self.extract_df = extractor.execute()
         self.extract_df = extract_df
 
         self.tidy_df = None
@@ -146,8 +144,10 @@ class Transformer:
         self.filled_df = self.fill_in(clobber=clobber)
         logger.info('agg-ing now')
         if agg_cols is None:
-            agg_cols = ([x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
-                        + ['line_id', 'common', 'utility_name_ferc1'])
+            agg_cols = (
+                IDX_COLS_OUT +
+                ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1']
+            )
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
             idx_cols=agg_cols)
@@ -894,6 +894,9 @@ def agg_to_idx(deprish_df, idx_cols):
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
 
+    suffix = ""
+    if 'plant_balance_w_common' in deprish_df.columns:
+        suffix = f'_w{COMMON_SUFFIX}'
     # weighted average agg section ###
     # enumerate wtavg cols
     avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
@@ -901,7 +904,7 @@ def agg_to_idx(deprish_df, idx_cols):
          if '_rate' in x and 'rate_type_pct' not in x]
     # prep dict with col to average (key) and col to weight on (value)
     # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = dict.fromkeys(avg_cols, 'unaccrued_balance')
+    wtavg_cols = dict.fromkeys(avg_cols, f'unaccrued_balance{suffix}')
     # aggregate the columned that need to be averaged ..
     for data_col, weight_col in wtavg_cols.items():
         deprish_asset = (
@@ -911,11 +914,18 @@ def agg_to_idx(deprish_df, idx_cols):
                     data_col=data_col,
                     weight_col=weight_col,
                     by=idx_cols
-                ).reset_index(),  # bc weighted_average returns index of idx_cols
+                ).reset_index(),  # weighted_average returns w/idx_cols index
                 how='outer',
                 on=idx_cols
             )
         )
+    deprish_asset.loc[:, 'remaining_life_avg_old'] = (
+        deprish_asset.loc[:, 'remaining_life_avg']
+    )
+    deprish_asset.loc[:, 'remaining_life_avg'] = (
+        deprish_asset[f"unaccrued_balance{suffix}"]
+        / deprish_asset[f"depreciation_annual_epxns{suffix}"]
+    )
     deprish_asset = pudl.helpers.convert_cols_dtypes(
         deprish_asset,
         'depreciation',
@@ -975,20 +985,20 @@ def fill_in_tech_type(gens):
 ######################
 
 
-def get_ferc_acct_type_map(file_path):
+def get_ferc_acct_type_map():
     """Grab the mapping of the FERC Account numbers to names."""
-    ferc_acct_map = (
-        pd.read_csv(file_path, dtype={'ferc_acct': pd.StringDtype()})
+    ferc_acct_map = pd.read_csv(
+        pudl_rmi.FERC_ACCT_NAMES_CSV,
+        dtype={'ferc_acct': pd.StringDtype()}
     )
+    # ensure there are NO NULLS in the input file
+    assert(ferc_acct_map.notnull().any().any())
     return ferc_acct_map
 
 
 def add_ferc_acct_name(tidy_df):
     """Add the FERC Account name into the tidied deprecation table."""
-    file_path_ferc_acct_names = (
-        pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
-    ferc_acct_names = get_ferc_acct_type_map(
-        file_path_ferc_acct_names)
+    ferc_acct_names = get_ferc_acct_type_map()
     # ensure the ferc_acct column is a string, otherwise the string
     # manipliations won't work
     tidy_df = tidy_df.astype({'ferc_acct': pd.StringDtype()})

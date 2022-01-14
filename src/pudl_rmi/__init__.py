@@ -35,6 +35,7 @@ DEPRISH_RAW_XLSX: Path = INPUTS_DIR / 'deprish_raw.xlsx'
 """Path to the raw depreciation data."""
 DEPRISH_COMMON_LABELS_XLSX: Path = INPUTS_DIR / 'deprish_common_labels.xlsx'
 """Path to mannual label of common records in depreciation studies."""
+FERC_ACCT_NAMES_CSV: Path = INPUTS_DIR / 'ferc_acct_names.csv'
 
 PLANT_PARTS_EIA_PKL: Path = OUTPUTS_DIR / 'plant_parts_eia.pkl.gz'
 """Path to EIA plant-part list."""
