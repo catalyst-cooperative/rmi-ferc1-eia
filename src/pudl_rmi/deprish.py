@@ -116,8 +116,6 @@ class Transformer:
             extract_df (pandas.DataFrame): dataframe of extracted depreciation
                 studies from ``Extractor.execute()``
         """
-        # Note: should I pass in an instance of Extractor and make this call:
-        # self.extract_df = extractor.execute()
         self.extract_df = extract_df
 
         self.tidy_df = None
@@ -146,8 +144,10 @@ class Transformer:
         self.filled_df = self.fill_in(clobber=clobber)
         logger.info('agg-ing now')
         if agg_cols is None:
-            agg_cols = ([x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
-                        + ['line_id', 'common', 'utility_name_ferc1'])
+            agg_cols = (
+                IDX_COLS_OUT +
+                ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1']
+            )
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
             idx_cols=agg_cols)

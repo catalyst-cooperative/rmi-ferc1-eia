@@ -7,6 +7,7 @@ has been connected to the EIA plant-part list, which is a compilation of
 various possible combinations of generator records.
 
 Some defintions:
+
 * Scale: Converting record(s) from one set of plant-parts to another.
 * Allocate: A specific implementation of scaling. This is down-scaling. When
   the original dataset has records that are of a larger granularity than your
@@ -19,18 +20,24 @@ Some defintions:
   implemented!)
 
 Currently Implemented:
-* A scale-to-generator-er.
-    Inputs:
-    * Any dataset that has been connected to the EIA plant-part list. This
-      dataset can have heterogeneous plant-parts (i.e. one record can be
-      associated with a full plant while the next can be associated with a
-      generator or a unit).
-    * Information regarding how to transform each of the columns in the input
-      dataset.
-    Outputs:
-    * The initial dataset scaled to the generator level.
+
+* An allocate-to-generator-er.
+
+    * Inputs:
+
+       * Any dataset that has been connected to the EIA plant-part list. This
+         dataset can have heterogeneous plant-parts (i.e. one record can be
+         associated with a full plant while the next can be associated with a
+         generator or a unit).
+       * Information regarding how to transform each of the columns in the
+         input dataset.
+
+    * Outputs:
+
+       * The initial dataset scaled to the generator level.
 
 Future Needs:
+
 * A merger of generator-based records. This is currently implemented in the
   ``connect_deprish_to_ferc1`` notebook, but it needs to be buttoned up and
   integrated here.
@@ -196,8 +203,8 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     scaled_fe = (
         PlantPartScaler(
             treatments=META_FERC1_EIA,
-            eia_pk=['record_id_eia'],
-            data_set_idx_cols=['record_id_ferc1'],
+            ppl_id=['record_id_eia'],
+            data_set_id_cols=['record_id_ferc1'],
             plant_part='plant_gen'
         )
         .execute(
@@ -209,8 +216,8 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     scaled_de = (
         PlantPartScaler(
             treatments=META_DEPRISH_EIA,
-            eia_pk=['record_id_eia', 'data_source'],
-            data_set_idx_cols=['line_id'],
+            ppl_id=['record_id_eia', 'data_source'],
+            data_set_id_cols=['line_id'],
             plant_part='plant_gen'
         )
         .execute(
@@ -240,9 +247,13 @@ class FieldTreatment(BaseModel):
     the columns we will want to aggregate are the same as those we would want
     to allocate, so we are keeping this more generic treatment name.
 
-    Kwargs:
-        allocator_cols: the prioritized list of columns that should be used
-            when allocating the column.
+    Args:
+        allocator_cols: an ordered list of columns that should be used when
+            allocating the column. The list should be orderd based on priority
+            of which column should attempted to be used as an allocator first.
+            If the first column is null, it won't be able to be used as an
+            allocator and the second column will be attempted to be used as an
+            allocator and so on.
         wtavg_col: a column that will be used as a weighting column when
             applying a weighted average to the column.
         treatment_type: the name of a treatment type from the following types:
@@ -274,18 +285,19 @@ class PlantPartScaler(BaseModel):
     Args:
         treatments: a dictionary of column name (keys) with field treatments
             (values)
-        eia_pk:
-        data_set_idx_cols:
-        plant_part:
+        ppl_id: Identifing columns for the EIA plant-part list.
+        data_set_id_cols: Identifing columns for dataset to scale.
+        plant_part: name of EIA plant-part to scale to. Current implementation
+            only allows for ``plant_gen``.
 
     """
 
     treatments: Dict[str, FieldTreatment]
-    eia_pk: List[str] = ['record_id_eia']
-    data_set_idx_cols: List[str]
+    ppl_id: List[str] = ['record_id_eia']
+    data_set_id_cols: List[str]
     plant_part: Literal['plant_gen']
 
-    def get_treatment_cols(self, treatment_type: str) -> list[str]:
+    def _get_treatment_cols(self, treatment_type: str) -> list[str]:
         """Grab the columns which need a specific treatment type."""
         return [
             col for (col, treat) in self.treatments.items()
@@ -296,7 +308,7 @@ class PlantPartScaler(BaseModel):
         """Grab the dict of columns that get a weighted average treatment."""
         return {
             wtavg_col: self.treatments[wtavg_col].wtavg_col
-            for wtavg_col in self.get_treatment_cols('wtavg')
+            for wtavg_col in self._get_treatment_cols('wtavg')
         }
 
     @property
@@ -304,11 +316,11 @@ class PlantPartScaler(BaseModel):
         """Grab the columns from the metadata which need to be allocated."""
         return {
             allocate_col: self.treatments[allocate_col].allocator_cols
-            for allocate_col in self.get_treatment_cols('scale')
+            for allocate_col in self._get_treatment_cols('scale')
         }
 
     @property
-    def plant_part_pk_cols(self):
+    def plant_part_id_cols(self):
         """Get the primary keys for a plant-part."""
         return (pudl.analysis.plant_parts_eia.PLANT_PARTS
                 [self.plant_part]['id_cols']
@@ -320,6 +332,7 @@ class PlantPartScaler(BaseModel):
         Scale a dataframe to a generator-level.
 
         There are four main steps here:
+
         * STEP 1: Aggregate the dataset records that are associated with the
           same EIA plant-part records. Sometime the original dataset include
           mulitple records that are associated with the same plant-part record.
@@ -331,15 +344,15 @@ class PlantPartScaler(BaseModel):
           generally a one-to-many merge where we cast many generators across
           each data-set record. Now we have the dataset records associated with
           generators but duplicated. (Step 2 and 3 are grouped into one method)
-        * STEP 3: This is the splitting/scaling step. Here we take the
-          dataset records that have been duplicated across their mulitple
-          generator components and distribute portions of the data columns
-          based on another weighting column (ex: if there are 2 generators
-          associated with a dataset record and one has a 100 MW capacity while
-          the second has a 200 MW capacity, 1/3 of the data column would be
-          allocated to the first generator while the remaining 2/3 would be
-          allocated to the second generator). At the end of this step, we have
-          generator records with data columns allocated.
+        * STEP 3: This is the scaling step (only allocaiton is currently
+          implemented). Here we take the dataset records that have been
+          duplicated across their mulitple generator components and distribute
+          portions of the data columns based on another weighting column (ex:
+          if there are 2 generators associated with a dataset record and one
+          has a 100 MW capacity while the second has a 200 MW capacity, 1/3 of
+          the data column would be allocated to the first generator while the
+          remaining 2/3 would be allocated to the second generator). At the end
+          of this step, we have generator records with data columns allocated.
         * STEP 4: Aggregate the generator based records. At this step we
           sometimes have multiple records representing the same generator. This
           happens when we have two seperate records reporting overlapping
@@ -347,6 +360,11 @@ class PlantPartScaler(BaseModel):
           depreciation record and a unit in another). We are assuming here that
           the records do not contain duplicate data - which we know isn't
           always a perfect bet.
+
+        Args:
+            df_to_scale: the input data table that you want to scale.
+            ppl:
+
         """
         # extract the records that are NOT connected to the EIA plant-part list
         # Note: Right now we are just dropping the non-connected
@@ -366,7 +384,7 @@ class PlantPartScaler(BaseModel):
         )
         # set the index to be the main EIA plant-part index columns
         scaled_df_post_agg = scaled_df_post_agg.set_index(
-            self.plant_part_pk_cols + ['record_id_eia']
+            self.plant_part_id_cols + ['record_id_eia']
         )
         return scaled_df_post_agg
 
@@ -379,7 +397,7 @@ class PlantPartScaler(BaseModel):
         Allocate records w/ larger granularities to sub-component plant-parts.
 
         Implement both steps 2 and 3 as described in
-        :meth:``PlantPartScaler.execute``.
+        :meth:`PlantPartScaler.execute`.
 
         Args:
             to_allocate: the dataframe to be allocated.
@@ -400,14 +418,14 @@ class PlantPartScaler(BaseModel):
         # grab all of the ppl columns, plus data set's id column(s)
         # this enables us to have a unique index
         idx_cols = (
-            self.plant_part_pk_cols
-            + self.data_set_idx_cols
+            self.plant_part_id_cols
+            + self.data_set_id_cols
         )
         allocated = merged_df.set_index(idx_cols)
         for allocate_col, allocator_cols in self.allocator_cols_dict.items():
             allocated.loc[:, allocate_col] = _allocate_col(
                 to_allocate=allocated,
-                by=self.data_set_idx_cols,
+                by=self.data_set_id_cols,
                 allocate_col=allocate_col,
                 allocator_cols=allocator_cols
             )
@@ -416,7 +434,7 @@ class PlantPartScaler(BaseModel):
     def aggregate_duplicate_eia(self, connected_to_scale, ppl):
         """Aggregate duplicate EIA plant-part records."""
         dupe_mask = connected_to_scale.duplicated(
-            subset=self.eia_pk, keep=False
+            subset=self.ppl_id, keep=False
         )
         # two dfs
         dupes = connected_to_scale[dupe_mask]
@@ -434,8 +452,8 @@ class PlantPartScaler(BaseModel):
             # sum and weighted average!
             de_duped = pudl.helpers.sum_and_weighted_average_agg(
                 df_in=dupes,
-                by=self.eia_pk,
-                sum_cols=self.get_treatment_cols('scale'),
+                by=self.ppl_id,
+                sum_cols=self._get_treatment_cols('scale'),
                 wtavg_dict=self.wtavg_dict
             )
             # add in the string columns
@@ -443,11 +461,11 @@ class PlantPartScaler(BaseModel):
             # show up in the original data columns
             de_duped = de_duped.merge(
                 (
-                    dupes.groupby(self.eia_pk, as_index=False)
+                    dupes.groupby(self.ppl_id, as_index=False)
                     .agg({k: str_concat for k
-                          in self.get_treatment_cols('str_concat')})
+                          in self._get_treatment_cols('str_concat')})
                 ),
-                on=self.eia_pk,
+                on=self.ppl_id,
                 validate='1:1',
                 how='left'
             ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
