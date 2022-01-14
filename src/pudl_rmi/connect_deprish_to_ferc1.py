@@ -199,7 +199,7 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     Args:
         plant_parts_eia (pandas.DataFrame): EIA plant-part list - table of
             "plant-parts" which are groups of aggregated EIA generators
-            that coorespond to portions of plants from generators to fuel
+            that correspond to portions of plants from generators to fuel
             types to whole plants.
         deprish_eia (pandas.DataFrame): table of the connection between the
             depreciation studies and the EIA plant-parts list.
@@ -501,92 +501,95 @@ class PlantPartScaler(BaseModel):
 
     def broadcast_merge_to_plant_part(
             self,
-            to_scale: pd.DataFrame,
-            cols_to_keep: list,
+            data_to_scale: pd.DataFrame,
+            cols_to_keep: List[str],
             ppl: pd.DataFrame) -> pd.DataFrame:
         """
-        Broadcast merge a plant-part from the plant-part list onto a dataframe.
+        Broadcast data with a variety of granularities to a single plant-part.
 
-        This method merges an input data table that has been connected to the
-        EIA plant-part list with a particular plant-part - in our current
-        implementation: merge in the EIA plant-part list generators. This
-        is generally a one-to-many merge where we broadcast many generators
-        across each data-set record.
+        This method merges an input dataframe (``data_to_scale``) containing
+        data that has a heterogeneous set of plant-part granularities with a
+        subset of the EIA plant-part list that has a single granularity.
+        (Currently this single granularity must be generators). In general this
+        will be a one-to-many merge in which values from single records in the
+        input data end up associated with several records from the plant part
+        list.
 
-        First, we're grabbing a subset of the plant-part list associated with
-        the plant-part (i.e. plants, generators, fuel types, etc.) that this
-        scaler instance is trying to scale to (
-        :attr:``PlantPartScaler.plant_part``).
+        First, we select a subset of the full EIA plant-part list corresponding
+        to the plant-part of the :class:`PlantPartScaler` instance.  (specified
+        by its :attr:`plant_part`). In theory this could be the plant,
+        generator, fuel type, etc. Currently only generators are supported.
 
-        Then, this method merges the plant-part list subset onto ``to_scale``.
-        The ``to_scale`` table contains records that are heterogeneous
-        in its plant-part granularities. Each plant-part granularity has
-        different primary keys that need to be used to merge on. Because of
-        that heterogeneity, we must iteratively merge subsets of ``to_scale``
-        that coorespond to different plant-part granularities with different
-        merge columns.
+        Then, we iterate over all the possible plant parts, selecting the subset
+        of records in ``data_to_scale`` that have that granularity, and merge
+        the homogeneous subset of the plant part list that we selected above
+        onto that subset of the input data. Each iteration uses a different set
+        of columns to merge on -- the columns which define the primary key for
+        the plant part being merged. Each iteration creates a separate
+        dataframe, corresponding to a particular plant part, and at the end they
+        are all concatenated together and returned.
 
-        This method is implementing Step 2 enumerated in
-        :meth:`PlantPartScaler.execute`.
+        This method is implementing Step 2 enumerated in :meth:`execute`.
 
-        Note: CG is not sure if we will need this method to aggregate or not.
-        So we are keeping this method with the more generic "scale" verbage.
+        Note: :user:`cmgosnell` thinks this method might apply to both
+        aggretation and allocation, so it is using the more generic "scale"
+        verb.
 
         Args:
-            to_scale: a data table where all records have been linked to EIA
-                plant-part list but they may be heterogeneous in its plant-part
-                granularities (i.e. some records could be of 'plant' plant-part
-                type while others are 'plant_gen' or 'plant_prime_mover').
-                All of the plant-part list columns need to be present in this
-                table.
-            cols_to_keep: columns from ``to_scale`` from the original dataset
-                that you want to show up in the output. These should not be
-                columns that show up in the ``ppl``.
+            data_to_scale: a data table where all records have been linked to
+                EIA plant-part list but they may be heterogeneous in its
+                plant-part granularities (i.e. some records could be of 'plant'
+                plant-part type while others are 'plant_gen' or
+                'plant_prime_mover').  All of the plant-part list columns need
+                to be present in this table.
+            cols_to_keep: columns from the original data ``data_to_scale`` that
+                you want to show up in the output. These should not be columns
+                that show up in the ``ppl``.
             ppl: the EIA plant-part list.
 
         Returns:
-            A table which records coorespond to
-            :attr:``PlantPartScaler.plant_part`` (in this current
-            implementation: the records all coorespond to EIA generators!).
-            This is an intermediate table because the data columns from the
-            original dataset are duplicated.
+            A dataframe in which records correspond to :attr:``plant_part`` (in
+            the current implementation: the records all correspond to EIA
+            generators!). This is an intermediate table that cannot be used
+            directly for analysis because the data columns from the original
+            dataset are duplicated and still need to be scaled up/down.
 
         """
-        # grab only the plant-part records that we are trying to scale to
+        # select only the plant-part records that we are trying to scale to
         ppl_part_df = ppl[ppl.plant_part == self.plant_part]
         # convert the date to year start - this is necessary because the
         # depreciation data is often reported as EOY and the ppl is always SOY
-        to_scale.loc[:, 'report_date'] = (
-            pd.to_datetime(to_scale.report_date.dt.year, format='%Y')
+        data_to_scale.loc[:, 'report_date'] = (
+            pd.to_datetime(data_to_scale.report_date.dt.year, format='%Y')
         )
-        scale_parts = []
+        out_dfs = []
         for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
-            pk_part = (
+            pk_cols = (
                 pudl.analysis.plant_parts_eia.PLANT_PARTS
                 [merge_part]['id_cols']
                 + pudl.analysis.plant_parts_eia.IDX_TO_ADD
                 + pudl.analysis.plant_parts_eia.IDX_OWN_TO_ADD
             )
-            # grab just the part of the df that cooresponds to the plant_part
             part_df = pd.merge(
                 (
-                    to_scale[to_scale.plant_part == merge_part]
-                    [pk_part + ['record_id_eia'] + cols_to_keep]
+                    # select just the records that correspond to merge_part
+                    data_to_scale[data_to_scale.plant_part == merge_part]
+                    [pk_cols + ['record_id_eia'] + cols_to_keep]
                 ),
                 ppl_part_df,
-                on=pk_part,
+                on=pk_cols,
                 how='left',
                 # this unfortunately needs to be a m:m bc sometimes the df
-                # to_scale has multiple record associated with the same
+                # data_to_scale has multiple record associated with the same
                 # record_id_eia but are unique records and are not aggregated
                 # in aggregate_duplicate_eia. For instance, the depreciation
                 # data has both PUC and FERC studies.
                 validate='m:m',
                 suffixes=('_og', '')
             )
-            scale_parts.append(part_df)
-        scale_parts_df = pd.concat(scale_parts)
-        return scale_parts_df
+            out_dfs.append(part_df)
+        out_df = pd.concat(out_dfs)
+        return out_df
 
 
 def str_concat(x):
