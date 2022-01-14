@@ -1200,7 +1200,7 @@ def check_match_consistentcy(connects_ferc1_eia, train_df, match_type='all'):
     return count
 
 
-def calc_annual_capital_addts_ferc1(steam_df, window=3):
+def calc_annual_capital_additions_ferc1(steam_df, window=3):
     """
     Calculate annual capital additions for FERC1 steam records.
 
@@ -1215,7 +1215,7 @@ def calc_annual_capital_addts_ferc1(steam_df, window=3):
 
     Returns:
         pandas.DataFrame: augemented version of steam_df with two additional
-        columns: `capex_annual_addt` and `capex_annual_addt_rolling`.
+        columns: `capex_annual_addition` and `capex_annual_addition_rolling`.
     """
     # we need to sort the df so it lines up w/ the groupby
     steam_df = steam_df.sort_values(IDX_STEAM)
@@ -1224,45 +1224,45 @@ def calc_annual_capital_addts_ferc1(steam_df, window=3):
     steam_df['capex_total_shifted'] = steam_df.groupby(
         [x for x in IDX_STEAM if x != 'report_date'])[['capex_total']].shift()
     steam_df = steam_df.assign(
-        capex_annual_addt=lambda x: x.capex_total - x.capex_total_shifted
+        capex_annual_addition=lambda x: x.capex_total - x.capex_total_shifted
     )
 
     addts = pudl.helpers.generate_rolling_avg(
         steam_df,
         group_cols=[x for x in IDX_STEAM if x != 'report_date'],
-        data_col='capex_annual_addt',
+        data_col='capex_annual_addition',
         window=window
     ).pipe(pudl.helpers.convert_cols_dtypes, 'ferc1')
 
     steam_df_w_addts = (
         pd.merge(
             steam_df,
-            addts[IDX_STEAM + ['capex_total', 'capex_annual_addt_rolling']],
+            addts[IDX_STEAM + ['capex_total', 'capex_annual_addition_rolling']],
             on=IDX_STEAM + ['capex_total'],
             how='left',
         )
         .assign(
             capex_annual_per_mwh=lambda x:
-                x.capex_annual_addt / x.net_generation_mwh_ferc1,
+                x.capex_annual_addition / x.net_generation_mwh_ferc1,
             capex_annual_per_mw=lambda x:
-                x.capex_annual_addt / x.capacity_mw_ferc1,
+                x.capex_annual_addition / x.capacity_mw_ferc1,
             capex_annual_per_kw=lambda x:
-                x.capex_annual_addt / x.capacity_mw_ferc1 / 1000,
+                x.capex_annual_addition / x.capacity_mw_ferc1 / 1000,
             capex_annual_per_mwh_rolling=lambda x:
-                x.capex_annual_addt_rolling / x.net_generation_mwh_ferc1,
+                x.capex_annual_addition_rolling / x.net_generation_mwh_ferc1,
             capex_annual_per_mw_rolling=lambda x:
-                x.capex_annual_addt_rolling / x.capacity_mw_ferc1,
+                x.capex_annual_addition_rolling / x.capacity_mw_ferc1,
         )
     )
 
-    steam_df_w_addts = add_mean_cap_addts(steam_df_w_addts)
+    steam_df_w_addts = add_mean_cap_additions(steam_df_w_addts)
     # bb tests for volumne of negative annual capex
     neg_cap_addts = len(
-        steam_df_w_addts[steam_df_w_addts.capex_annual_addt_rolling < 0]) \
+        steam_df_w_addts[steam_df_w_addts.capex_annual_addition_rolling < 0]) \
         / len(steam_df_w_addts)
     neg_cap_addts_mw = (
         steam_df_w_addts[
-            steam_df_w_addts.capex_annual_addt_rolling < 0]
+            steam_df_w_addts.capex_annual_addition_rolling < 0]
         .net_generation_mwh_ferc1.sum()
         / steam_df_w_addts.net_generation_mwh_ferc1.sum())
     message = (f'{neg_cap_addts:.02%} records have negative capitial additions'
@@ -1274,10 +1274,10 @@ def calc_annual_capital_addts_ferc1(steam_df, window=3):
     return steam_df_w_addts
 
 
-def add_mean_cap_addts(steam_df):
+def add_mean_cap_additions(steam_df):
     """Add mean capital additions over lifetime of plant (via `IDX_STEAM`)."""
     idx_steam_no_date = [c for c in IDX_STEAM if c != 'report_year']
-    gb_cap_an = steam_df.groupby(idx_steam_no_date)[['capex_annual_addt']]
+    gb_cap_an = steam_df.groupby(idx_steam_no_date)[['capex_annual_addition']]
     # calcuate the standard deviatoin of each generator's capex over time
     df = (
         steam_df
@@ -1296,8 +1296,9 @@ def add_mean_cap_addts(steam_df):
             validate='m:1'  # should this really be 1:1?
         )
         .assign(
-            capex_annual_addt_diff_mean=lambda x: x.capex_annual_addt - \
-            x. capex_annual_addt_gen_mean,
+            capex_annual_addition_diff_mean=lambda x:
+                x.capex_annual_addition
+                - x. capex_annual_addition_gen_mean,
         )
     )
     return df
