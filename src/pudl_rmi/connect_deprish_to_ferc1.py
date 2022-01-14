@@ -417,7 +417,7 @@ class PlantPartScaler(BaseModel):
         """
         # STEP 2
         merged_df = self.broadcast_merge_to_plant_part(
-            to_scale=to_allocate,
+            data_to_scale=to_allocate,
             ppl=ppl.reset_index(),
             cols_to_keep=list(self.treatments)
         )
@@ -520,14 +520,14 @@ class PlantPartScaler(BaseModel):
         by its :attr:`plant_part`). In theory this could be the plant,
         generator, fuel type, etc. Currently only generators are supported.
 
-        Then, we iterate over all the possible plant parts, selecting the subset
-        of records in ``data_to_scale`` that have that granularity, and merge
-        the homogeneous subset of the plant part list that we selected above
-        onto that subset of the input data. Each iteration uses a different set
-        of columns to merge on -- the columns which define the primary key for
-        the plant part being merged. Each iteration creates a separate
-        dataframe, corresponding to a particular plant part, and at the end they
-        are all concatenated together and returned.
+        Then, we iterate over all the possible plant parts, selecting the
+        subset of records in ``data_to_scale`` that have that granularity, and
+        merge the homogeneous subset of the plant part list that we selected
+        above onto that subset of the input data. Each iteration uses a
+        different set of columns to merge on -- the columns which define the
+        primary key for the plant part being merged. Each iteration creates a
+        separate dataframe, corresponding to a particular plant part, and at
+        the end they are all concatenated together and returned.
 
         This method is implementing Step 2 enumerated in :meth:`execute`.
 
@@ -548,7 +548,7 @@ class PlantPartScaler(BaseModel):
             ppl: the EIA plant-part list.
 
         Returns:
-            A dataframe in which records correspond to :attr:``plant_part`` (in
+            A dataframe in which records correspond to :attr:`plant_part` (in
             the current implementation: the records all correspond to EIA
             generators!). This is an intermediate table that cannot be used
             directly for analysis because the data columns from the original
@@ -601,7 +601,7 @@ def _allocate_col(
         to_allocate: pd.DataFrame,
         by: list,
         allocate_col: str,
-        allocator_cols: list[str]) -> pd.Series:
+        allocator_cols: List[str]) -> pd.Series:
     """
     Allocate larger dataset records porportionally by EIA plant-part columns.
 
@@ -609,7 +609,8 @@ def _allocate_col(
         to_allocate: table of data that has been merged with the EIA plant-part
             list records of the scale that you want the output to be in.
         allocate_col: name of the data column to scale. The data in this column
-            has been broadcast across multiple records in ``df_to_scale``.
+            has been broadcast across multiple records in
+            :meth:`broadcast_merge_to_plant_part`.
         by: columns to group by.
         allocator_cols: ordered list of columns to allocate porportionally
             based on. Ordered based on priority: if non-null result from
