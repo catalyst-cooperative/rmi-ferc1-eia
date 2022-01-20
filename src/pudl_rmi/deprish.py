@@ -287,15 +287,7 @@ class Transformer:
         else:
             suffix = ""
         for _ in range(3):
-            filled_df = filled_df.assign(
-                net_salvage_rate=lambda x:
-                    # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_rate.fillna(
-                        x[f"net_salvage{suffix}"] /
-                        x[f"book_reserve{suffix}"]),
-                reserve_rate=lambda x: x.reserve_rate.fillna(
-                    x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]),
-            )
+            filled_df = _fill_in_rate_cols(filled_df, suffix)
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
@@ -331,20 +323,21 @@ class Transformer:
                     (filled_df['depreciation_annual_rate'])
                     * filled_df['remaining_life_avg'])
             )
-        filled_df[f"book_reserve_og{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"]
-        )
-        filled_df[f"book_reserve{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"].fillna(
-                ((1 - filled_df.net_salvage_rate) *
-                 filled_df[f"plant_balance{suffix}"])
-                - filled_df[f"unaccrued_balance{suffix}"])
-        )
-        filled_df[f"book_reserve_option2{suffix}"] = (
-            filled_df[f"plant_balance{suffix}"] -
-            (filled_df[f"depreciation_annual_epxns{suffix}"]
-             * filled_df.remaining_life_avg)
-        )
+            filled_df[f"book_reserve_og{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"]
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    ((1 - filled_df.net_salvage_rate) *
+                     filled_df[f"plant_balance{suffix}"])
+                    - filled_df[f"unaccrued_balance{suffix}"])
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    (filled_df[f"depreciation_annual_epxns{suffix}"]
+                     * filled_df.remaining_life_avg))
+            )
 
         return filled_df
 
@@ -857,6 +850,31 @@ class Transformer:
         return df_w_tots
 
 
+def _fill_in_rate_cols(filled_df, suffix):
+    filled_df = filled_df.replace({0: np.nan})
+    filled_df = filled_df.assign(
+        net_salvage_rate=lambda x:
+            # first clean % v num, then net_salvage/book_value
+            x.net_salvage_rate.fillna(
+                x[f"net_salvage{suffix}"] /
+                x[f"book_reserve{suffix}"]),
+        reserve_rate=lambda x: x.reserve_rate.fillna(
+            x[f"book_reserve{suffix}"] /
+            x[f"plant_balance{suffix}"]),
+    )
+    filled_df.loc[:, 'remaining_life_avg'] = (
+        filled_df.loc[:, 'remaining_life_avg'].fillna(
+            filled_df[f"unaccrued_balance{suffix}"]
+            / filled_df[f"depreciation_annual_epxns{suffix}"])
+    )
+    filled_df.loc[:, "depreciation_annual_rate"] = (
+        filled_df["depreciation_annual_rate"].fillna(
+            filled_df[f"depreciation_annual_epxns{suffix}"] /
+            (filled_df[f"plant_balance{suffix}"]))
+    )
+    return filled_df
+
+
 def agg_to_idx(deprish_df, idx_cols):
     """
     Aggregate the depreciation data to the asset level.
@@ -902,6 +920,7 @@ def agg_to_idx(deprish_df, idx_cols):
     avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
         [x for x in deprish_df.columns
          if '_rate' in x and 'rate_type_pct' not in x]
+
     # prep dict with col to average (key) and col to weight on (value)
     # in this case we always want to weight based on unaccrued_balance
     wtavg_cols = dict.fromkeys(avg_cols, f'unaccrued_balance{suffix}')
@@ -919,13 +938,18 @@ def agg_to_idx(deprish_df, idx_cols):
                 on=idx_cols
             )
         )
-    deprish_asset.loc[:, 'remaining_life_avg_old'] = (
-        deprish_asset.loc[:, 'remaining_life_avg']
-    )
-    deprish_asset.loc[:, 'remaining_life_avg'] = (
-        deprish_asset[f"unaccrued_balance{suffix}"]
-        / deprish_asset[f"depreciation_annual_epxns{suffix}"]
-    )
+
+    calc_cols = ['net_salvage_rate', 'reserve_rate',
+                 'remaining_life_avg', 'depreciation_annual_rate']
+    # once we feel cozy about these outputs, we can skip these _old version and
+    # only do the weighted average for ['service_life_avg', 'net_removal_rate']
+    deprish_asset.loc[:, [f"{c}_old" for c in calc_cols]
+                      ] = deprish_asset[calc_cols].add_suffix("_old")
+    # null the calc columns before sending them through the fill_in funciton bc
+    # that function fills nulls!
+    deprish_asset.loc[:, calc_cols] = pd.NA
+    deprish_asset = _fill_in_rate_cols(deprish_asset, suffix)
+
     deprish_asset = pudl.helpers.convert_cols_dtypes(
         deprish_asset,
         'depreciation',
