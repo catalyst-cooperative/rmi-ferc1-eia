@@ -22,6 +22,7 @@ import warnings
 
 import pandas as pd
 import numpy as np
+from typing import Literal
 
 import pudl
 import pudl_rmi
@@ -161,8 +162,7 @@ class Transformer:
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
                 self.extract_df
-                .pipe(pudl.helpers.convert_cols_dtypes,
-                      'depreciation', name='depreciation')
+                .convert_dtypes(convert_floating=False)
                 .pipe(self.convert_rate_cols)
                 .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
@@ -279,14 +279,17 @@ class Transformer:
                 be applied to the non-allocated data columns
         """
         filled_df = deepcopy(df_to_fill)
+        # replace the 0's with nulls. if left in, the 0's will produce inf's
+        # and strange outputs for filled in outputs.
+        filled_df = filled_df.replace({0: np.nan})
 
         # we need to be able to fill in the native columns as well as those
         # that have been augmented via
         if common_allocated:
-            suffix = "_w_common"
+            suffix = f'_w{COMMON_SUFFIX}'
         else:
             suffix = ""
-        for _ in range(3):
+        for _ in range(2):
             filled_df = _fill_in_rate_cols(filled_df, suffix)
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
@@ -850,11 +853,30 @@ class Transformer:
         return df_w_tots
 
 
-def _fill_in_rate_cols(filled_df, suffix):
-    filled_df = filled_df.replace({0: np.nan})
+def _fill_in_rate_cols(
+    filled_df: pd.DataFrame,
+    suffix: Literal['',  f'_w{COMMON_SUFFIX}']
+) -> pd.DataFrame:
+    """
+    Fill in missing values from rate columns.
+
+    The rates will be filled with the original data columns or the data columns
+    that have had the common records allocated to them via
+    :meth:`split_merge_common_records`. These data columns that have had the
+    common records allocated to them have a suffix on their column names.
+
+    Args:
+        filled_df: a dataframe with null values to fill in.
+        suffix: the end of the column names, which will indicate wether this
+            function should use the data columns which have had the common
+            records allocated to them, or the base columns without common. The
+            possible options here are: '' (which indicates the use of the base
+            columns) or :py:const:`COMMON_SUFFIX`
+
+    """
+    # filled_df = filled_df.replace({0: np.nan})
     filled_df = filled_df.assign(
         net_salvage_rate=lambda x:
-            # first clean % v num, then net_salvage/book_value
             x.net_salvage_rate.fillna(
                 x[f"net_salvage{suffix}"] /
                 x[f"book_reserve{suffix}"]),
@@ -950,11 +972,7 @@ def agg_to_idx(deprish_df, idx_cols):
     deprish_asset.loc[:, calc_cols] = pd.NA
     deprish_asset = _fill_in_rate_cols(deprish_asset, suffix)
 
-    deprish_asset = pudl.helpers.convert_cols_dtypes(
-        deprish_asset,
-        'depreciation',
-        name='depreciation'
-    )
+    deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
 
 
