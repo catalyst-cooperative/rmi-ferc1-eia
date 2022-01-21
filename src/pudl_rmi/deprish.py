@@ -972,6 +972,27 @@ def agg_to_idx(deprish_df, idx_cols):
     deprish_asset.loc[:, calc_cols] = pd.NA
     deprish_asset = _fill_in_rate_cols(deprish_asset, suffix)
 
+    # check the difference between the weighted average version of these
+    # calc_cols and the filled-in versions.
+    len_d = len(deprish_asset)
+    off_by = .3  # assume a value being off by less than 30% is in acceptable
+    for calc_col in calc_cols:
+        deprish_asset.loc[:, 'test'] = (
+            deprish_asset.loc[:, calc_col]
+            / deprish_asset.loc[:, f"{calc_col}_old"]
+        )
+        off = deprish_asset[(deprish_asset.test > (1 + off_by)) |
+                            (deprish_asset.test < (1 - off_by))]
+        logger.info(
+            f"{len(off)/len_d:.1%} of re-calculated {calc_col} is off by more "
+            f"than {off_by:.0%} of the weighted average.")
+        if len(off) / len_d > .7:
+            raise AssertionError(
+                f"Recalculated {calc_col} is more different than the weighted "
+                "average version than expect. Check the methodology in "
+                "_fill_in_rate_cols()"
+            )
+
     deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
 
