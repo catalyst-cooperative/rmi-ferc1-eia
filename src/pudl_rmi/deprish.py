@@ -992,6 +992,8 @@ def agg_to_idx(deprish_df, idx_cols):
                 "average version than expect. Check the methodology in "
                 "_fill_in_rate_cols()"
             )
+    # now that we've check these old columns we can remove Thermal
+    deprish_asset = deprish_asset.drop(columns=[f"{c}_old" for c in calc_cols])
 
     deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
