@@ -932,8 +932,10 @@ def agg_to_idx(deprish_df, idx_cols):
         sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
         suffix = f'_w{COMMON_SUFFIX}'
     # aggregate the columns that can be summed..
-    deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
-        sum_cols].sum(min_count=1)
+    deprish_asset = (
+        deprish_df.groupby(by=idx_cols, as_index=False, dropna=False)
+        [sum_cols].sum(min_count=1)
+    )
 
     calc_cols = ['net_salvage_rate', 'reserve_rate',
                  'remaining_life_avg', 'depreciation_annual_rate']
