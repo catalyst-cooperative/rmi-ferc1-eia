@@ -290,7 +290,7 @@ class Transformer:
         else:
             suffix = ""
         for _ in range(2):
-            filled_df = _fill_in_rate_cols(filled_df, suffix)
+            filled_df = _calculate_rate_cols(filled_df, suffix)
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
@@ -853,8 +853,8 @@ class Transformer:
         return df_w_tots
 
 
-def _fill_in_rate_cols(
-    filled_df: pd.DataFrame,
+def _calculate_rate_cols(
+    df_to_fill: pd.DataFrame,
     suffix: Literal['',  f'_w{COMMON_SUFFIX}']
 ) -> pd.DataFrame:
     """
@@ -874,8 +874,7 @@ def _fill_in_rate_cols(
             columns) or :py:const:`COMMON_SUFFIX`
 
     """
-    # filled_df = filled_df.replace({0: np.nan})
-    filled_df = filled_df.assign(
+    filled_df = df_to_fill.assign(
         net_salvage_rate=lambda x:
             x.net_salvage_rate.fillna(
                 x[f"net_salvage{suffix}"] /
@@ -928,72 +927,20 @@ def agg_to_idx(deprish_df, idx_cols):
     sum_cols = DOLLAR_COLS
     # if common lines have been allocated, we need to aggregate those allocated
     # columns as well
+    suffix = ""
     if 'plant_balance_w_common' in deprish_df.columns:
         sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
+        suffix = f'_w{COMMON_SUFFIX}'
     # aggregate the columns that can be summed..
     deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
         sum_cols].sum(min_count=1)
 
-    suffix = ""
-    if 'plant_balance_w_common' in deprish_df.columns:
-        suffix = f'_w{COMMON_SUFFIX}'
-    # weighted average agg section ###
-    # enumerate wtavg cols
-    avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
-        [x for x in deprish_df.columns
-         if '_rate' in x and 'rate_type_pct' not in x]
-
-    # prep dict with col to average (key) and col to weight on (value)
-    # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = dict.fromkeys(avg_cols, f'unaccrued_balance{suffix}')
-    # aggregate the columned that need to be averaged ..
-    for data_col, weight_col in wtavg_cols.items():
-        deprish_asset = (
-            deprish_asset.merge(
-                pudl.helpers.weighted_average(
-                    deprish_df,
-                    data_col=data_col,
-                    weight_col=weight_col,
-                    by=idx_cols
-                ).reset_index(),  # weighted_average returns w/idx_cols index
-                how='outer',
-                on=idx_cols
-            )
-        )
-
     calc_cols = ['net_salvage_rate', 'reserve_rate',
                  'remaining_life_avg', 'depreciation_annual_rate']
-    # once we feel cozy about these outputs, we can skip these _old version and
-    # only do the weighted average for ['service_life_avg', 'net_removal_rate']
-    deprish_asset.loc[:, [f"{c}_old" for c in calc_cols]
-                      ] = deprish_asset[calc_cols].add_suffix("_old")
     # null the calc columns before sending them through the fill_in funciton bc
     # that function fills nulls!
     deprish_asset.loc[:, calc_cols] = pd.NA
-    deprish_asset = _fill_in_rate_cols(deprish_asset, suffix)
-
-    # check the difference between the weighted average version of these
-    # calc_cols and the filled-in versions.
-    len_d = len(deprish_asset)
-    off_by = .3  # assume a value being off by less than 30% is in acceptable
-    for calc_col in calc_cols:
-        deprish_asset.loc[:, 'test'] = (
-            deprish_asset.loc[:, calc_col]
-            / deprish_asset.loc[:, f"{calc_col}_old"]
-        )
-        off = deprish_asset[(deprish_asset.test > (1 + off_by)) |
-                            (deprish_asset.test < (1 - off_by))]
-        logger.info(
-            f"{len(off)/len_d:.1%} of re-calculated {calc_col} is off by more "
-            f"than {off_by:.0%} of the weighted average.")
-        if len(off) / len_d > .7:
-            raise AssertionError(
-                f"Recalculated {calc_col} is more different than the weighted "
-                "average version than expect. Check the methodology in "
-                "_fill_in_rate_cols()"
-            )
-    # now that we've check these old columns we can remove Thermal
-    deprish_asset = deprish_asset.drop(columns=[f"{c}_old" for c in calc_cols])
+    deprish_asset = _calculate_rate_cols(deprish_asset, suffix)
 
     deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
