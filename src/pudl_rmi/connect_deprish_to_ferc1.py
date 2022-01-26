@@ -117,11 +117,6 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
                 'total_fuel_cost'
             ],
         },
-    'net_removal_rate':
-        {
-            'treatment_type': 'wtavg',
-            'wtavg_col': 'unaccrued_balance_w_common'
-        },
     'depreciation_annual_rate':
         {
             'treatment_type': 'wtavg',
@@ -157,7 +152,7 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
                 'total_fuel_cost'
             ],
         },
-    'capex_annual_addt':
+    'capex_annual_addition':
         {
             'treatment_type': 'scale',
             'allocator_cols': [
@@ -232,14 +227,23 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             ppl=plant_parts_eia)
     )
 
+    # both of these scaled dfs have ppl columns. we are going to drop all of
+    # the ppl columns before merging and then merge the ppl back in as oppose
+    # to try to reconcile the ppl columns from the scaled dfs
     ferc_deprish_eia = (
         pd.merge(
-            scaled_de,
-            scaled_fe,
+            scaled_de.drop(
+                columns=[c for c in scaled_de if c in plant_parts_eia]),
+            scaled_fe.drop(
+                columns=[c for c in scaled_fe if c in plant_parts_eia]),
             right_index=True,
             left_index=True,
             how='outer',
-            suffixes=('_deprish', '_ferc1'),
+        )
+        .merge(
+            plant_parts_eia,
+            right_index=True, left_index=True,
+            how='left'
         )
     )
     return ferc_deprish_eia
@@ -394,9 +398,7 @@ class PlantPartScaler(BaseModel):
             ppl=ppl
         )
         # set the index to be the main EIA plant-part index columns
-        scaled_df_post_agg = scaled_df_post_agg.set_index(
-            self.plant_part_pk_cols + ['record_id_eia']
-        )
+        scaled_df_post_agg = scaled_df_post_agg.set_index(['record_id_eia'])
         return scaled_df_post_agg
 
     def allocate(
@@ -466,7 +468,7 @@ class PlantPartScaler(BaseModel):
                 by=self.ppl_pk,
                 sum_cols=self._get_treatment_cols('scale'),
                 wtavg_dict=self.wtavg_dict
-            )
+            ).pipe(pudl.metadata.fields.apply_pudl_dtypes)
             # add in the string columns
             # TODO: add a test to ensure that the str-squish character doesn't
             # show up in the original data columns
@@ -479,7 +481,7 @@ class PlantPartScaler(BaseModel):
                 on=self.ppl_pk,
                 validate='1:1',
                 how='left'
-            ).pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+            ).pipe(pudl.metadata.fields.apply_pudl_dtypes)
 
             # merge back in the ppl idx columns
             de_duped = (
@@ -631,20 +633,20 @@ def _allocate_col(
     )
     # for each of the columns we want to allocate the frc data by
     # generate the % of the total group, so we can allocate the data_col
-    allocated_col = f"{allocate_col}_allocated"
-    to_allocate[allocated_col] = pd.NA
-    for allocate_col in allocator_cols:
-        to_allocate[f"{allocate_col}_proportion"] = (
-            to_allocate[allocate_col] / to_allocate[f"{allocate_col}_total"])
+    output_col = f"{allocate_col}_allocated"
+    to_allocate[output_col] = pd.NA
+    for allocator_col in allocator_cols:
+        to_allocate[f"{allocator_col}_proportion"] = (
+            to_allocate[allocator_col] / to_allocate[f"{allocator_col}_total"])
         # choose the first non-null option. The order of the allocate_cols will
         # determine which allocate_col will be used
-        to_allocate[allocated_col] = (
-            to_allocate[allocated_col].fillna(
+        to_allocate[output_col] = (
+            to_allocate[output_col].fillna(
                 to_allocate[allocate_col]
-                * to_allocate[f"{allocate_col}_proportion"])
+                * to_allocate[f"{allocator_col}_proportion"])
         )
     to_allocate = (
         to_allocate.drop(columns=allocate_col)
-        .rename(columns={allocated_col: allocate_col})
+        .rename(columns={output_col: allocate_col})
     )
     return to_allocate.loc[:, [allocate_col]]
