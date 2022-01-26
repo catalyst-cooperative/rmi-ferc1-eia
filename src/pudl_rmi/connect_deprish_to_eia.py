@@ -76,8 +76,7 @@ def prep_deprish(deprish_df, plant_parts_df, key_deprish):
     # we could grab the output here instead of the input file...
     deprish_df = (
         deprish_df.assign(report_year=lambda x: x.report_date.dt.year)
-        .astype({'report_year': pd.Int64Dtype()})  # bc it isnt an eia col
-        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+        .convert_dtypes(convert_floating=False)
     )
 
     deprish_df.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
@@ -115,7 +114,7 @@ def prep_deprish(deprish_df, plant_parts_df, key_deprish):
         # names.... so they've got to go
         .dropna(subset=['plant_part_name', '_merge'])
         .drop(columns=['_merge'])
-        .pipe(pudl.helpers.convert_cols_dtypes, 'depreciation')
+        .convert_dtypes(convert_floating=False)
     )
     return deprish_ids
 
@@ -131,7 +130,7 @@ def prep_master_parts_eia(plant_parts_df, deprish_df, key_ppl):
         .reset_index()  # convert the record_id_eia index to a column
         .set_index(RESTRICT_MATCH_COLS).loc[options_index]
         .reset_index()
-        .pipe(pudl.helpers.convert_cols_dtypes, 'eia')
+        .convert_dtypes(convert_floating=False)
     )
     plant_parts_df.loc[:, key_ppl] = pudl.helpers.cleanstrings_series(
         plant_parts_df[key_ppl], str_map=STRINGS_TO_CLEAN)
@@ -224,20 +223,23 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
                 file_path_deprish, skiprows=0, sheet_name=sheet_name_output,)
         )
         overrides_df = (
-            overrides_df[overrides_df.filter(like='record_id_eia_override')
-                         .notnull().any(axis='columns')]
-            [['plant_part_name', 'report_year'] +
+            overrides_df[
+                overrides_df.filter(like='record_id_eia_override')
+                .notnull().any(axis='columns')
+            ]
+            [RESTRICT_MATCH_COLS + ['plant_part_name', 'data_source'] +
              list(overrides_df.filter(like='record_id_eia_override').columns)])
         logger.info(
             f"Adding {len(overrides_df)} overrides from {sheet_name_output}.")
         # concat, sort so the True overrides are at the top and drop dupes
         deprish_match_full = (
             pd.merge(
-                deprish_match.pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
-                overrides_df.pipe(pudl.helpers.convert_cols_dtypes, 'eia'),
-                on=['plant_part_name', 'report_year'],
+                deprish_match.convert_dtypes(convert_floating=False),
+                overrides_df.convert_dtypes(convert_floating=False),
+                on=RESTRICT_MATCH_COLS + ['plant_part_name', 'data_source'],
                 how='outer'
             )
+            .drop_duplicates()
             .assign(record_id_eia=lambda x:
                     x.record_id_eia_override.fillna(x.record_id_eia_fuzzy))
         )
@@ -271,16 +273,16 @@ def match_deprish_eia(deprish_df, plant_parts_df, sheet_name_output):
     # option. so we're dropping all of the shared columns before merging
     ppl_non_id_cols = [c for c in PPL_COLS if c != 'record_id_eia']
     deprish_match = (
-        deprish_match.set_index('record_id_eia')
-        .drop(columns=[c for c in deprish_match if c in ppl_non_id_cols])
+        deprish_match
+        .drop(columns=[c for c in deprish_match
+                       if c in ppl_non_id_cols
+                       and c not in RESTRICT_MATCH_COLS])
         .merge(
-            plant_parts_df[ppl_non_id_cols],
-            left_index=True,
-            right_index=True,
+            ppl_df.reset_index()[PPL_COLS],
+            on=['record_id_eia'] + RESTRICT_MATCH_COLS,
             how='left',
             validate='m:1',
         )
-        .reset_index()
         # rename the ids so that we have the "true granularity"
         # Every PPL record has identifying columns for it's true granualry,
         # even when the true granularity is the same record, so we can use the
@@ -289,7 +291,11 @@ def match_deprish_eia(deprish_df, plant_parts_df, sheet_name_output):
         # appropirate ID column so we don't have duplicate columns
         .drop(columns=['record_id_eia_fuzzy'])
         .rename(columns=PPL_RENAME)
+        # reassign_id_ownership_dupes will fail with nulls in this bool col
+        .assign(ownership_dupe=lambda x: x.ownership_dupe.fillna(False))
         .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
+        .convert_dtypes(convert_floating=False)
+
     )
     first_cols = [
         'plant_part_name', 'utility_name_ferc1', 'report_year',
@@ -342,7 +348,9 @@ def grab_possible_plant_part_list_matches(plant_parts_df, deprish_df):
     """
     possible_matches_ppl = (
         pd.merge(
-            plant_parts_df.reset_index().dropna(subset=RESTRICT_MATCH_COLS),
+            plant_parts_df.reset_index()
+            .convert_dtypes(convert_floating=False)
+            .dropna(subset=RESTRICT_MATCH_COLS),
             deprish_df[RESTRICT_MATCH_COLS].drop_duplicates(),
             on=RESTRICT_MATCH_COLS)
         .pipe(pudl.helpers.organize_cols, PPL_COLS)
