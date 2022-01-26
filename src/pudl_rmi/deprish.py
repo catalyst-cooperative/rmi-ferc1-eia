@@ -5,6 +5,25 @@ Catalyst has compiled depreciation studies for a project with the Rocky
 Mountain Institue. These studies were compiled from Public Utility Commission
 proceedings as well as the FERC Form 1 table.
 
+The main transform method is Transformer.execute(), which has four steps:
+
+* *early tidy* which mostly cleans data types and preforms minor data
+  adjustments.
+* *reshape* which rn allocates the "common" records - records which are
+  associated with a full plant or group of plant-parts such as the land value
+  of a plant - to their "atomic" record (i.e. the non-common plant-part
+  records).
+* *fill in* which calculates missing values. Many of the original depreciation
+  studies do not have all of the data columns that are commonly need to
+  analysis, but generally they have enough of the value to calculate the
+  missing data points (i.e. one study will have a depreciation rate but no
+  annual depreciation cost and vice versa).
+* *aggregate*. Many of the depreciation studies include the very detailed
+  records for each FERC account # - which are accounting categories. This means
+  many plant-part's have a record for every FERC account #. This is a level of
+  detail which we basically never need, so we aggregate the output to the
+  plant-part level.
+
 how to run this module:
 file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
 sheet_name_deprish='Depreciation Studies Raw'
