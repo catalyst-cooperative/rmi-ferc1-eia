@@ -22,6 +22,7 @@ import warnings
 
 import pandas as pd
 import numpy as np
+from typing import Literal
 
 import pudl
 import pudl_rmi
@@ -161,8 +162,7 @@ class Transformer:
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
                 self.extract_df
-                .pipe(pudl.helpers.convert_cols_dtypes,
-                      'depreciation', name='depreciation')
+                .convert_dtypes(convert_floating=False)
                 .pipe(self.convert_rate_cols)
                 .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
@@ -279,23 +279,18 @@ class Transformer:
                 be applied to the non-allocated data columns
         """
         filled_df = deepcopy(df_to_fill)
+        # replace the 0's with nulls. if left in, the 0's will produce inf's
+        # and strange outputs for filled in outputs.
+        filled_df = filled_df.replace({0: np.nan})
 
         # we need to be able to fill in the native columns as well as those
         # that have been augmented via
         if common_allocated:
-            suffix = "_w_common"
+            suffix = f'_w{COMMON_SUFFIX}'
         else:
             suffix = ""
-        for _ in range(3):
-            filled_df = filled_df.assign(
-                net_salvage_rate=lambda x:
-                    # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_rate.fillna(
-                        x[f"net_salvage{suffix}"] /
-                        x[f"book_reserve{suffix}"]),
-                reserve_rate=lambda x: x.reserve_rate.fillna(
-                    x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]),
-            )
+        for _ in range(2):
+            filled_df = _calculate_rate_cols(filled_df, suffix)
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
@@ -331,20 +326,21 @@ class Transformer:
                     (filled_df['depreciation_annual_rate'])
                     * filled_df['remaining_life_avg'])
             )
-        filled_df[f"book_reserve_og{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"]
-        )
-        filled_df[f"book_reserve{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"].fillna(
-                ((1 - filled_df.net_salvage_rate) *
-                 filled_df[f"plant_balance{suffix}"])
-                - filled_df[f"unaccrued_balance{suffix}"])
-        )
-        filled_df[f"book_reserve_option2{suffix}"] = (
-            filled_df[f"plant_balance{suffix}"] -
-            (filled_df[f"depreciation_annual_epxns{suffix}"]
-             * filled_df.remaining_life_avg)
-        )
+            filled_df[f"book_reserve_og{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"]
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    ((1 - filled_df.net_salvage_rate) *
+                     filled_df[f"plant_balance{suffix}"])
+                    - filled_df[f"unaccrued_balance{suffix}"])
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    (filled_df[f"depreciation_annual_epxns{suffix}"]
+                     * filled_df.remaining_life_avg))
+            )
 
         return filled_df
 
@@ -857,6 +853,49 @@ class Transformer:
         return df_w_tots
 
 
+def _calculate_rate_cols(
+    df_to_fill: pd.DataFrame,
+    suffix: Literal['',  f'_w{COMMON_SUFFIX}']
+) -> pd.DataFrame:
+    """
+    Fill in missing values from rate columns.
+
+    The rates will be filled with the original data columns or the data columns
+    that have had the common records allocated to them via
+    :meth:`split_merge_common_records`. These data columns that have had the
+    common records allocated to them have a suffix on their column names.
+
+    Args:
+        filled_df: a dataframe with null values to fill in.
+        suffix: the end of the column names, which will indicate wether this
+            function should use the data columns which have had the common
+            records allocated to them, or the base columns without common. The
+            possible options here are: '' (which indicates the use of the base
+            columns) or :py:const:`COMMON_SUFFIX`
+
+    """
+    filled_df = df_to_fill.assign(
+        net_salvage_rate=lambda x:
+            x.net_salvage_rate.fillna(
+                x[f"net_salvage{suffix}"] /
+                x[f"book_reserve{suffix}"]),
+        reserve_rate=lambda x: x.reserve_rate.fillna(
+            x[f"book_reserve{suffix}"] /
+            x[f"plant_balance{suffix}"]),
+    )
+    filled_df.loc[:, 'remaining_life_avg'] = (
+        filled_df.loc[:, 'remaining_life_avg'].fillna(
+            filled_df[f"unaccrued_balance{suffix}"]
+            / filled_df[f"depreciation_annual_epxns{suffix}"])
+    )
+    filled_df.loc[:, "depreciation_annual_rate"] = (
+        filled_df["depreciation_annual_rate"].fillna(
+            filled_df[f"depreciation_annual_epxns{suffix}"] /
+            (filled_df[f"plant_balance{suffix}"]))
+    )
+    return filled_df
+
+
 def agg_to_idx(deprish_df, idx_cols):
     """
     Aggregate the depreciation data to the asset level.
@@ -888,49 +927,24 @@ def agg_to_idx(deprish_df, idx_cols):
     sum_cols = DOLLAR_COLS
     # if common lines have been allocated, we need to aggregate those allocated
     # columns as well
-    if 'plant_balance_w_common' in deprish_df.columns:
-        sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
-    # aggregate the columns that can be summed..
-    deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
-        sum_cols].sum(min_count=1)
-
     suffix = ""
     if 'plant_balance_w_common' in deprish_df.columns:
+        sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
         suffix = f'_w{COMMON_SUFFIX}'
-    # weighted average agg section ###
-    # enumerate wtavg cols
-    avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
-        [x for x in deprish_df.columns
-         if '_rate' in x and 'rate_type_pct' not in x]
-    # prep dict with col to average (key) and col to weight on (value)
-    # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = dict.fromkeys(avg_cols, f'unaccrued_balance{suffix}')
-    # aggregate the columned that need to be averaged ..
-    for data_col, weight_col in wtavg_cols.items():
-        deprish_asset = (
-            deprish_asset.merge(
-                pudl.helpers.weighted_average(
-                    deprish_df,
-                    data_col=data_col,
-                    weight_col=weight_col,
-                    by=idx_cols
-                ).reset_index(),  # weighted_average returns w/idx_cols index
-                how='outer',
-                on=idx_cols
-            )
-        )
-    deprish_asset.loc[:, 'remaining_life_avg_old'] = (
-        deprish_asset.loc[:, 'remaining_life_avg']
+    # aggregate the columns that can be summed..
+    deprish_asset = (
+        deprish_df.groupby(by=idx_cols, as_index=False, dropna=False)
+        [sum_cols].sum(min_count=1)
     )
-    deprish_asset.loc[:, 'remaining_life_avg'] = (
-        deprish_asset[f"unaccrued_balance{suffix}"]
-        / deprish_asset[f"depreciation_annual_epxns{suffix}"]
-    )
-    deprish_asset = pudl.helpers.convert_cols_dtypes(
-        deprish_asset,
-        'depreciation',
-        name='depreciation'
-    )
+
+    calc_cols = ['net_salvage_rate', 'reserve_rate',
+                 'remaining_life_avg', 'depreciation_annual_rate']
+    # null the calc columns before sending them through the fill_in funciton bc
+    # that function fills nulls!
+    deprish_asset.loc[:, calc_cols] = pd.NA
+    deprish_asset = _calculate_rate_cols(deprish_asset, suffix)
+
+    deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
 
 
