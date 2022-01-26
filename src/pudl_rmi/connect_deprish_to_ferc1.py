@@ -227,6 +227,9 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             ppl=plant_parts_eia)
     )
 
+    # both of these scaled dfs have ppl columns. we are going to drop all of
+    # the ppl columns before merging and then merge the ppl back in as oppose
+    # to try to reconcile the ppl columns from the scaled dfs
     ferc_deprish_eia = (
         pd.merge(
             scaled_de.drop(
@@ -236,7 +239,6 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             right_index=True,
             left_index=True,
             how='outer',
-            suffixes=('_deprish', '_ferc1'),
         )
         .merge(
             plant_parts_eia,
