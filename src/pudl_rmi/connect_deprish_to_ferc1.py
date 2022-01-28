@@ -62,6 +62,7 @@ from typing import List, Optional, Dict, Literal
 from pydantic import BaseModel, validator
 
 import pandas as pd
+import numpy as np
 
 import pudl
 
@@ -246,6 +247,7 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             how='left'
         )
     )
+    test_consistency_of_data_stages(df1=deprish_eia, df2=ferc_deprish_eia)
     return ferc_deprish_eia
 
 
@@ -650,3 +652,141 @@ def _allocate_col(
         .rename(columns={output_col: allocate_col})
     )
     return to_allocate.loc[:, [allocate_col]]
+
+
+##################
+# Validation Tests
+##################
+
+# This whole section should pprrrrooobably be moved into a validation layer of
+# CI tests for this repo.
+
+def test_consistency_of_data_stages(df1, df2):
+    """
+    Test the consistency of two stages of the depreciation data processing.
+
+    The data that is processed in this repo goes along multiple stages of its
+    journey. This function right now is hard coded to test two the depreication
+    data's main data columns. Right now, this is hard coded to fail when there
+    are more inconsitent plants and utilities than are currently known.
+
+    TODO: I think :func:``data_col_test`` is a perfect candidate for the
+    decorators that let you test multiple inputs (different stages of the data
+    and different data columns) as well as output values (in this case the
+    number of known bad utilities and plants).
+
+    Args:
+        df1: One dataframe to sum and check consistency with ``df2``. Both
+            dfs should have columns ``data_col`` as well as identifying
+            columns: ``['report_date', 'data_source', 'utility_id_pudl',
+            'plant_id_eia']``
+        df2: Other dataframe to sum and check consistency against ``df1``.
+
+    """
+    util_bad, plant_bad = data_col_test(
+        df1=df1, df2=df2, data_col='plant_balance_w_common')
+
+    # known baddies. We need to track these down
+    assert(len(plant_bad) <= 53)
+    assert(len(util_bad) <= 88)
+
+    util_bad, plant_bad = data_col_test(
+        df1=df1, df2=df2, data_col='unaccrued_balance_w_common')
+
+    # known baddies. We need to track these down
+    assert(len(plant_bad) <= 35)
+    assert(len(util_bad) <= 70)
+
+
+def data_col_test(df1, df2, data_col: str) -> pd.DataFrame:
+    """
+    Check consistency of column at the plant and utility level in two inputs.
+
+    Args:
+        df1: One dataframe to sum and check consistency with ``df2``. Both
+            dfs should have columns ``data_col`` as well as identifying
+            columns: ``['report_date', 'data_source', 'utility_id_pudl',
+            'plant_id_eia']``
+        df2: Other dataframe to sum and check consistency against ``df1``.
+        data_col: data column to check. Column must be in both ``df1`` and
+            ``df2``.
+
+    """
+    util_test = gb_test(
+        df1,
+        df2,
+        data_col=data_col,
+        by=['report_year', 'data_source', 'utility_id_pudl']
+    )
+
+    logger.info(
+        f"Duke utility level data is consistent for {data_col}!! Go forth and "
+        "close them coal plants lil tables")
+
+    plant_test = gb_test(
+        df1,
+        df2,
+        data_col=data_col,
+        by=['report_year', 'data_source', 'utility_id_pudl', 'plant_id_eia']
+    )
+
+    util_bad = util_test[~util_test.match & util_test.match.notnull()]
+    plant_bad = plant_test[~plant_test.match & plant_test.match.notnull()]
+    logger.warn(
+        f"We have {len(util_bad)} utilities and {len(plant_bad)} "
+        f"plants who's {data_col} doesn't match the input."
+    )
+
+    # we know the duke utilities should be correct!
+    assert(util_test.loc[2018, 'FERC', 90].match)
+    assert(util_test.loc[2018, 'FERC', 97].match)
+    return util_bad, plant_bad
+
+
+def gb_test(
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    data_col: str,
+    by: List[str]
+) -> pd.DataFrame:
+    """
+    Merge two grouped input tables to determine if summed data column matches.
+
+    Args:
+        df1: One dataframe to sum and check consistency with ``df2``.
+        df2: Other dataframe to sum and check consistency against ``df1``.
+        data_col: data column to check. Column must be in both ``df1`` and
+            ``df2``.
+    """
+    return (
+        pd.merge(
+            _group_sum_col(
+                df1, data_col=data_col, by=by),
+            _group_sum_col(
+                df2, data_col=data_col, by=by),
+            right_index=True, left_index=True,
+            suffixes=('_1', '_2'),
+            how='outer'
+        )
+        .assign(
+            match=lambda x: np.where(
+                x[f"{data_col}_1"].notnull() & x[f"{data_col}_2"].notnull(),
+                np.isclose(x[f"{data_col}_1"], x[f"{data_col}_2"]),
+                pd.NA
+            ),
+            diff=lambda x: x[f"{data_col}_1"] / x[f"{data_col}_2"],
+        )
+        .sort_index()
+    )
+
+
+def _group_sum_col(df, data_col: str, by: List[str]) -> pd.DataFrame:
+    """Groupby sum a specific table's data col."""
+    return (
+        df  # convert date to year bc many of the og depish studies are EOY
+        .assign(report_year=lambda x: x.report_date.dt.year)
+        [df.plant_id_eia.notnull()]  # only plant associated reocrds
+        .groupby(by=by, dropna=True)
+        [[data_col]]
+        .sum(min_count=1)
+    )
