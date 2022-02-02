@@ -666,9 +666,10 @@ def test_consistency_of_data_stages(df1, df2):
     Test the consistency of two stages of the depreciation data processing.
 
     The data that is processed in this repo goes along multiple stages of its
-    journey. This function right now is hard coded to test two the depreication
-    data's main data columns. Right now, this is hard coded to fail when there
-    are more inconsitent plants and utilities than are currently known.
+    journey. This function right now is hard coded to test two of the
+    depreication data's main data columns. Right now, this is hard coded to
+    fail when there are more inconsitent plants and utilities than are
+    currently known.
 
     TODO: I think :func:``data_col_test`` is a perfect candidate for the
     decorators that let you test multiple inputs (different stages of the data
@@ -700,7 +701,7 @@ def test_consistency_of_data_stages(df1, df2):
 
 def data_col_test(df1, df2, data_col: str) -> pd.DataFrame:
     """
-    Check consistency of column at the plant and utility level in two inputs.
+    Check consistency of a column at the plant and utility level of two dfs.
 
     Args:
         df1: One dataframe to sum and check consistency with ``df2``. Both
@@ -752,6 +753,8 @@ def gb_test(
     """
     Merge two grouped input tables to determine if summed data column matches.
 
+    TODO: Please help me name this....
+
     Args:
         df1: One dataframe to sum and check consistency with ``df2``.
         df2: Other dataframe to sum and check consistency against ``df1``.
@@ -760,10 +763,8 @@ def gb_test(
     """
     return (
         pd.merge(
-            _group_sum_col(
-                df1, data_col=data_col, by=by),
-            _group_sum_col(
-                df2, data_col=data_col, by=by),
+            _group_sum_col(df1, data_col=data_col, by=by),
+            _group_sum_col(df2, data_col=data_col, by=by),
             right_index=True, left_index=True,
             suffixes=('_1', '_2'),
             how='outer'
