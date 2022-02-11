@@ -42,7 +42,9 @@ jobs:
     - name: Download PUDL DB and log pre-test PUDL workspace contents
       run: |
         mkdir -p ~/pudl-work/sqlite/
-        if [ ! -f ~/pudl-work/sqlite/pudl.sqlite ]; then curl -o ~/pudl-work/sqlite/pudl.sqlite https://data.catalyst.coop/pudl.db; fi
+        if [ ! -f ~/pudl-work/sqlite/pudl.sqlite ]
+        then curl -o ~/pudl-work/sqlite/pudl.sqlite https://data.catalyst.coop/pudl.db
+        fi
         find ~/pudl-work/
       shell: bash -l {0}
 
@@ -52,13 +54,11 @@ jobs:
         conda run -n pudl-rmi sqlite3 --version
       shell: bash -l {0}
 
-    - name: Run pytest without using Tox
+    - name: Run pytest using Tox
       env:
         API_KEY_EIA: ${{ secrets.API_KEY_EIA }}
       run: |
-        conda run -n pudl-rmi pytest --cached-plant-parts-eia --cached-deprish\
-          test/integration/rmi_out_test.py::test_deprish_to_eia_out\
-          test/integration/rmi_out_test.py::test_pudl_engine
+        conda run -n pudl-rmi tox
       shell: bash -l {0}
 
     - name: Log post-test PUDL workspace contents
