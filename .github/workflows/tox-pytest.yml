@@ -2,6 +2,10 @@ name: tox-pytest
 
 on: [ push, pull_request ]
 
+env:
+  PUDL_RMI_INPUTS_DIR: ${{ env.GITHUB_WORKSPACE }}"/inputs"
+  PUDL_RMI_OUTPUTS_DIR: ${{ env.GITHUB_WORKSPACE}}"/outputs"
+
 jobs:
   build:
     runs-on: ubuntu-latest
