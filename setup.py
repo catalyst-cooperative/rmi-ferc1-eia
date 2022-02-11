@@ -1,7 +1,8 @@
 """Setup script to make rmi_ferc1_eia directly installable with pip."""
 
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 readme_path = Path(__file__).parent / "README.md"
 long_description = readme_path.read_text()
@@ -17,11 +18,29 @@ setup(
     license="MIT",
     version='0.1.0',
     install_requires=[
-        # "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@dev",
+        "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@mul_eia",
         "fuzzywuzzy~=0.18.0",
         "recordlinkage~=0.14.0",
         "python-levenshtein~=0.12.2",
     ],
+    extras_require={
+        "test": [
+            "autopep8~=1.5",
+            "coverage>=5.3,<7.0",
+            "flake8>=4.0,<5",
+            "flake8-builtins~=1.5",
+            "flake8-colors~=0.1",
+            "flake8-docstrings~=1.5",
+            "flake8-rst-docstrings~=0.2",
+            "flake8-use-fstring~=1.0",
+            "isort>=5.0,<6",
+            "pep8-naming~=0.12",
+            "pre-commit>=2.9,<3",
+            "pytest>=6.2,<8.0",
+            "pytest-cov>=2.10,<4",
+            "tox>=3.20,<4",
+        ]
+    },
     python_requires=">=3.8,<3.11",
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -6,8 +6,9 @@ diagram of the relations.
 """
 
 import logging
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 import pudl_rmi
 
@@ -225,7 +226,6 @@ class Output():
                     clobber=clobber_deprish_eia),
                 ferc1_to_eia=self.grab_ferc1_to_eia(
                     clobber=clobber_ferc1_eia),
-                clobber=clobber
             )
             # export
             connects_deprish_ferc1.to_pickle(file_path)
@@ -241,15 +241,16 @@ class Output():
         """
         Gotta catch em all. Get all of the RMI outputs.
 
-        Get or regenerate all of the RMI outputs. This method is mostly for
-        testing purposes because it returns all 5 outputs. To grab individual
-        outputs, it is recommended to use the output-specific method.
+        Read from disk or regenerate all of the RMI outputs. This method is mostly for
+        testing purposes because it returns all 5 outputs. To grab individual outputs,
+        it is recommended to use the output-specific method.
 
         Args:
-            clobber_all (boolean): Deafult is False, which will grab the
-                outputs if they already exist, or generate them if they don't
-                exist. True will re-generate the outputs whether they exist on
-                disk. Re-generating everything will take ~15 minutes.
+            clobber_all (boolean): Deafult is False, which will read saved
+                outputs from disk if they already exist, or generate them if
+                they don't. True will re-calculate the outputs regardless of
+                whether they exist on disk, and save them to disk.
+                Re-generating everything will take ~15 minutes.
 
         Returns:
             pandas.DataFrame: EIA plant-part list - table of "plant-parts"
