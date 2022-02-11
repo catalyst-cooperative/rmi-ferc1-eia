@@ -56,8 +56,9 @@ jobs:
       env:
         API_KEY_EIA: ${{ secrets.API_KEY_EIA }}
       run: |
-        # conda run -n pudl-rmi pytest --cached-plant-parts-eia --cached-deprish test/integration/rmi_out_test.py::test_deprish_to_eia_out
-        conda run -n pudl-rmi pytest test/integration/rmi_out_test.py::test_pudl_engine
+        conda run -n pudl-rmi pytest --cached-plant-parts-eia --cached-deprish\
+          test/integration/rmi_out_test.py::test_deprish_to_eia_out\
+          test/integration/rmi_out_test.py::test_pudl_engine
       shell: bash -l {0}
 
     - name: Log post-test PUDL workspace contents
