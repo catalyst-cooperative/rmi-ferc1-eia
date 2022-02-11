@@ -33,20 +33,20 @@ master unit list.
 
 import logging
 import statistics
-from copy import deepcopy
 import warnings
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
+import pudl
+import pudl.helpers
 import recordlinkage as rl
 import scipy
 from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
-import pudl
-import pudl.helpers
 import pudl_rmi
-from pudl_rmi import make_plant_parts_eia, connect_deprish_to_eia
+from pudl_rmi import connect_deprish_to_eia, make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 

@@ -56,15 +56,12 @@ Future Needs:
 """
 
 import logging
+from typing import Dict, List, Literal, Optional
 
-
-from typing import List, Optional, Dict, Literal
-from pydantic import BaseModel, validator
-
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 import pudl
+from pydantic import BaseModel, validator
 
 logger = logging.getLogger(__name__)
 
@@ -732,7 +729,7 @@ def data_col_test(df1, df2, data_col: str) -> pd.DataFrame:
 
     util_bad = util_test[~util_test.match & util_test.match.notnull()]
     plant_bad = plant_test[~plant_test.match & plant_test.match.notnull()]
-    logger.warn(
+    logger.warning(
         f"We have {len(util_bad)} utilities and {len(plant_bad)} "
         f"plants who's {data_col} doesn't match the input."
     )
