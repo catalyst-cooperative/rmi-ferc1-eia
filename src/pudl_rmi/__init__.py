@@ -14,7 +14,7 @@ import pudl_rmi.make_plant_parts_eia  # noqa: F401
 
 REPO_DIR = Path(__file__).resolve().parent.parent.parent
 INPUTS_DIR = (
-    Path(os.environ.get("PUDL_RMI_INPUTS_DIR")) or REPO_DIR / 'inputs'
+    Path(os.environ.get("PUDL_RMI_INPUTS_DIR", REPO_DIR / 'inputs'))
 )
 """
 Directory of input files that are used in generating the RMI outputs.
@@ -24,7 +24,7 @@ these files (even the excel files) are updated during some of the processing.
 If these files don't exist, then many of the outputs will fail.
 """
 OUTPUTS_DIR = (
-    Path(os.environ.get("PUDL_RMI_OUTPUTS_DIR")) or REPO_DIR / 'outputs'
+    Path(os.environ.get("PUDL_RMI_OUTPUTS_DIR", REPO_DIR / 'outputs'))
 )
 """
 Directory of output files that are generated from the RMI processes.

@@ -49,7 +49,8 @@ import pudl_rmi
 from pudl_rmi import connect_deprish_to_eia, make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
-
+# Silence the recordlinkage logger, which is out of control
+logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ['utility_id_ferc1', 'plant_id_ferc1', 'report_date']
 
 
