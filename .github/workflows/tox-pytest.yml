@@ -41,8 +41,8 @@ jobs:
 
     - name: Log SQLite3 version
       run: |
-        conda run -n pudl-test which sqlite3
-        conda run -n pudl-test sqlite3 --version
+        conda run -n pudl-rmi which sqlite3
+        conda run -n pudl-rmi sqlite3 --version
       shell: bash -l {0}
 
     - name: Run pytest without using Tox
