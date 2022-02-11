@@ -77,6 +77,8 @@ def execute(pudl_out, plant_parts_df):
         plant_parts_true_df=inputs.plant_parts_true_df,
         plants_ferc1_df=inputs.plants_ferc1_df
     )
+    # add capex (this should be moved into pudl_out.plants_steam_ferc1)
+    connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
     return connects_ferc1_eia
 
 
