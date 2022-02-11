@@ -29,6 +29,9 @@ jobs:
         environment-file: environment.yml
 
     - name: Log the conda environment
+      env:
+        PUDL_RMI_INPUTS_DIR: ${{ github.workspace }}/inputs
+        PUDL_RMI_OUTPUTS_DIR: ${{ github.workspace }}/outputs
       run: |
         conda info
         conda list
