@@ -30,8 +30,8 @@ jobs:
 
     - name: Log the conda environment
       env:
-        PUDL_RMI_INPUTS_DIR: ${{ env.GITHUB_WORKSPACE }}"/inputs"
-        PUDL_RMI_OUTPUTS_DIR: ${{ env.GITHUB_WORKSPACE}}"/outputs"
+        PUDL_RMI_INPUTS_DIR: ${{ github.workspace }}/inputs
+        PUDL_RMI_OUTPUTS_DIR: ${{ github.workspace }}/outputs
       run: |
         conda info
         conda list
