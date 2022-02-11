@@ -6,7 +6,25 @@ This can take up to an hour to run.
 
 import logging
 
+import pytest
+import sqlalchemy as sa
+
 logger = logging.getLogger(__name__)
+
+
+@pytest.mark.parametrize(
+    "table_name", [
+        "fuel_ferc1",
+        "ownership_eia860",
+        "plants_entity_eia",
+        "fuel_receipts_costs_eia923",
+        "utilities_pudl",
+    ]
+)
+def test_pudl_engine(pudl_engine, table_name):
+    """Test that the PUDL DB is actually available."""
+    insp = sa.inspect(pudl_engine)
+    assert table_name in insp.get_table_names()
 
 
 def test_ppl_out(rmi_out, request):

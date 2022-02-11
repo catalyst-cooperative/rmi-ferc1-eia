@@ -12,3 +12,5 @@
 .hypothesis
 .tox
 .env
+coverage.xml
+.coverage
