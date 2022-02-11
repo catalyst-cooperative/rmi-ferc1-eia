@@ -29,9 +29,6 @@ jobs:
         environment-file: environment.yml
 
     - name: Log the conda environment
-      env:
-        PUDL_RMI_INPUTS_DIR: ${{ github.workspace }}/inputs
-        PUDL_RMI_OUTPUTS_DIR: ${{ github.workspace }}/outputs
       run: |
         conda info
         conda list
@@ -62,6 +59,8 @@ jobs:
     - name: Run pytest using Tox
       env:
         API_KEY_EIA: ${{ secrets.API_KEY_EIA }}
+        PUDL_RMI_INPUTS_DIR: ${{ github.workspace }}/inputs
+        PUDL_RMI_OUTPUTS_DIR: ${{ github.workspace }}/outputs
       run: |
         conda run -n pudl-rmi tox
 
