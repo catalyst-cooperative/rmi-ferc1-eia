@@ -307,7 +307,7 @@ class PlantPartScaler(BaseModel):
     data_set_pk_cols: List[str]
     plant_part: Literal['plant_gen']
 
-    def _get_treatment_cols(self, treatment_type: str) -> list[str]:
+    def _get_treatment_cols(self, treatment_type: str) -> List[str]:
         """Grab the columns which need a specific treatment type."""
         return [
             col for (col, treat) in self.treatments.items()
