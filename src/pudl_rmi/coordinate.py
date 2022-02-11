@@ -224,8 +224,7 @@ class Output():
                 deprish_eia=self.grab_deprish_to_eia(
                     clobber=clobber_deprish_eia),
                 ferc1_to_eia=self.grab_ferc1_to_eia(
-                    clobber=clobber_ferc1_eia),
-                clobber=clobber
+                    clobber=clobber_ferc1_eia)
             )
             # export
             connects_deprish_ferc1.to_pickle(file_path)
