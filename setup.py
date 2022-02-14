@@ -34,6 +34,7 @@ setup(
             "flake8-rst-docstrings~=0.2",
             "flake8-use-fstring~=1.0",
             "isort>=5.0,<6",
+            "memory_profiler>=0.60.0",
             "pep8-naming~=0.12",
             "pre-commit>=2.9,<3",
             "pytest>=6.2,<8.0",
