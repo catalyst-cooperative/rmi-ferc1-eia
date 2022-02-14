@@ -105,7 +105,7 @@ def pudl_out(pudl_engine):
     return PudlTabl(
         pudl_engine=pudl_engine,
         freq='AS',
-        fill_fuel_cost=True,
+        fill_fuel_cost=False,
         roll_fuel_cost=True,
         fill_net_gen=True,
     )

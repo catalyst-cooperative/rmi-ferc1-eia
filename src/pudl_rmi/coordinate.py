@@ -308,16 +308,29 @@ def main():
     pudl_out = PudlTabl(
         pudl_engine=pudl_engine,
         freq='AS',
-        fill_fuel_cost=True,
+        fill_fuel_cost=False,
         roll_fuel_cost=True,
         fill_net_gen=True,
     )
     rmi_out = Output(pudl_out)
-    _ = rmi_out.grab_plant_part_list(clobber=False)
-    _ = rmi_out.grab_deprish(clobber=True)
-    _ = rmi_out.grab_deprish_to_eia(clobber=True)
-    _ = rmi_out.grab_ferc1_to_eia(clobber=True)
-    _ = rmi_out.grab_deprish_to_ferc1(clobber=True)
+    ppl = rmi_out.grab_plant_part_list(clobber=True)
+    del rmi_out.pudl_out._dfs['plant_parts_eia']
+    del rmi_out.pudl_out._dfs['plant_parts_eia']
+    del rmi_out.pudl_out._dfs['gens_mega_eia']
+    del rmi_out.pudl_out._dfs['true_grans_eia']
+    del ppl
+
+    deprish = rmi_out.grab_deprish(clobber=True)
+    del deprish
+
+    deprish_to_eia = rmi_out.grab_deprish_to_eia(clobber=True)
+    del deprish_to_eia
+
+    ferc1_to_eia = rmi_out.grab_ferc1_to_eia(clobber=True)
+    del ferc1_to_eia
+
+    deprish_to_ferc1 = rmi_out.grab_deprish_to_ferc1(clobber=True)
+    del deprish_to_ferc1
 
 
 if __name__ == "__main__":
