@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pudl
 import sqlalchemy as sa
-from memory_profiler import profile
+# from memory_profiler import profile
 from pudl.output.pudltabl import PudlTabl
 
 import pudl_rmi
@@ -52,7 +52,7 @@ class Output():
                 f"Frequency of `pudl_out` must be `AS` but got {pudl_out.freq}"
             )
 
-    @profile
+    # @profile
     def grab_plant_part_list(self, clobber=False):
         """
         Get the master unit list; generate it or get if from a file.
@@ -81,7 +81,7 @@ class Output():
             plant_parts_eia = pd.read_pickle(file_path)
         return plant_parts_eia
 
-    @profile
+    # @profile
     def grab_deprish(self, clobber=False):
         """
         Generate or grab the cleaned deprecaition studies.
@@ -102,7 +102,7 @@ class Output():
             deprish_df = pd.read_pickle(file_path)
         return deprish_df
 
-    @profile
+    # @profile
     def grab_deprish_to_eia(
         self,
         clobber: bool = False,
@@ -142,7 +142,7 @@ class Output():
             deprish_match_df = pd.read_pickle(file_path)
         return deprish_match_df
 
-    @profile
+    # @profile
     def grab_ferc1_to_eia(self, clobber=False, clobber_plant_part_list=False):
         """
         Generate or grab a connection between FERC1 and EIA.
@@ -177,7 +177,7 @@ class Output():
             connects_ferc1_eia = pd.read_pickle(file_path)
         return connects_ferc1_eia
 
-    @profile
+    # @profile
     def grab_deprish_to_ferc1(
         self,
         clobber=False,
@@ -300,7 +300,7 @@ def check_is_file_or_not_exists(file_path: Path):
         )
 
 
-@profile
+# @profile
 def main():
     """Exercise all output methods for memory profiling."""
     pudl_settings = pudl.workspace.setup.get_defaults()
@@ -314,11 +314,10 @@ def main():
     )
     rmi_out = Output(pudl_out)
     ppl = rmi_out.grab_plant_part_list(clobber=True)
-    del rmi_out.pudl_out._dfs['plant_parts_eia']
-    del rmi_out.pudl_out._dfs['plant_parts_eia']
-    del rmi_out.pudl_out._dfs['gens_mega_eia']
-    del rmi_out.pudl_out._dfs['true_grans_eia']
     del ppl
+    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
+        if ppl_df in rmi_out.pudl_out._dfs:
+            del rmi_out.pudl_out._dfs[ppl_df]
 
     deprish = rmi_out.grab_deprish(clobber=True)
     del deprish

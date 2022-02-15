@@ -32,10 +32,10 @@ def test_ppl_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-plant-parts-eia")
     ppl = rmi_out.grab_plant_part_list(clobber=clobber)
     assert not ppl.empty
-    del rmi_out.pudl_out._dfs['plant_parts_eia']
-    del rmi_out.pudl_out._dfs['gens_mega_eia']
-    del rmi_out.pudl_out._dfs['true_grans_eia']
     del ppl
+    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
+        if ppl_df in rmi_out.pudl_out._dfs:
+            del rmi_out.pudl_out._dfs[ppl_df]
 
 
 def test_deprish_out(rmi_out, request):

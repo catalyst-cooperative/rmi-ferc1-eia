@@ -20,8 +20,8 @@ setup(
     install_requires=[
         "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@mul_eia",
         "fuzzywuzzy~=0.18.0",
-        "recordlinkage~=0.14.0",
         "python-levenshtein~=0.12.2",
+        "recordlinkage~=0.14.0",
     ],
     extras_require={
         "test": [
