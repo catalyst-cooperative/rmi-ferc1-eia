@@ -1082,14 +1082,10 @@ def prettyify_best_matches(
             warnings.warn(message)
             return no_ferc
         else:
-<<<<<<< HEAD
             logger.info(
                 "jsuk there are some FERC-EIA matches that aren't in the steam \
                 table but this is because they are linked to retired EIA generators.")
             #raise AssertionError(message)
-=======
-            # raise AssertionError(message)
->>>>>>> main
             warnings.warn(message)
 
     _log_match_coverage(connects_ferc1_eia)
