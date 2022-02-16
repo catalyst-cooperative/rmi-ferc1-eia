@@ -1149,13 +1149,8 @@ def check_match_consistentcy(connects_ferc1_eia, train_df, match_type='all'):
     mask = connects_ferc1_eia.record_id_eia.notnull()
 
     if match_type == 'overrides':
-<<<<<<< HEAD
-        consistency = .38  # changed from 45 because it was failing...
-        consistency_one_cap_ferc = .85
-=======
         consistency = .39
         consistency_one_cap_ferc = .83
->>>>>>> main
         train_ferc1 = train_df.reset_index()
         # these bbs were missing from connects_ferc1_eia. not totally sure why
         missing = [
