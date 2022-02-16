@@ -5,6 +5,25 @@ Catalyst has compiled depreciation studies for a project with the Rocky
 Mountain Institue. These studies were compiled from Public Utility Commission
 proceedings as well as the FERC Form 1 table.
 
+The main transform method is Transformer.execute(), which has four steps:
+
+* *early tidy* which mostly cleans data types and preforms minor data
+  adjustments.
+* *reshape* which rn allocates the "common" records - records which are
+  associated with a full plant or group of plant-parts such as the land value
+  of a plant - to their "atomic" record (i.e. the non-common plant-part
+  records).
+* *fill in* which calculates missing values. Many of the original depreciation
+  studies do not have all of the data columns that are commonly need to
+  analysis, but generally they have enough of the value to calculate the
+  missing data points (i.e. one study will have a depreciation rate but no
+  annual depreciation cost and vice versa).
+* *aggregate*. Many of the depreciation studies include the very detailed
+  records for each FERC account # - which are accounting categories. This means
+  many plant-part's have a record for every FERC account #. This is a level of
+  detail which we basically never need, so we aggregate the output to the
+  plant-part level.
+
 how to run this module:
 file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
 sheet_name_deprish='Depreciation Studies Raw'
@@ -19,26 +38,29 @@ deprish_df = transformer.execute()
 import logging
 from copy import deepcopy
 import warnings
-import pathlib
 
 import pandas as pd
 import numpy as np
+from typing import Literal
 
 import pudl
+import pudl_rmi
 
 logger = logging.getLogger(__name__)
 
 
-INT_IDS = ['utility_id_ferc1', 'utility_id_pudl',
-           'plant_id_pudl', 'report_year']
+INT_IDS = [
+    'utility_id_ferc1', 'utility_id_pudl', 'plant_id_eia', 'report_year'
+]
 
 NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
 
 IDX_COLS_DEPRISH = [
     'report_date',
-    'plant_id_pudl',
+    'plant_id_eia',
     'plant_part_name',
     'ferc_acct',
+    'ferc_acct_name',
     'utility_id_pudl',
     'data_source'
 ]
@@ -54,6 +76,13 @@ DOLLAR_COLS = [
 ]
 
 
+def execute():
+    """Generate cleaned and allocated depreciation studies."""
+    transformer = Transformer(Extractor().execute())
+    deprish_df = transformer.execute()
+    return deprish_df
+
+
 class Extractor:
     """
     Extractor for turning excel based depreciation data into a dataframe.
@@ -66,39 +95,33 @@ class Extractor:
     will want to use a datastore object to handle the path.
     """
 
-    def __init__(self,
-                 file_path,
-                 sheet_name,
-                 skiprows=0):
+    def __init__(self, sheet_name='Depreciation Studies Raw', skiprows=0):
         """
         Initialize a for deprish.Extractor.
 
         Args:
-            file_path (path-like)
             sheet_name (str, int): String used for excel sheet name or
                 integer used for zero-indexed sheet location.
             skiprows (int): rows to skip in zero-indexed column location,
                 default is 0.
         """
-        self.file_path = file_path
         self.sheet_name = sheet_name
         self.skiprows = skiprows
 
     def execute(self):
         """Turn excel-based depreciation data into a dataframe."""
-        logger.info(f"Reading the depreciation data from {self.file_path}")
+        logger.info(
+            "Reading the depreciation data from "
+            f"{pudl_rmi.DEPRISH_RAW_XLSX}"
+        )
         return (
             pd.read_excel(
-                self.file_path,
+                pudl_rmi.DEPRISH_RAW_XLSX,
                 skiprows=self.skiprows,
                 sheet_name=self.sheet_name,
                 dtype={i: pd.Int64Dtype() for i in INT_IDS},
                 na_values=NA_VALUES
             )
-            # for some reason the read_excel is grabbing ALL OF THE COLUMNS
-            # .... in the whole dang sheet
-            .dropna(axis='columns', how='all')
-            .dropna(axis='rows', how='all')
         )
 
 
@@ -113,8 +136,6 @@ class Transformer:
             extract_df (pandas.DataFrame): dataframe of extracted depreciation
                 studies from ``Extractor.execute()``
         """
-        # Note: should I pass in an instance of Extractor and make this call:
-        # self.extract_df = extractor.execute()
         self.extract_df = extract_df
 
         self.tidy_df = None
@@ -129,7 +150,7 @@ class Transformer:
             clobber (bool): if True and dataframe has already been generated,
                 regenergate the datagframe.
             agg_cols (iterable): list of column names to aggregate on. Default
-                is None, which defualts to: ['report_date', 'plant_id_pudl',
+                is None, which defualts to: ['report_date', 'plant_id_eia',
                 'plant_part_name', 'ferc_acct', 'utility_id_pudl',
                 'data_source', 'line_id', 'common', 'utility_name_ferc1']
 
@@ -143,8 +164,10 @@ class Transformer:
         self.filled_df = self.fill_in(clobber=clobber)
         logger.info('agg-ing now')
         if agg_cols is None:
-            agg_cols = ([x for x in IDX_COLS_DEPRISH if x not in ['ferc_acct']]
-                        + ['line_id', 'common', 'utility_name_ferc1'])
+            agg_cols = (
+                IDX_COLS_OUT +
+                ['line_id', 'common', 'utility_name_ferc1', 'utility_id_ferc1']
+            )
         self.agg_by_plant_df = agg_to_idx(
             self.filled_df,
             idx_cols=agg_cols)
@@ -158,8 +181,7 @@ class Transformer:
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
                 self.extract_df
-                .pipe(pudl.helpers.convert_cols_dtypes,
-                      'depreciation', name='depreciation')
+                .convert_dtypes(convert_floating=False)
                 .pipe(self.convert_rate_cols)
                 .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
@@ -276,23 +298,18 @@ class Transformer:
                 be applied to the non-allocated data columns
         """
         filled_df = deepcopy(df_to_fill)
+        # replace the 0's with nulls. if left in, the 0's will produce inf's
+        # and strange outputs for filled in outputs.
+        filled_df = filled_df.replace({0: np.nan})
 
         # we need to be able to fill in the native columns as well as those
         # that have been augmented via
         if common_allocated:
-            suffix = "_w_common"
+            suffix = f'_w{COMMON_SUFFIX}'
         else:
             suffix = ""
-        for _ in range(3):
-            filled_df = filled_df.assign(
-                net_salvage_rate=lambda x:
-                    # first clean % v num, then net_salvage/book_value
-                    x.net_salvage_rate.fillna(
-                        x[f"net_salvage{suffix}"] /
-                        x[f"book_reserve{suffix}"]),
-                reserve_rate=lambda x: x.reserve_rate.fillna(
-                    x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]),
-            )
+        for _ in range(2):
+            filled_df = _calculate_rate_cols(filled_df, suffix)
 
             filled_df[f"depreciation_annual_epxns{suffix}"] = (
                 filled_df[f"depreciation_annual_epxns{suffix}"].fillna(
@@ -328,20 +345,21 @@ class Transformer:
                     (filled_df['depreciation_annual_rate'])
                     * filled_df['remaining_life_avg'])
             )
-        filled_df[f"book_reserve_og{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"]
-        )
-        filled_df[f"book_reserve{suffix}"] = (
-            filled_df[f"book_reserve{suffix}"].fillna(
-                ((1 - filled_df.net_salvage_rate) *
-                 filled_df[f"plant_balance{suffix}"])
-                - filled_df[f"unaccrued_balance{suffix}"])
-        )
-        filled_df[f"book_reserve_option2{suffix}"] = (
-            filled_df[f"plant_balance{suffix}"] -
-            (filled_df[f"depreciation_annual_epxns{suffix}"]
-             * filled_df.remaining_life_avg)
-        )
+            filled_df[f"book_reserve_og{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"]
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    ((1 - filled_df.net_salvage_rate) *
+                     filled_df[f"plant_balance{suffix}"])
+                    - filled_df[f"unaccrued_balance{suffix}"])
+            )
+            filled_df[f"book_reserve{suffix}"] = (
+                filled_df[f"book_reserve{suffix}"].fillna(
+                    filled_df[f"plant_balance{suffix}"] -
+                    (filled_df[f"depreciation_annual_epxns{suffix}"]
+                     * filled_df.remaining_life_avg))
+            )
 
         return filled_df
 
@@ -375,8 +393,15 @@ class Transformer:
         ]
         for col in to_num_cols:
             tidy_df[col] = pd.to_numeric(tidy_df[col])
-
-        for rate_col in ['net_salvage_rate', 'depreciation_annual_rate']:
+        # convert the mixed rate/percentage columns using the cooresponding
+        # boolean columns that let us know whether a particular record has
+        # data reported as a decimal rates or whole number percentages
+        rate_cols = ['net_salvage_rate', 'depreciation_annual_rate']
+        # ensure the cooresponding boolean columns are actually bools
+        tidy_df = tidy_df.astype(
+            {f"{k}_type_pct": pd.BooleanDtype() for k in rate_cols}
+        )
+        for rate_col in rate_cols:
             tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] = (
                 tidy_df.loc[tidy_df[f'{rate_col}_type_pct'], rate_col] / 100
             )
@@ -468,17 +493,17 @@ class Transformer:
         """
         known_dupes = [
             # KCP&L plants
-            294, 306, 314, 534, 263, 335, 780, 389,
+            2079, 6065, 1241, 2080, 6065, 6068, 2098, 2094,
             # Wisconsin Electric Power Company
-            756, 759, 775, 829, 839, 468,
+            1769, 1778, 55742, 1784, 1786,
             # Kansas City Empire
-            458
+            56456
         ]
-        # grab the duplicates (only those that have plant_id_pudl's)
+        # grab the duplicates (only those that have plant_id_eia's)
         # because those are the atomic records we will process
         dupes = tidy_df[
             tidy_df.duplicated(subset=IDX_COLS_DEPRISH, keep=False)
-            & (tidy_df.plant_id_pudl.notnull())
+            & (tidy_df.plant_id_eia.notnull())
         ]
         # we know there are a fair amount of duplicates from FERC.
         # there is nothing to do for these records besides squishing
@@ -486,7 +511,7 @@ class Transformer:
         # and we know about some duplicates that we are trying to fix
         unknown_dupes = dupes[
             (dupes.data_source != 'FERC')
-            & (~dupes.plant_id_pudl.isin(known_dupes))
+            & (~dupes.plant_id_eia.isin(known_dupes))
         ]
         if not unknown_dupes.empty:
             self.unknown_dupes = unknown_dupes
@@ -497,7 +522,9 @@ class Transformer:
             )
         # okay now that we feel confident that we aren't going to loose data
         # let's aggregate away any remaining duplicates
-        agg_cols = (IDX_COLS_DEPRISH + ['line_id', 'utility_name_ferc1'])
+        agg_cols = (
+            IDX_COLS_DEPRISH +
+            ['line_id', 'utility_name_ferc1', 'utility_id_ferc1'])
         tidy_df = agg_to_idx(tidy_df, idx_cols=agg_cols)
         return tidy_df
 
@@ -845,6 +872,49 @@ class Transformer:
         return df_w_tots
 
 
+def _calculate_rate_cols(
+    df_to_fill: pd.DataFrame,
+    suffix: Literal['',  f'_w{COMMON_SUFFIX}']
+) -> pd.DataFrame:
+    """
+    Fill in missing values from rate columns.
+
+    The rates will be filled with the original data columns or the data columns
+    that have had the common records allocated to them via
+    :meth:`split_merge_common_records`. These data columns that have had the
+    common records allocated to them have a suffix on their column names.
+
+    Args:
+        filled_df: a dataframe with null values to fill in.
+        suffix: the end of the column names, which will indicate wether this
+            function should use the data columns which have had the common
+            records allocated to them, or the base columns without common. The
+            possible options here are: '' (which indicates the use of the base
+            columns) or :py:const:`COMMON_SUFFIX`
+
+    """
+    filled_df = df_to_fill.assign(
+        net_salvage_rate=lambda x:
+            x.net_salvage_rate.fillna(
+                x[f"net_salvage{suffix}"] /
+                x[f"book_reserve{suffix}"]),
+        reserve_rate=lambda x: x.reserve_rate.fillna(
+            x[f"book_reserve{suffix}"] /
+            x[f"plant_balance{suffix}"]),
+    )
+    filled_df.loc[:, 'remaining_life_avg'] = (
+        filled_df.loc[:, 'remaining_life_avg'].fillna(
+            filled_df[f"unaccrued_balance{suffix}"]
+            / filled_df[f"depreciation_annual_epxns{suffix}"])
+    )
+    filled_df.loc[:, "depreciation_annual_rate"] = (
+        filled_df["depreciation_annual_rate"].fillna(
+            filled_df[f"depreciation_annual_epxns{suffix}"] /
+            (filled_df[f"plant_balance{suffix}"]))
+    )
+    return filled_df
+
+
 def agg_to_idx(deprish_df, idx_cols):
     """
     Aggregate the depreciation data to the asset level.
@@ -876,30 +946,24 @@ def agg_to_idx(deprish_df, idx_cols):
     sum_cols = DOLLAR_COLS
     # if common lines have been allocated, we need to aggregate those allocated
     # columns as well
+    suffix = ""
     if 'plant_balance_w_common' in deprish_df.columns:
         sum_cols = DOLLAR_COLS + [f"{x}_w{COMMON_SUFFIX}" for x in DOLLAR_COLS]
+        suffix = f'_w{COMMON_SUFFIX}'
     # aggregate the columns that can be summed..
-    deprish_asset = deprish_df.groupby(by=idx_cols, dropna=False)[
-        sum_cols].sum(min_count=1)
+    deprish_asset = (
+        deprish_df.groupby(by=idx_cols, as_index=False, dropna=False)
+        [sum_cols].sum(min_count=1)
+    )
 
-    # weighted average agg section ###
-    # enumerate wtavg cols
-    avg_cols = ['service_life_avg', 'remaining_life_avg'] + \
-        [x for x in deprish_df.columns
-         if '_rate' in x and 'rate_type_pct' not in x]
-    # prep dict with col to average (key) and col to weight on (value)
-    # in this case we always want to weight based on unaccrued_balance
-    wtavg_cols = dict.fromkeys(avg_cols, 'unaccrued_balance')
-    # aggregate the columned that need to be averaged ..
-    for data_col, weight_col in wtavg_cols.items():
-        deprish_asset = (
-            deprish_asset.merge(
-                pudl.helpers.weighted_average(
-                    deprish_df,
-                    data_col=data_col,
-                    weight_col=weight_col,
-                    idx_cols=idx_cols),
-                how='outer', on=idx_cols))
+    calc_cols = ['net_salvage_rate', 'reserve_rate',
+                 'remaining_life_avg', 'depreciation_annual_rate']
+    # null the calc columns before sending them through the fill_in funciton bc
+    # that function fills nulls!
+    deprish_asset.loc[:, calc_cols] = pd.NA
+    deprish_asset = _calculate_rate_cols(deprish_asset, suffix)
+
+    deprish_asset = deprish_asset.convert_dtypes(convert_floating=False)
     return deprish_asset
 
 
@@ -954,20 +1018,20 @@ def fill_in_tech_type(gens):
 ######################
 
 
-def get_ferc_acct_type_map(file_path):
+def get_ferc_acct_type_map():
     """Grab the mapping of the FERC Account numbers to names."""
-    ferc_acct_map = (
-        pd.read_csv(file_path, dtype={'ferc_acct': pd.StringDtype()})
+    ferc_acct_map = pd.read_csv(
+        pudl_rmi.FERC_ACCT_NAMES_CSV,
+        dtype={'ferc_acct': pd.StringDtype()}
     )
+    # ensure there are NO NULLS in the input file
+    assert(ferc_acct_map.notnull().any().any())
     return ferc_acct_map
 
 
 def add_ferc_acct_name(tidy_df):
     """Add the FERC Account name into the tidied deprecation table."""
-    file_path_ferc_acct_names = (
-        pathlib.Path().cwd().parent / 'inputs' / 'ferc_acct_names.csv')
-    ferc_acct_names = get_ferc_acct_type_map(
-        file_path_ferc_acct_names)
+    ferc_acct_names = get_ferc_acct_type_map()
     # ensure the ferc_acct column is a string, otherwise the string
     # manipliations won't work
     tidy_df = tidy_df.astype({'ferc_acct': pd.StringDtype()})
@@ -998,13 +1062,12 @@ def assign_line_id(df):
     """Make a composite id column."""
     df = df.assign(
         line_id=lambda x:
-        x.report_date.dt.year.astype(pd.Int64Dtype()).map(str) + "_" +
-        x.plant_id_pudl.map(str) + "_" +
-        x.plant_part_name.map(str).str.lower() + "_" +
-        x.ferc_acct_name.fillna("").str.lower() + "_" +
-        # x.note.fillna("") + "_" +
-        x.utility_id_pudl.map(str) + "_" +
-        x.data_source.fillna("")
+            x.report_date.dt.year.astype(pd.Int64Dtype()).map(str) + "_" +
+            x.plant_id_eia.map(str) + "_" +
+            x.plant_part_name.map(str).str.lower() + "_" +
+            x.ferc_acct_name.fillna("").str.lower() + "_" +
+            x.utility_id_pudl.map(str) + "_" +
+            x.data_source.fillna("")
     )
     return df
 
@@ -1026,11 +1089,9 @@ def get_common_assn():
         multiple main records and thus are repeted.
     """
     # grab the mannually labeled common records
-    path_common_dc = (
-        pathlib.Path().cwd().parent / 'outputs' / 'deprish_cleaned.xlsx')
     common_mannual = (
         pd.read_excel(
-            path_common_dc,
+            pudl_rmi.DEPRISH_COMMON_LABELS_XLSX,
             skiprows=0,
             sheet_name='common_labeling',
             dtype={i: pd.Int64Dtype() for i in INT_IDS},
@@ -1114,7 +1175,7 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
                 idx_cols=['line_id', 'utility_name_ferc1'] +
                 [x for x in IDX_COLS_DEPRISH if x != 'ferc_acct']),
             plants_pudl,
-            on=['plant_id_pudl', 'report_date'],
+            on=['plant_id_eia', 'report_date'],
             how='left',
             validate='m:1',
             suffixes=('', '_eia')
@@ -1154,7 +1215,7 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
 
 def get_plant_pudl_info(pudl_out):
     """
-    Grab info about plants, aggregated to plant_id_pudl/report_date.
+    Grab info about plants, aggregated to plant_id_eia/report_date.
 
     Args:
         pudl_out (pudl.output.pudltabl.PudlTabl): A PUDL output object that
@@ -1164,10 +1225,10 @@ def get_plant_pudl_info(pudl_out):
         pudl_out.gens_eia860()
         .assign(count='place_holder')
         .sort_values(['plant_name_eia', 'state'])
-        .groupby(['plant_id_pudl', 'report_date'], as_index=False)
+        .groupby(['plant_id_eia', 'report_date'], as_index=False)
         # Must use .join because x.unique() arrays are not hashable
         .agg(
-            {'plant_id_eia':
+            {'plant_id_pudl':
              lambda x: '; '.join([str(x) for x in x.unique() if x]),
              'generator_id': lambda x: '; '.join(x.unique()),
              'count': lambda x: x.count(),
@@ -1179,7 +1240,7 @@ def get_plant_pudl_info(pudl_out):
              'fuel_type_code_pudl':
              lambda x: '; '.join([x for x in x.unique() if x]),
              })
-        .astype({'plant_id_pudl': 'Int64'})
+        .astype({'plant_id_eia': 'Int64'})
     )
     return plants_pudl
 
@@ -1223,8 +1284,7 @@ def make_default_common_assn(file_path_deprish):
     based on IDX_COLS_COMMON.
     """
     transformer = Transformer(
-        extract_df=Extractor(file_path=file_path_deprish,
-                             sheet_name=0).execute()
+        extract_df=Extractor().execute()
     )
     # assume common plant records based on the plant_part_name
     deprish_df = (
@@ -1237,14 +1297,14 @@ def make_default_common_assn(file_path_deprish):
         )
     )
 
-    # if there is no plant_id_pudl, there will be no plant for the common
+    # if there is no plant_id_eia, there will be no plant for the common
     # record to be allocated across, so for now we need to assume these
     # records are not common
     deprish_c_df = deprish_df.loc[
-        deprish_df.common & deprish_df.plant_id_pudl.notnull()
+        deprish_df.common & deprish_df.plant_id_eia.notnull()
     ]
     deprish_df = deprish_df.loc[
-        ~deprish_df.common | deprish_df.plant_id_pudl.isnull()]
+        ~deprish_df.common | deprish_df.plant_id_eia.isnull()]
 
     common_assn = (
         pd.merge(
