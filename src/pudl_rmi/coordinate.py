@@ -6,8 +6,13 @@ diagram of the relations.
 """
 
 import logging
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
+import pudl
+import sqlalchemy as sa
+# from memory_profiler import profile
+from pudl.output.pudltabl import PudlTabl
 
 import pudl_rmi
 
@@ -47,6 +52,7 @@ class Output():
                 f"Frequency of `pudl_out` must be `AS` but got {pudl_out.freq}"
             )
 
+    # @profile
     def grab_plant_part_list(self, clobber=False):
         """
         Get the master unit list; generate it or get if from a file.
@@ -75,6 +81,7 @@ class Output():
             plant_parts_eia = pd.read_pickle(file_path)
         return plant_parts_eia
 
+    # @profile
     def grab_deprish(self, clobber=False):
         """
         Generate or grab the cleaned deprecaition studies.
@@ -95,6 +102,7 @@ class Output():
             deprish_df = pd.read_pickle(file_path)
         return deprish_df
 
+    # @profile
     def grab_deprish_to_eia(
         self,
         clobber: bool = False,
@@ -134,6 +142,7 @@ class Output():
             deprish_match_df = pd.read_pickle(file_path)
         return deprish_match_df
 
+    # @profile
     def grab_ferc1_to_eia(self, clobber=False, clobber_plant_part_list=False):
         """
         Generate or grab a connection between FERC1 and EIA.
@@ -168,6 +177,7 @@ class Output():
             connects_ferc1_eia = pd.read_pickle(file_path)
         return connects_ferc1_eia
 
+    # @profile
     def grab_deprish_to_ferc1(
         self,
         clobber=False,
@@ -224,8 +234,7 @@ class Output():
                 deprish_eia=self.grab_deprish_to_eia(
                     clobber=clobber_deprish_eia),
                 ferc1_to_eia=self.grab_ferc1_to_eia(
-                    clobber=clobber_ferc1_eia),
-                clobber=clobber
+                    clobber=clobber_ferc1_eia)
             )
             # export
             connects_deprish_ferc1.to_pickle(file_path)
@@ -241,15 +250,16 @@ class Output():
         """
         Gotta catch em all. Get all of the RMI outputs.
 
-        Get or regenerate all of the RMI outputs. This method is mostly for
-        testing purposes because it returns all 5 outputs. To grab individual
-        outputs, it is recommended to use the output-specific method.
+        Read from disk or regenerate all of the RMI outputs. This method is mostly for
+        testing purposes because it returns all 5 outputs. To grab individual outputs,
+        it is recommended to use the output-specific method.
 
         Args:
-            clobber_all (boolean): Deafult is False, which will grab the
-                outputs if they already exist, or generate them if they don't
-                exist. True will re-generate the outputs whether they exist on
-                disk. Re-generating everything will take ~15 minutes.
+            clobber_all (boolean): Deafult is False, which will read saved
+                outputs from disk if they already exist, or generate them if
+                they don't. True will re-calculate the outputs regardless of
+                whether they exist on disk, and save them to disk.
+                Re-generating everything will take ~15 minutes.
 
         Returns:
             pandas.DataFrame: EIA plant-part list - table of "plant-parts"
@@ -288,3 +298,39 @@ def check_is_file_or_not_exists(file_path: Path):
             f"Path exists but is not a file. Check if {file_path} is a "
             "directory. It should be either a pickled file or nothing."
         )
+
+
+# @profile
+def main():
+    """Exercise all output methods for memory profiling."""
+    pudl_settings = pudl.workspace.setup.get_defaults()
+    pudl_engine = sa.create_engine(pudl_settings["pudl_db"])
+    pudl_out = PudlTabl(
+        pudl_engine=pudl_engine,
+        freq='AS',
+        fill_fuel_cost=False,
+        roll_fuel_cost=True,
+        fill_net_gen=True,
+    )
+    rmi_out = Output(pudl_out)
+    ppl = rmi_out.grab_plant_part_list(clobber=True)
+    del ppl
+    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
+        if ppl_df in rmi_out.pudl_out._dfs:
+            del rmi_out.pudl_out._dfs[ppl_df]
+
+    deprish = rmi_out.grab_deprish(clobber=True)
+    del deprish
+
+    deprish_to_eia = rmi_out.grab_deprish_to_eia(clobber=True)
+    del deprish_to_eia
+
+    ferc1_to_eia = rmi_out.grab_ferc1_to_eia(clobber=True)
+    del ferc1_to_eia
+
+    deprish_to_ferc1 = rmi_out.grab_deprish_to_ferc1(clobber=True)
+    del deprish_to_ferc1
+
+
+if __name__ == "__main__":
+    main()

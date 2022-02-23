@@ -33,23 +33,24 @@ master unit list.
 
 import logging
 import statistics
-from copy import deepcopy
 import warnings
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
+import pudl
+import pudl.helpers
 import recordlinkage as rl
 import scipy
 from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
-import pudl
-import pudl.helpers
 import pudl_rmi
-from pudl_rmi import make_plant_parts_eia, connect_deprish_to_eia
+from pudl_rmi import connect_deprish_to_eia, make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
-
+# Silence the recordlinkage logger, which is out of control
+logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ['utility_id_ferc1', 'plant_id_ferc1', 'report_date']
 
 
@@ -77,6 +78,8 @@ def execute(pudl_out, plant_parts_df):
         plant_parts_true_df=inputs.plant_parts_true_df,
         plants_ferc1_df=inputs.plants_ferc1_df
     )
+    # add capex (this should be moved into pudl_out.plants_steam_ferc1)
+    connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
     return connects_ferc1_eia
 
 

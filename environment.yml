@@ -5,40 +5,34 @@ channels:
 dependencies:
   # Basic python environment requirements:
   - pip~=21.0
-  - python>=3.8,<3.10
+  - python>=3.8,<3.11
+  - setuptools<60.0.0
 
-  # Tricky binary GEOS dependencies, best addressed w/ conda:
-  - geopandas~=0.9.0
-  - pygeos~=0.9.0
-
-  - python-snappy~=0.6.0  # Ensures snappy-dev library gets installed
-  - numba~=0.53  # not strictly necessary, but speeds some things up by 100x
+  # Tricky binary dependencies, best resolved w/ conda:
+  - geopandas>=0.9,<0.11
+  - pygeos>=0.10,<0.13
+  - python-snappy>=0.6,<1  # Ensures snappy-dev library gets installed
+  - numba>=0.55.1,<0.56  # not strictly necessary, but speeds some things up by 100x
+  - sqlite>=3.36,<4   # Required by PUDL 0.5.0 and later.
 
   # So we can run a notebook server
-  - jupyterlab~=3.0
-  - jupyter-resource-usage~=0.5.0
-  
+  - jupyterlab>=3.2,<4
+  - jupyter-resource-usage>=0.5,<1
 
-  # RMI package requirements, also specified in setup.py
-  - fuzzywuzzy~=0.18.0
-  - recordlinkage~=0.14.0
-  - python-levenshtein~=0.12.2
+  # Visualization and data validation packages used interactively but not required.
   - pandera~=0.7.2
   - seaborn~=0.11.2
   - plotly==5.4.0
-  
 
   # Not normal Python packages that come from PyPI
   - nodejs  # Useful for Jupyter Notebook Server
 
   - pip:
     - simpledbf~=0.2.6
-#    - jupyterlab-plotly    
-    - git+https://github.com/catalyst-cooperative/pudl.git@dev
+    # Install the (local) pudl_rmi package such that we can do development work:
+    - --editable ./[test]
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
-    # should also remove or comment out the github based dependency inside setup.py as
-    # it may supersede the editable installation, which would be confusing.
+    # MUST remove or comment out the github based dependency inside setup.py as
+    # it will supersede the editable installation:
     # - --editable ../path/to/your/cloned/pudl/repo
-    # Install the local package such that we can do development work:
-    # - --editable ./

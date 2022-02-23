@@ -1,17 +1,21 @@
 """Connecting depreciation data, FERC1 and EIA for RMI."""
 
-import pkg_resources
+import os
 from pathlib import Path
 
-import pudl_rmi.make_plant_parts_eia
-import pudl_rmi.deprish
-import pudl_rmi.coordinate
-import pudl_rmi.connect_ferc1_to_eia
-import pudl_rmi.connect_deprish_to_ferc1
+import pkg_resources
+
 import pudl_rmi.connect_deprish_to_eia
+import pudl_rmi.connect_deprish_to_ferc1
+import pudl_rmi.connect_ferc1_to_eia
+import pudl_rmi.coordinate
+import pudl_rmi.deprish
+import pudl_rmi.make_plant_parts_eia  # noqa: F401
 
 REPO_DIR = Path(__file__).resolve().parent.parent.parent
-INPUTS_DIR = REPO_DIR / 'inputs'
+INPUTS_DIR = (
+    Path(os.environ.get("PUDL_RMI_INPUTS_DIR", REPO_DIR / 'inputs'))
+)
 """
 Directory of input files that are used in generating the RMI outputs.
 
@@ -19,7 +23,9 @@ These files are required inputs and should be checked into the repo. Some of
 these files (even the excel files) are updated during some of the processing.
 If these files don't exist, then many of the outputs will fail.
 """
-OUTPUTS_DIR = REPO_DIR / 'outputs'
+OUTPUTS_DIR = (
+    Path(os.environ.get("PUDL_RMI_OUTPUTS_DIR", REPO_DIR / 'outputs'))
+)
 """
 Directory of output files that are generated from the RMI processes.
 

@@ -15,14 +15,14 @@ import logging
 import sys
 
 import pandas as pd
+import pudl
 import sqlalchemy as sa
 from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
 from xlrd import XLRDError
 
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
-import pudl
 import pudl_rmi
+import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 

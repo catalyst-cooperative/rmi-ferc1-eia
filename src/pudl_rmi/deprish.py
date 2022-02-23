@@ -36,14 +36,14 @@ deprish_df = transformer.execute()
 """
 
 import logging
-from copy import deepcopy
 import warnings
-
-import pandas as pd
-import numpy as np
+from copy import deepcopy
 from typing import Literal
 
+import numpy as np
+import pandas as pd
 import pudl
+
 import pudl_rmi
 
 logger = logging.getLogger(__name__)
@@ -874,7 +874,7 @@ class Transformer:
 
 def _calculate_rate_cols(
     df_to_fill: pd.DataFrame,
-    suffix: Literal['',  f'_w{COMMON_SUFFIX}']
+    suffix: Literal['', f'_w{COMMON_SUFFIX}']
 ) -> pd.DataFrame:
     """
     Fill in missing values from rate columns.
