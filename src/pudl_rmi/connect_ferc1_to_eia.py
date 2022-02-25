@@ -1096,7 +1096,7 @@ def prettyify_best_matches(
 
 
 def _log_match_coverage(connects_ferc1_eia):
-    eia_years = pudl.constants.WORKING_PARTITIONS['eia860']['years']
+    eia_years = pudl.metadata.sources.SOURCES['eia860']['working_partitions']['years']
     # get the matches from just the EIA working years
     m_eia_years = connects_ferc1_eia[
         (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
