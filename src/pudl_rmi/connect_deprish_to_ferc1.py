@@ -147,7 +147,7 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
 }
 
 
-def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
+def execute(plant_parts_eia, deprish_eia, ferc1_eia):
     """
     Connect depreciation data to FERC1 via EIA and scale to depreciation.
 
@@ -162,47 +162,47 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             the FERC1 plants and the EIA plant-parts list.
     """
     logger.info("Scaling FERC1-EIA to the generator level.")
-    scaled_fe = (
+    scaled_ferc1_eia = (
         PlantPartScaler(
             treatments=META_FERC1_EIA,
-            ppl_pk=['record_id_eia'],
+            ppe_pk=['record_id_eia'],
             data_set_pk_cols=['record_id_ferc1'],
             plant_part='plant_gen'
         )
         .execute(
-            df_to_scale=ferc1_to_eia,
-            ppl=plant_parts_eia)
+            df_to_scale=ferc1_eia,
+            plant_parts_eia=plant_parts_eia)
     )
 
     logger.info("Scaling Depreciation-EIA to the generator level.")
-    scaled_de = (
+    scaled_deprish_eia = (
         PlantPartScaler(
             treatments=META_DEPRISH_EIA,
-            ppl_pk=['record_id_eia', 'data_source'],
+            ppe_pk=['record_id_eia', 'data_source'],
             data_set_pk_cols=['line_id'],
             plant_part='plant_gen'
         )
         .execute(
             df_to_scale=deprish_eia,
-            ppl=plant_parts_eia)
+            plant_parts_eia=plant_parts_eia)
     )
 
     # scale the FERC-EIA records that we can't match to Deprish-EIA records due
     # to ownership
-    scaled_fe = scale_to_fraction_owned(
-        scaled_de=scaled_de,
-        scaled_fe=scaled_fe,
-        ppl=plant_parts_eia
+    scaled_ferc1_eia = scale_to_fraction_owned(
+        scaled_deprish_eia=scaled_deprish_eia,
+        scaled_ferc1_eia=scaled_ferc1_eia,
+        plant_parts_eia=plant_parts_eia
     )
-    # both of these scaled dfs have ppl columns. we are going to drop all of
-    # the ppl columns before merging and then merge the ppl back in as oppose
-    # to try to reconcile the ppl columns from the scaled dfs
+    # both of these scaled dfs have ppe columns. we are going to drop all of
+    # the ppe columns before merging and then merge the ppe back in as oppose
+    # to try to reconcile the ppe columns from the scaled dfs
     ferc_deprish_eia = (
         pd.merge(
-            scaled_de.drop(
-                columns=[c for c in scaled_de if c in plant_parts_eia]),
-            scaled_fe.drop(
-                columns=[c for c in scaled_fe if c in plant_parts_eia]),
+            scaled_deprish_eia.drop(
+                columns=[c for c in scaled_deprish_eia if c in plant_parts_eia]),
+            scaled_ferc1_eia.drop(
+                columns=[c for c in scaled_ferc1_eia if c in plant_parts_eia]),
             right_index=True,
             left_index=True,
             how='outer',
@@ -218,9 +218,9 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
 
 
 def scale_to_fraction_owned(
-    scaled_de: pd.DataFrame,
-    scaled_fe: pd.DataFrame,
-    ppl: pd.DataFrame
+    scaled_deprish_eia: pd.DataFrame,
+    scaled_ferc1_eia: pd.DataFrame,
+    plant_parts_eia: pd.DataFrame
 ) -> pd.DataFrame:
     """
     Standardize by ownership.
@@ -237,25 +237,28 @@ def scale_to_fraction_owned(
     counterparts owership & the convert them.
 
     Args:
-        scaled_fe
-        scaled_de
-        ppl
+        scaled_deprish_eia
+        scaled_ferc1_eia
+        plant_parts_eia
     """
-    logger.info("doing the new thing")
-    # convert EIA ppl ownership dupes. Regardless of what a record was
+    # convert EIA ppe ownership dupes. Regardless of what a record was
     # matched with, default to the "total" ownership record if the "total"
     # and "owned" records are the same (i.e. there is only one owner)
     # this step could be done at basically any step before merging two
     # scaled_dfs together
-    scaled_de = make_plant_parts_eia.reassign_id_ownership_dupes(scaled_de)
-    scaled_fe = make_plant_parts_eia.reassign_id_ownership_dupes(scaled_fe)
+    scaled_deprish_eia = make_plant_parts_eia.reassign_id_ownership_dupes(
+        scaled_deprish_eia
+    )
+    scaled_ferc1_eia = make_plant_parts_eia.reassign_id_ownership_dupes(
+        scaled_ferc1_eia
+    )
 
     # first we must find the records that are connected
-    # to the same EIA ppl record
+    # to the same EIA ppe record
     own_df = (
         pd.merge(
-            _make_record_id_eia_wo_ownership(scaled_de),
-            _make_record_id_eia_wo_ownership(scaled_fe),
+            _make_record_id_eia_wo_ownership(scaled_deprish_eia),
+            _make_record_id_eia_wo_ownership(scaled_ferc1_eia),
             right_index=True, left_index=True,
             suffixes=('_de', '_fe')
         )
@@ -280,23 +283,30 @@ def scale_to_fraction_owned(
     #         f"records: {de_bad_totals}"
     # )
 
-    # convert the ppl columns from the ferc-eia data
+    # convert the ppe columns from the ferc-eia data
     # seperate the 'good' records (that can be merged w/o dealing with ownership)
-    fe_own_good = scaled_fe.drop(index=own_df[own_df.ownership_off].record_id_eia_fe)
+    fe_own_good = (
+        scaled_ferc1_eia
+        .drop(index=own_df[own_df.ownership_off].record_id_eia_fe)
+    )
     # grab the record ids for the records that need to be scaled
-    fe_own_off = scaled_fe.loc[own_df[own_df.ownership_off].record_id_eia_fe]
+    fe_own_off = (
+        scaled_ferc1_eia.loc[own_df[own_df.ownership_off].record_id_eia_fe]
+    )
 
     # convert the index (which is the record_id_eia)
     fe_own_off.index = fe_own_off.index.str.replace("_total_", "_owned_")
-    # replace the columns from the ppl
-    ppl_cols = [c for c in fe_own_off if c in ppl]
-    fe_own_off.loc[:, ppl_cols] = ppl.loc[fe_own_off.index, ppl_cols]
+    # replace the columns from the ppe
+    ppe_cols = [c for c in fe_own_off if c in plant_parts_eia]
+    fe_own_off.loc[:, ppe_cols] = (
+        plant_parts_eia.loc[fe_own_off.index, ppe_cols]
+    )
 
     # the columns that need to be scaled are the same allocator cols
     # from the PlantPartScaler
     scale_cols = PlantPartScaler(
         treatments=META_FERC1_EIA,
-        ppl_pk=['record_id_eia'],
+        ppe_pk=['record_id_eia'],
         data_set_pk_cols=['record_id_ferc1'],
         plant_part='plant_gen'
     ).allocator_cols_dict.keys()
@@ -310,7 +320,7 @@ def scale_to_fraction_owned(
     # squish the goodies and the cleaned baddies back together
     scaled_fe_cleaned = pd.concat([fe_own_good, fe_own_off]).sort_index()
     # the output should be exactly the same len
-    assert(len(scaled_fe_cleaned) == len(scaled_fe))
+    assert(len(scaled_fe_cleaned) == len(scaled_ferc1_eia))
     return scaled_fe_cleaned
 
 
@@ -374,7 +384,7 @@ class PlantPartScaler(BaseModel):
     Args:
         treatments: a dictionary of column name (keys) with field treatments
             (values)
-        ppl_pk: Identifing columns for the EIA plant-part list.
+        ppe_pk: Identifing columns for the EIA plant-part list.
         data_set_pk_cols: Identifing columns for dataset to scale.
         plant_part: name of EIA plant-part to scale to. Current implementation
             only allows for ``plant_gen``.
@@ -382,7 +392,7 @@ class PlantPartScaler(BaseModel):
     """
 
     treatments: Dict[str, FieldTreatment]
-    ppl_pk: List[str] = ['record_id_eia']
+    ppe_pk: List[str] = ['record_id_eia']
     data_set_pk_cols: List[str]
     plant_part: Literal['plant_gen']
 
@@ -419,7 +429,7 @@ class PlantPartScaler(BaseModel):
     def execute(
         self,
         df_to_scale: pd.DataFrame,
-        ppl: pd.DataFrame
+        plant_parts_eia: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Scale a dataframe to a generator-level.
@@ -456,10 +466,10 @@ class PlantPartScaler(BaseModel):
 
         Args:
             df_to_scale: the input data table that you want to scale.
-            ppl: the EIA plant-part list.
+            ppe: the EIA plant-parts.
 
         """
-        # extract the records that are NOT connected to the EIA plant-part list
+        # extract the records that are NOT connected to the EIA plant-parts
         # Note: Right now we are just dropping the non-connected
         # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
         connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
@@ -468,14 +478,14 @@ class PlantPartScaler(BaseModel):
         # STEP 1
         # Aggregate when there is more than one source record associated with
         # the same EIA plant-part.
-        to_scale = self.aggregate_duplicate_eia(connected_to_scale, ppl)
+        to_scale = self.aggregate_duplicate_eia(connected_to_scale, plant_parts_eia)
         # STEP 2 & 3
-        allocated = self.allocate(to_scale, ppl)
+        allocated = self.allocate(to_scale, plant_parts_eia)
         # STEP 4
         # second aggregation of the duplicate EIA records.
         scaled_df_post_agg = self.aggregate_duplicate_eia(
             connected_to_scale=allocated.reset_index(),
-            ppl=ppl
+            plant_parts_eia=plant_parts_eia
         )
         # set the index to be the main EIA plant-part index columns
         scaled_df_post_agg = scaled_df_post_agg.set_index(['record_id_eia'])
@@ -484,7 +494,7 @@ class PlantPartScaler(BaseModel):
     def allocate(
             self,
             to_allocate: pd.DataFrame,
-            ppl: pd.DataFrame
+            plant_parts_eia: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Allocate records w/ larger granularities to sub-component plant-parts.
@@ -494,13 +504,13 @@ class PlantPartScaler(BaseModel):
 
         Args:
             to_allocate: the dataframe to be allocated.
-            ppl: EIA plant-part list generated from
+            plant_parts_eia: EIA plant-parts generated from
                 ``pudl.analysis.plant_parts_eia``
         """
         # STEP 2
         merged_df = self.broadcast_merge_to_plant_part(
             data_to_scale=to_allocate,
-            ppl=ppl.reset_index(),
+            ppe=plant_parts_eia.reset_index(),
             cols_to_keep=list(self.treatments)
         )
         # at this stage we have plant-part records with the data columns from
@@ -508,7 +518,7 @@ class PlantPartScaler(BaseModel):
         # is duplicated!
 
         # STEP 3
-        # grab all of the ppl columns, plus data set's id column(s)
+        # grab all of the ppe columns, plus data set's id column(s)
         # this enables us to have a unique index
         pk_cols = (
             self.plant_part_pk_cols
@@ -524,12 +534,12 @@ class PlantPartScaler(BaseModel):
             )
         return allocated
 
-    def aggregate_duplicate_eia(self, connected_to_scale, ppl):
+    def aggregate_duplicate_eia(self, connected_to_scale, plant_parts_eia):
         """Aggregate duplicate EIA plant-part records."""
         connected_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(
             connected_to_scale)
         dupe_mask = connected_to_scale.duplicated(
-            subset=self.ppl_pk, keep=False
+            subset=self.ppe_pk, keep=False
         )
         # two dfs
         dupes = connected_to_scale[dupe_mask]
@@ -547,7 +557,7 @@ class PlantPartScaler(BaseModel):
             # sum and weighted average!
             de_duped = pudl.helpers.sum_and_weighted_average_agg(
                 df_in=dupes,
-                by=self.ppl_pk,
+                by=self.ppe_pk,
                 sum_cols=self._get_treatment_cols('scale'),
                 wtavg_dict=self.wtavg_dict
             ).pipe(pudl.metadata.fields.apply_pudl_dtypes)
@@ -556,20 +566,20 @@ class PlantPartScaler(BaseModel):
             # show up in the original data columns
             de_duped = de_duped.merge(
                 (
-                    dupes.groupby(self.ppl_pk, as_index=False)
+                    dupes.groupby(self.ppe_pk, as_index=False)
                     .agg({k: str_concat for k
                           in self._get_treatment_cols('str_concat')})
                 ),
-                on=self.ppl_pk,
+                on=self.ppe_pk,
                 validate='1:1',
                 how='left'
             ).pipe(pudl.metadata.fields.apply_pudl_dtypes)
 
-            # merge back in the ppl idx columns
+            # merge back in the ppe idx columns
             de_duped = (
                 de_duped.set_index('record_id_eia')
                 .merge(
-                    ppl,
+                    plant_parts_eia,
                     left_index=True,
                     right_index=True,
                     how='left',
@@ -587,26 +597,25 @@ class PlantPartScaler(BaseModel):
             self,
             data_to_scale: pd.DataFrame,
             cols_to_keep: List[str],
-            ppl: pd.DataFrame) -> pd.DataFrame:
+            ppe: pd.DataFrame) -> pd.DataFrame:
         """
         Broadcast data with a variety of granularities to a single plant-part.
 
         This method merges an input dataframe (``data_to_scale``) containing
         data that has a heterogeneous set of plant-part granularities with a
-        subset of the EIA plant-part list that has a single granularity.
-        (Currently this single granularity must be generators). In general this
-        will be a one-to-many merge in which values from single records in the
-        input data end up associated with several records from the plant part
-        list.
+        subset of the EIA plant-parts that has a single granularity. (Currently
+        this single granularity must be generators). In general this will be a
+        one-to-many merge in which values from single records in the input data
+        end up associated with several records from the EIA plant parts.
 
-        First, we select a subset of the full EIA plant-part list corresponding
-        to the plant-part of the :class:`PlantPartScaler` instance.  (specified
+        First, we select a subset of the full EIA plant-parts corresponding to
+        the plant-part of the :class:`PlantPartScaler` instance.  (specified
         by its :attr:`plant_part`). In theory this could be the plant,
         generator, fuel type, etc. Currently only generators are supported.
 
         Then, we iterate over all the possible plant parts, selecting the
         subset of records in ``data_to_scale`` that have that granularity, and
-        merge the homogeneous subset of the plant part list that we selected
+        merge the homogeneous subset of the EIA plant parts that we selected
         above onto that subset of the input data. Each iteration uses a
         different set of columns to merge on -- the columns which define the
         primary key for the plant part being merged. Each iteration creates a
@@ -621,15 +630,15 @@ class PlantPartScaler(BaseModel):
 
         Args:
             data_to_scale: a data table where all records have been linked to
-                EIA plant-part list but they may be heterogeneous in its
+                EIA plant-parts but they may be heterogeneous in its
                 plant-part granularities (i.e. some records could be of 'plant'
                 plant-part type while others are 'plant_gen' or
-                'plant_prime_mover').  All of the plant-part list columns need
+                'plant_prime_mover').  All of the plant-parts columns need
                 to be present in this table.
             cols_to_keep: columns from the original data ``data_to_scale`` that
                 you want to show up in the output. These should not be columns
-                that show up in the ``ppl``.
-            ppl: the EIA plant-part list.
+                that show up in the ``ppe``.
+            ppe: the EIA plant-parts.
 
         Returns:
             A dataframe in which records correspond to :attr:`plant_part` (in
@@ -640,9 +649,9 @@ class PlantPartScaler(BaseModel):
 
         """
         # select only the plant-part records that we are trying to scale to
-        ppl_part_df = ppl[ppl.plant_part == self.plant_part]
+        ppe_part_df = ppe[ppe.plant_part == self.plant_part]
         # convert the date to year start - this is necessary because the
-        # depreciation data is often reported as EOY and the ppl is always SOY
+        # depreciation data is often reported as EOY and the ppe is always SOY
         data_to_scale.loc[:, 'report_date'] = (
             pd.to_datetime(data_to_scale.report_date.dt.year, format='%Y')
         )
@@ -660,7 +669,7 @@ class PlantPartScaler(BaseModel):
                     data_to_scale[data_to_scale.plant_part == merge_part]
                     [pk_cols + ['record_id_eia'] + cols_to_keep]
                 ),
-                ppl_part_df,
+                ppe_part_df,
                 on=pk_cols,
                 how='left',
                 # this unfortunately needs to be a m:m bc sometimes the df
@@ -690,8 +699,8 @@ def _allocate_col(
     Allocate larger dataset records porportionally by EIA plant-part columns.
 
     Args:
-        to_allocate: table of data that has been merged with the EIA plant-part
-            list records of the scale that you want the output to be in.
+        to_allocate: table of data that has been merged with the EIA plant-parts
+            records of the scale that you want the output to be in.
         allocate_col: name of the data column to scale. The data in this column
             has been broadcast across multiple records in
             :meth:`broadcast_merge_to_plant_part`.
