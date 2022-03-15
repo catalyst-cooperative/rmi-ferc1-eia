@@ -40,9 +40,9 @@ import numpy as np
 import pandas as pd
 import pudl
 import pudl.helpers
-from pudl.metadata.classes import DataSource
 import recordlinkage as rl
 import scipy
+from pudl.metadata.classes import DataSource
 from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
