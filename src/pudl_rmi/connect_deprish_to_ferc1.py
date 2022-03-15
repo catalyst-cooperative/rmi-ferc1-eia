@@ -159,14 +159,139 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
                 'total_fuel_cost'
             ],
         },
+    'opex_allowances':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_boiler':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_coolants':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_electric':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_engineering':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_fuel':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_misc_power':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_misc_steam':
+        {'treatment_type': 'scale',
+         'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+         },
     'opex_nonfuel':
         {
             'treatment_type': 'scale',
-            'allocator_cols': [
-                'capacity_mw',
-                'net_generation_mwh',
-                'total_fuel_cost'
-            ],
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_operations':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_plant':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_production_total':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_rents':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_steam':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_steam_other':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_structures':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_transfer':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_maintenance':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_total':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_dams':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_generation_misc':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_hydraulic':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_misc_plant':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_water_for_power':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_production_before_pumping':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_pumped_storage':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
+        },
+    'opex_pumping':
+        {
+            'treatment_type': 'scale',
+            'allocator_cols': ['capacity_mw', 'net_generation_mwh', 'total_fuel_cost']
         },
     'capacity_mw_ferc1':
         {
