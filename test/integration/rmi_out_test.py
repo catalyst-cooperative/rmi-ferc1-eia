@@ -16,19 +16,20 @@ import pudl_rmi
 logger = logging.getLogger(__name__)
 
 
-PK_UTILS = ['report_year', 'data_source', 'utility_id_pudl']
-PK_PLANTS = ['report_year', 'data_source', 'utility_id_pudl', 'plant_id_eia']
-PATH_FAIL = pudl_rmi.INPUTS_DIR / 'validation'
+PK_UTILS = ["report_year", "data_source", "utility_id_pudl"]
+PK_PLANTS = ["report_year", "data_source", "utility_id_pudl", "plant_id_eia"]
+PATH_FAIL = pudl_rmi.INPUTS_DIR / "validation"
 
 
 @pytest.mark.parametrize(
-    "table_name", [
+    "table_name",
+    [
         "fuel_ferc1",
         "ownership_eia860",
         "plants_entity_eia",
         "fuel_receipts_costs_eia923",
         "utilities_pudl",
-    ]
+    ],
 )
 def test_pudl_engine(pudl_engine, table_name):
     """Test that the PUDL DB is actually available."""
@@ -84,72 +85,70 @@ def _add_data_source(df):
     the FERC-EIA-Depreciation tables we need to add *both* versions of the
     depreciation `data_source`.
     """
-    if 'data_source' not in df:
-        df = pd.concat([
-            df.assign(data_source='PUC'),
-            df.assign(data_source='FERC'),
-        ])
+    if "data_source" not in df:
+        df = pd.concat(
+            [
+                df.assign(data_source="PUC"),
+                df.assign(data_source="FERC"),
+            ]
+        )
     return df
 
 
 @pytest.mark.parametrize(
-    "df1_name,df2_name,data_col,by_name", [
+    "df1_name,df2_name,data_col,by_name",
+    [
+        ("grab_deprish", "grab_deprish_to_eia", "plant_balance_w_common", "utilities"),
         (
             "grab_deprish",
             "grab_deprish_to_eia",
-            'plant_balance_w_common',
-            'utilities'
-        ),
-        (
-            "grab_deprish",
-            "grab_deprish_to_eia",
-            'plant_balance_w_common',
-            'plants',
+            "plant_balance_w_common",
+            "plants",
         ),
         (
             "grab_deprish_to_eia",
             "grab_deprish_to_ferc1",
-            'plant_balance_w_common',
-            'utilities',
+            "plant_balance_w_common",
+            "utilities",
         ),
         (
             "grab_deprish_to_eia",
             "grab_deprish_to_ferc1",
-            'plant_balance_w_common',
-            'plants',
+            "plant_balance_w_common",
+            "plants",
         ),
         (
             "grab_deprish",
             "grab_deprish_to_ferc1",
-            'plant_balance_w_common',
-            'utilities'
+            "plant_balance_w_common",
+            "utilities",
         ),
         (
             "grab_deprish",
             "grab_deprish_to_ferc1",
-            'plant_balance_w_common',
-            'plants',
+            "plant_balance_w_common",
+            "plants",
         ),
         (
             "grab_ferc1_to_eia",
             "grab_deprish_to_ferc1",
-            'capex_total',
-            'utilities',
+            "capex_total",
+            "utilities",
         ),
         (
             "grab_ferc1_to_eia",
             "grab_deprish_to_ferc1",
-            'capex_total',
-            'plants',
+            "capex_total",
+            "plants",
         ),
-    ]
+    ],
 )
 def test_consistency_of_data_stages(
     rmi_out,
     df1_name: str,
     df2_name: str,
     data_col: str,
-    by_name: Literal['plants', 'utilities'],
+    by_name: Literal["plants", "utilities"],
 ):
     """
     Test the consistency of a data column at two stages.
@@ -163,17 +162,16 @@ def test_consistency_of_data_stages(
 
     Ideally, the inputs
     """
-    if by_name == 'plants':
+    if by_name == "plants":
         by = PK_PLANTS
-    elif by_name == 'utilities':
+    elif by_name == "utilities":
         by = PK_UTILS
 
     test_stages = pudl_rmi.connect_deprish_to_ferc1.gb_test(
         df1=rmi_out.__getattribute__(df1_name)().pipe(_add_data_source),
         df2=rmi_out.__getattribute__(df2_name)().pipe(_add_data_source),
         data_col=data_col,
-        by=by
-
+        by=by,
     )
     # we add the off_rate.notnll() mask in here bc there are a ton of unconnected
     # data in these tables (eg. depreciation records that don't have a EIA connection)
@@ -188,8 +186,7 @@ def test_consistency_of_data_stages(
     )
 
     fail_path = (
-        PATH_FAIL /
-        f"fail_{data_col}_{by_name}_{df1_name.replace('grab_', '')}_vs_"
+        PATH_FAIL / f"fail_{data_col}_{by_name}_{df1_name.replace('grab_', '')}_vs_"
         f"{df2_name.replace('grab_', '')}.csv"
     )
     fails_expected = pd.read_csv(fail_path).set_index(by)
