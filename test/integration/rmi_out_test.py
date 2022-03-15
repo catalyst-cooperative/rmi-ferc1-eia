@@ -7,9 +7,9 @@ This can take up to an hour to run.
 import logging
 from typing import Literal
 
+import pandas as pd
 import pytest
 import sqlalchemy as sa
-import pandas as pd
 
 import pudl_rmi
 
