@@ -11,7 +11,6 @@ from pathlib import Path
 import pandas as pd
 import pudl
 import sqlalchemy as sa
-
 # from memory_profiler import profile
 from pudl.output.pudltabl import PudlTabl
 
