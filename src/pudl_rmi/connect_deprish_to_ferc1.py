@@ -63,6 +63,8 @@ import pandas as pd
 import pudl
 from pydantic import BaseModel, validator
 
+from pudl_rmi import make_plant_parts_eia
+
 logger = logging.getLogger(__name__)
 
 META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
@@ -350,6 +352,13 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
             ppl=plant_parts_eia)
     )
 
+    # scale the FERC-EIA records that we can't match to Deprish-EIA records due
+    # to ownership
+    scaled_fe = scale_to_fraction_owned(
+        scaled_de=scaled_de,
+        scaled_fe=scaled_fe,
+        ppl=plant_parts_eia
+    )
     # both of these scaled dfs have ppl columns. we are going to drop all of
     # the ppl columns before merging and then merge the ppl back in as oppose
     # to try to reconcile the ppl columns from the scaled dfs
@@ -371,6 +380,116 @@ def execute(plant_parts_eia, deprish_eia, ferc1_to_eia):
     )
     test_consistency_of_data_stages(df1=deprish_eia, df2=ferc_deprish_eia)
     return ferc_deprish_eia
+
+
+def scale_to_fraction_owned(
+    scaled_de: pd.DataFrame,
+    scaled_fe: pd.DataFrame,
+    ppl: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Standardize by ownership.
+
+    When we merge the FERC-EIA data (scaled to generators) with the Deprish-EIA
+    data (scaled to generators), we are merging on the EIA plant-part list's
+    ``record_id_eia``. A majority of the time is only one owner for each plant,
+    but when plants do have multiple owners this complicates this merge. When
+    mapping the depreciation records, we assume all of the records are "owned"
+    portions of each plant - which are often synonymous with the "total"
+    records.
+
+    Find the FERC records which have a different ownership % than its deprish
+    counterparts owership & the convert them.
+
+    Args:
+        scaled_fe
+        scaled_de
+        ppl
+    """
+    logger.info("doing the new thing")
+    # convert EIA ppl ownership dupes. Regardless of what a record was
+    # matched with, default to the "total" ownership record if the "total"
+    # and "owned" records are the same (i.e. there is only one owner)
+    # this step could be done at basically any step before merging two
+    # scaled_dfs together
+    scaled_de = make_plant_parts_eia.reassign_id_ownership_dupes(scaled_de)
+    scaled_fe = make_plant_parts_eia.reassign_id_ownership_dupes(scaled_fe)
+
+    # first we must find the records that are connected
+    # to the same EIA ppl record
+    own_df = (
+        pd.merge(
+            _make_record_id_eia_wo_ownership(scaled_de),
+            _make_record_id_eia_wo_ownership(scaled_fe),
+            right_index=True, left_index=True,
+            suffixes=('_de', '_fe')
+        )
+        .assign(
+            ownership_off=lambda x: x.record_id_eia_de != x.record_id_eia_fe
+        )  # bc sometimes there are two of the same record_id_eia in scaled_de,
+        # but with different data sources we need to drop duplicates so we
+        # don't end up with duplicates in the end.
+        .drop_duplicates()
+    )
+    # find matches where the ownership if off but it is the deprish
+    # side that has the totals
+    # de_bad_totals = own_df[
+    #     own_df.ownership_off
+    #     & (own_df.record_id_eia_de.str.contains("_total_"))
+    # ]
+    # if not de_bad_totals.empty:
+    #     raise AssertionError(
+    #         "The depreciation data in these records are connected to "
+    #         "total ownership EIA plant-part records and should "
+    #         "probably be hooked up to the owned slice of EIA plant-part"
+    #         f"records: {de_bad_totals}"
+    # )
+
+    # convert the ppl columns from the ferc-eia data
+    # seperate the 'good' records (that can be merged w/o dealing with ownership)
+    fe_own_good = scaled_fe.drop(index=own_df[own_df.ownership_off].record_id_eia_fe)
+    # grab the record ids for the records that need to be scaled
+    fe_own_off = scaled_fe.loc[own_df[own_df.ownership_off].record_id_eia_fe]
+
+    # convert the index (which is the record_id_eia)
+    fe_own_off.index = fe_own_off.index.str.replace("_total_", "_owned_")
+    # replace the columns from the ppl
+    ppl_cols = [c for c in fe_own_off if c in ppl]
+    fe_own_off.loc[:, ppl_cols] = ppl.loc[fe_own_off.index, ppl_cols]
+
+    # the columns that need to be scaled are the same allocator cols
+    # from the PlantPartScaler
+    scale_cols = PlantPartScaler(
+        treatments=META_FERC1_EIA,
+        ppl_pk=['record_id_eia'],
+        data_set_pk_cols=['record_id_ferc1'],
+        plant_part='plant_gen'
+    ).allocator_cols_dict.keys()
+
+    # actually scale the columns!!
+    fe_own_off.loc[:, scale_cols] = (
+        fe_own_off.loc[:, scale_cols].multiply(
+            fe_own_off.loc[:, 'fraction_owned'], axis="index")
+    )
+
+    # squish the goodies and the cleaned baddies back together
+    scaled_fe_cleaned = pd.concat([fe_own_good, fe_own_off]).sort_index()
+    # the output should be exactly the same len
+    assert(len(scaled_fe_cleaned) == len(scaled_fe))
+    return scaled_fe_cleaned
+
+
+def _make_record_id_eia_wo_ownership(scaled_df):
+    """Make a record_id_eia col.. w/o ownership."""
+    scaled_df = (
+        scaled_df.assign(
+            record_id_eia_wo_ownership=lambda x:
+            x.index.str.replace("owned_", "").str.replace("total_", ""),
+        )
+        .reset_index().set_index(['record_id_eia_wo_ownership'])
+        [['record_id_eia', 'ownership_dupe']]
+    )
+    return scaled_df
 
 
 class FieldTreatment(BaseModel):
@@ -401,7 +520,7 @@ class FieldTreatment(BaseModel):
 
     treatment_type: Literal['scale', 'str_concat', 'wtavg']
 
-    @validator('treatment_type')
+    @ validator('treatment_type')
     def check_treatments(cls, value, values):   # noqa: N805
         """Check treatments that need additional info."""
         if value == 'scale' and not values.get('allocator_cols'):
@@ -509,6 +628,8 @@ class PlantPartScaler(BaseModel):
         # Note: Right now we are just dropping the non-connected
         # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
         connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
+
+        df_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(df_to_scale)
         # STEP 1
         # Aggregate when there is more than one source record associated with
         # the same EIA plant-part.
@@ -570,6 +691,8 @@ class PlantPartScaler(BaseModel):
 
     def aggregate_duplicate_eia(self, connected_to_scale, ppl):
         """Aggregate duplicate EIA plant-part records."""
+        connected_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(
+            connected_to_scale)
         dupe_mask = connected_to_scale.duplicated(
             subset=self.ppl_pk, keep=False
         )
