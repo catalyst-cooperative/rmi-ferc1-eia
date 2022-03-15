@@ -144,7 +144,7 @@ def _add_data_source(df):
         ),
     ]
 )
-def test_data_col_at_two_stages(
+def test_consistency_of_data_stages(
     rmi_out,
     df1_name: str,
     df2_name: str,
