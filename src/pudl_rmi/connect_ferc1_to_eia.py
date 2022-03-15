@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 import pudl
 import pudl.helpers
+from pudl.metadata.classes import DataSource
 import recordlinkage as rl
 import scipy
 from recordlinkage.compare import Exact, Numeric, String  # , Date
@@ -1097,7 +1098,7 @@ def prettyify_best_matches(
 
 
 def _log_match_coverage(connects_ferc1_eia):
-    eia_years = pudl.constants.WORKING_PARTITIONS['eia860']['years']
+    eia_years = DataSource.from_id("eia860").working_partitions["years"]
     # get the matches from just the EIA working years
     m_eia_years = connects_ferc1_eia[
         (connects_ferc1_eia.report_date.dt.year.isin(eia_years))
@@ -1221,12 +1222,22 @@ def calc_annual_capital_additions_ferc1(steam_df, window=3):
     """
     # we need to sort the df so it lines up w/ the groupby
     steam_df = steam_df.sort_values(IDX_STEAM)
+
+    steam_df = steam_df.assign(
+        capex_wo_retirment_total=lambda x:
+            x.capex_equipment.fillna(0)
+            + x.capex_land.fillna(0)
+            + x.capex_structures.fillna(0)
+    )
     # we group on everything but the year so the groups are multi-year unique
     # plants the shift happens within these multi-year plant groups
-    steam_df['capex_total_shifted'] = steam_df.groupby(
-        [x for x in IDX_STEAM if x != 'report_date'])[['capex_total']].shift()
+    steam_df['capex_total_shifted'] = (
+        steam_df.groupby([x for x in IDX_STEAM if x != 'report_date'])
+        [['capex_wo_retirment_total']]
+        .shift()
+    )
     steam_df = steam_df.assign(
-        capex_annual_addition=lambda x: x.capex_total - x.capex_total_shifted
+        capex_annual_addition=lambda x: x.capex_wo_retirment_total - x.capex_total_shifted
     )
 
     addts = pudl.helpers.generate_rolling_avg(
@@ -1239,8 +1250,8 @@ def calc_annual_capital_additions_ferc1(steam_df, window=3):
     steam_df_w_addts = (
         pd.merge(
             steam_df,
-            addts[IDX_STEAM + ['capex_total', 'capex_annual_addition_rolling']],
-            on=IDX_STEAM + ['capex_total'],
+            addts[IDX_STEAM + ['capex_wo_retirment_total', 'capex_annual_addition_rolling']],
+            on=IDX_STEAM + ['capex_wo_retirment_total'],
             how='left',
         )
         .assign(
