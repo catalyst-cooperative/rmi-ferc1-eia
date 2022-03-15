@@ -53,7 +53,7 @@ INT_IDS = [
     'utility_id_ferc1', 'utility_id_pudl', 'plant_id_eia', 'report_year'
 ]
 
-NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*"]
+NA_VALUES = ["-", "—", "$-", ".", "_", "n/a", "N/A", "N/A $", "•", "*", "■", ]
 
 IDX_COLS_DEPRISH = [
     'report_date',
@@ -497,7 +497,9 @@ class Transformer:
             # Wisconsin Electric Power Company
             1769, 1778, 55742, 1784, 1786,
             # Kansas City Empire
-            56456
+            56456,
+            # a fully accrued portion of cooper lake
+            6291
         ]
         # grab the duplicates (only those that have plant_id_eia's)
         # because those are the atomic records we will process
