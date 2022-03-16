@@ -58,7 +58,6 @@ Future Needs:
 import logging
 from typing import Dict, List, Literal, Optional
 
-import numpy as np
 import pandas as pd
 import pudl
 from pydantic import BaseModel, validator
@@ -689,59 +688,3 @@ def _allocate_col(
         columns={output_col: allocate_col}
     )
     return to_allocate.loc[:, [allocate_col]]
-
-
-##################
-# Validation Tests
-##################
-
-# This whole section should pprrrrooobably be moved into a validation layer of
-# CI tests for this repo.
-
-
-def gb_test(
-    df1: pd.DataFrame, df2: pd.DataFrame, data_col: str, by: List[str]
-) -> pd.DataFrame:
-    """
-    Merge two grouped input tables to determine if summed data column matches.
-
-    TODO: Please help me name this....
-
-    Args:
-        df1: One dataframe to sum and check consistency with ``df2``.
-        df2: Other dataframe to sum and check consistency against ``df1``.
-        data_col: data column to check. Column must be in both ``df1`` and
-            ``df2``.
-    """
-    return (
-        pd.merge(
-            group_sum_col(df1, data_col=data_col, by=by),
-            group_sum_col(df2, data_col=data_col, by=by),
-            right_index=True,
-            left_index=True,
-            suffixes=("_1", "_2"),
-            how="outer",
-        )
-        .assign(
-            match=lambda x: np.isclose(
-                x[f"{data_col}_1"], x[f"{data_col}_2"], equal_nan=True
-            ),
-            off_rate=lambda x: x[f"{data_col}_1"] / x[f"{data_col}_2"],
-        )
-        .sort_index()
-    )
-
-
-def group_sum_col(df, data_col: str, by: List[str]) -> pd.DataFrame:
-    """Groupby sum a specific table's data col."""
-    gb_out = (
-        df.assign(  # convert date to year bc many of the og depish studies are EOY
-            report_year=lambda x: x.report_date.dt.year
-        )
-        .astype({"report_year": pd.Int64Dtype()})[
-            df.plant_id_eia.notnull()
-        ]  # only plant associated reocrds
-        .groupby(by=by, dropna=True)[[data_col]]
-        .sum(min_count=1)
-    )
-    return gb_out

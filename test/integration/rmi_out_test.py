@@ -80,7 +80,7 @@ def test_deprish_to_ferc1(rmi_out):
 ##################
 
 
-def gb_test(
+def gb_prep(
     df1: pd.DataFrame, df2: pd.DataFrame, data_col: str, by: List[str]
 ) -> pd.DataFrame:
     """
@@ -248,7 +248,7 @@ def test_consistency_of_data_stages(
             "This test only takes `plants` or `utilities` as an argument for `by_name`"
         )
 
-    test_stages = gb_test(
+    test_stages = gb_prep(
         df1=rmi_out.__getattribute__(df1_name)().pipe(_add_data_source),
         df2=rmi_out.__getattribute__(df2_name)().pipe(_add_data_source),
         data_col=data_col,
