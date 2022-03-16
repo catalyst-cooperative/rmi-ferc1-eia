@@ -46,6 +46,7 @@ report_year,data_source,utility_id_pudl
 2018,FERC,35
 2018,FERC,42
 2018,FERC,62
+2018,FERC,89
 2018,FERC,90
 2018,FERC,97
 2018,FERC,130
@@ -65,7 +66,6 @@ report_year,data_source,utility_id_pudl
 2018,FERC,364
 2018,PUC,23
 2018,PUC,31
-2018,PUC,90
 2018,PUC,92
 2018,PUC,97
 2018,PUC,106
@@ -91,6 +91,8 @@ report_year,data_source,utility_id_pudl
 2019,FERC,364
 2019,PUC,222
 2019,PUC,224
+2020,FERC,185
 2020,PUC,90
 2020,PUC,97
+2020,PUC,185
 2020,PUC,246
