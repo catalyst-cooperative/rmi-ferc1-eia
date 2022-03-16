@@ -270,8 +270,8 @@ class Output:
             pandas.DataFrame: a table of the conneciton between the
                 depreciation studies and the FERC1 plants.
         """
-        ppl = self.grab_plant_part_list(clobber=False)
-        d = self.grab_deprish(clobber=False)
+        ppl = self.grab_plant_part_list(clobber=clobber_all)
+        d = self.grab_deprish(clobber=clobber_all)
         de = self.grab_deprish_to_eia(clobber=clobber_all)
         fe = self.grab_ferc1_to_eia(clobber=clobber_all)
         df = self.grab_deprish_to_ferc1(clobber=clobber_all)
