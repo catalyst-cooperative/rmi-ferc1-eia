@@ -5,9 +5,9 @@ This can take up to an hour to run.
 """
 
 import logging
-from typing import Literal, List
-import numpy as np
+from typing import List, Literal
 
+import numpy as np
 import pandas as pd
 import pytest
 import sqlalchemy as sa
