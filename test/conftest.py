@@ -41,7 +41,7 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def pudl_settings_fixture():  # noqa: C901
     """
     Determine some settings for the test session.
@@ -51,7 +51,7 @@ def pudl_settings_fixture():  # noqa: C901
       downloaded PUDL DB.
 
     """
-    logger.info('setting up the pudl_settings_fixture')
+    logger.info("setting up the pudl_settings_fixture")
 
     # In CI we want a hard-coded path for input caching purposes:
     if os.environ.get("GITHUB_ACTIONS", False):
@@ -75,8 +75,7 @@ def pudl_settings_fixture():  # noqa: C901
 
     # Build all the pudl_settings paths:
     pudl_settings = pudl.workspace.setup.derive_paths(
-        pudl_in=pudl_in,
-        pudl_out=pudl_out
+        pudl_in=pudl_in, pudl_out=pudl_out
     )
     # Set up the pudl workspace:
     pudl.workspace.setup.init(pudl_in=pudl_in, pudl_out=pudl_out)
@@ -85,7 +84,7 @@ def pudl_settings_fixture():  # noqa: C901
     return pudl_settings
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def pudl_engine(pudl_settings_fixture):
     """
     Grab a connection to the PUDL Database.
@@ -93,18 +92,18 @@ def pudl_engine(pudl_settings_fixture):
     If we are using the test database, we initialize the PUDL DB from scratch.
     If we're using the live database, then we just make a conneciton to it.
     """
-    logger.info('setting up the pudl_engine fixture')
+    logger.info("setting up the pudl_engine fixture")
     engine = sa.create_engine(pudl_settings_fixture["pudl_db"])
-    logger.info('PUDL Engine: %s', engine)
+    logger.info("PUDL Engine: %s", engine)
     return engine
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def pudl_out(pudl_engine):
     """Make an annual PUDL output object with all filling enabled."""
     return PudlTabl(
         pudl_engine=pudl_engine,
-        freq='AS',
+        freq="AS",
         fill_fuel_cost=False,
         roll_fuel_cost=True,
         fill_net_gen=True,

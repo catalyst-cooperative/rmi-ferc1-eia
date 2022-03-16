@@ -42,16 +42,12 @@ def reassign_id_ownership_dupes(plant_parts_df):
         record_id_eia=lambda x: np.where(
             x.ownership_dupe,
             x.record_id_eia.str.replace("owned", "total"),
-            x.record_id_eia
+            x.record_id_eia,
         )
     )
-    if 'ownership' in plant_parts_df.columns:
+    if "ownership" in plant_parts_df.columns:
         plant_parts_df = plant_parts_df.assign(
-            ownership=lambda x: np.where(
-                x.ownership_dupe,
-                "total",
-                x.ownership
-            )
+            ownership=lambda x: np.where(x.ownership_dupe, "total", x.ownership)
         )
     # then we reset the index so we return the dataframe in the same structure
     # as we got it.

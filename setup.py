@@ -8,15 +8,15 @@ readme_path = Path(__file__).parent / "README.md"
 long_description = readme_path.read_text()
 
 setup(
-    name='pudl_rmi',
+    name="pudl_rmi",
     packages=find_packages("src"),
     package_dir={"": "src"},
-    description='This repository is a collaboration between RMI and Catalyst Cooperative to connect FERC Form 1 plant records, EIA plant records and depreciation study records at the most granular level.',
+    description="This repository is a collaboration between RMI and Catalyst Cooperative to connect FERC Form 1 plant records, EIA plant records and depreciation study records at the most granular level.",
     long_description=long_description,
     long_description_content_type="text/x-rst",
-    url='https://github.com/catalyst-cooperative/rmi-ferc1-eia/',
+    url="https://github.com/catalyst-cooperative/rmi-ferc1-eia/",
     license="MIT",
-    version='0.1.0',
+    version="0.1.0",
     install_requires=[
         "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@dev",
         "fuzzywuzzy~=0.18.0",
@@ -25,7 +25,7 @@ setup(
     ],
     extras_require={
         "test": [
-            "autopep8~=1.5",
+            "black>=22,<23",
             "coverage>=5.3,<7.0",
             "flake8>=4.0,<5",
             "flake8-builtins~=1.5",
@@ -53,5 +53,5 @@ setup(
     author_email="pudl@catalyst.coop",
     maintainer="Christina Gosnell",
     maintainer_email="cgosnell@catalyst.coop",
-    keywords=['depreciation', 'ferc1', 'eia', 'rmi']
+    keywords=["depreciation", "ferc1", "eia", "rmi"],
 )
