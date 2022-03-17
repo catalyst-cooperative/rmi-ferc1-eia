@@ -55,7 +55,7 @@ class Output:
             )
 
     # @profile
-    def plant_part_list(self, clobber=False):
+    def plant_parts_eia(self, clobber=False):
         """
         Get the EIA plant-parts; generate it or get if from a file.
 
@@ -142,7 +142,7 @@ class Output:
         if not file_path.exists() or clobber_any:
             deprish_eia = pudl_rmi.connect_deprish_to_eia.execute(
                 deprish=self.deprish(clobber=clobber_deprish),
-                plant_parts_eia=self.plant_part_list(clobber=clobber_plant_parts_eia),
+                plant_parts_eia=self.plant_parts_eia(clobber=clobber_plant_parts_eia),
                 save_to_xlsx=save_to_xlsx,
             )
             deprish_eia.to_pickle(file_path)
@@ -160,7 +160,7 @@ class Output:
         Args:
             clobber (boolean): True if you want to regenerate the master unit
                 list whether or not it is saved at the file_path_mul
-            clobber_plant_part_list (boolean): Generate and cache a new interim
+            clobber_plant_parts_eia (boolean): Generate and cache a new interim
                 output of the EIA plant part list and generate a new version of
                 the depreciaiton to FERC1 output. Default is False.
         """
@@ -175,7 +175,7 @@ class Output:
             )
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
                 self.pudl_out,
-                self.plant_part_list(clobber=clobber_plant_parts_eia),
+                self.plant_parts_eia(clobber=clobber_plant_parts_eia),
             )
             # export
             ferc1_eia.to_pickle(file_path)
@@ -233,7 +233,7 @@ class Output:
                 f"{file_path}. Generating a new output."
             )
             deprish_ferc1 = pudl_rmi.connect_deprish_to_ferc1.execute(
-                plant_parts_eia=self.plant_part_list(clobber=clobber_plant_parts_eia),
+                plant_parts_eia=self.plant_parts_eia(clobber=clobber_plant_parts_eia),
                 deprish_eia=self.deprish_to_eia(clobber=clobber_deprish_eia),
                 ferc1_eia=self.ferc1_to_eia(clobber=clobber_ferc1_eia),
             )
@@ -275,7 +275,7 @@ class Output:
             pandas.DataFrame: a table of the conneciton between the
                 depreciation studies and the FERC1 plants.
         """
-        ppl = self.plant_part_list(clobber=clobber_all)
+        ppl = self.plant_parts_eia(clobber=clobber_all)
         d = self.deprish(clobber=clobber_all)
         de = self.deprish_to_eia(clobber=clobber_all)
         fe = self.ferc1_to_eia(clobber=clobber_all)
@@ -312,7 +312,7 @@ def main():
         fill_net_gen=True,
     )
     rmi_out = Output(pudl_out)
-    ppl = rmi_out.plant_part_list(clobber=True)
+    ppl = rmi_out.plant_parts_eia(clobber=True)
     del ppl
     for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
         if ppl_df in rmi_out.pudl_out._dfs:
