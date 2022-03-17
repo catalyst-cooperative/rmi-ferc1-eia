@@ -245,7 +245,7 @@ class Output:
             deprish_ferc1 = pd.read_pickle(file_path)
         return deprish_ferc1
 
-    def all(self, clobber_all=False):
+    def run_all(self, clobber_all=False):
         """
         Gotta catch em all. Get all of the RMI outputs.
 
