@@ -134,7 +134,7 @@ class Output:
                 haven't updated the mannual mapping in `pudl_rmi.DEPRISH_RAW_XLSX`
                 it is recommended to not save because it takes up lotsa git
                 space. If you do update the overrides, it's recommended that
-                you run this with True.
+                you run this with True. Issue #169 will deprecate this.
         """
         clobber_any = any([clobber, clobber_deprish, clobber_plant_parts_eia])
         file_path = pudl_rmi.DEPRISH_EIA_PKL
