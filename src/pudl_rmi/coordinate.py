@@ -145,7 +145,7 @@ class Output:
                 plant_parts_eia=self.grab_plant_part_list(
                     clobber=clobber_plant_parts_eia
                 ),
-                save_to_xls=save_to_xlsx,
+                save_to_xlsx=save_to_xlsx,
             )
             deprish_eia.to_pickle(file_path)
         else:

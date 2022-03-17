@@ -400,7 +400,7 @@ def execute(
     deprish,
     plant_parts_eia,
     sheet_name_output="EIA to depreciation matches",
-    save_to_xls=True,
+    save_to_xlsx=True,
 ):
     """
     Generate the matched names and save to excel.
@@ -419,7 +419,7 @@ def execute(
         sheet_name_output (string): name of the excel tab which the matches
             will be output and the place where we will grab the overrides for
             the matches. Default is: 'EIA to depreciation matches'.
-        save_to_xls (boolean): If True, save the outputs to the workbook.
+        save_to_xlsx (boolean): If True, save the outputs to the workbook.
             Default is True. If False, the outputs are not saved - it reduces
             time and the dataframe is still returned.
 
@@ -434,7 +434,7 @@ def execute(
     possible_matches_ppe = grab_possible_plant_part_eia_matches(
         plant_parts_eia, deprish_match
     )
-    if save_to_xls:
+    if save_to_xlsx:
         sheets_df_dict = {
             sheet_name_output: deprish_match,
             "Subset of Master Unit List": possible_matches_ppe,
