@@ -80,13 +80,11 @@ def test_deprish_to_ferc1(rmi_out):
 ##################
 
 
-def gb_prep(
+def agg_test_data(
     df1: pd.DataFrame, df2: pd.DataFrame, data_col: str, by: List[str]
 ) -> pd.DataFrame:
     """
-    Merge two grouped input tables to determine if summed data column matches.
-
-    TODO: Please help me name this....
+    Merge two grouped input tables to determine if summed data column are equal.
 
     Args:
         df1: One dataframe to sum and check consistency with ``df2``.
@@ -104,10 +102,10 @@ def gb_prep(
             how="outer",
         )
         .assign(
-            match=lambda x: np.isclose(
+            data_isclose=lambda x: np.isclose(
                 x[f"{data_col}_1"], x[f"{data_col}_2"], equal_nan=True
             ),
-            off_rate=lambda x: x[f"{data_col}_1"] / x[f"{data_col}_2"],
+            data_ratio=lambda x: x[f"{data_col}_1"] / x[f"{data_col}_2"],
         )
         .sort_index()
     )
@@ -115,7 +113,7 @@ def gb_prep(
 
 def group_sum_col(df, data_col: str, by: List[str]) -> pd.DataFrame:
     """Groupby sum a specific table's data col."""
-    gb_out = (
+    summed_out = (
         df.assign(  # convert date to year bc many of the og depish studies are EOY
             report_year=lambda x: x.report_date.dt.year
         )
@@ -125,7 +123,7 @@ def group_sum_col(df, data_col: str, by: List[str]) -> pd.DataFrame:
         .groupby(by=by, dropna=True)[[data_col]]
         .sum(min_count=1)
     )
-    return gb_out
+    return summed_out
 
 
 def _add_data_source(df):
@@ -248,7 +246,7 @@ def test_consistency_of_data_stages(
             "This test only takes `plants` or `utilities` as an argument for `by_name`"
         )
 
-    test_stages = gb_prep(
+    test_stages = agg_test_data(
         df1=rmi_out.__getattribute__(df1_name)().pipe(_add_data_source),
         df2=rmi_out.__getattribute__(df2_name)().pipe(_add_data_source),
         data_col=data_col,
@@ -257,29 +255,30 @@ def test_consistency_of_data_stages(
     # there are a ton of unconnected data in these tables (eg. depreciation
     # records that don't have a EIA connection) these records will not get
     # effectively propegated through each of these stages that require a match
-    # to EIA. the `off_rate` column being null is an indication that either df1
+    # to EIA. the `data_ratio` column being null is an indication that either df1
     # or df2 has a null data_col.
-    # there are enough nulls in one of the aggregated ``data_col`` that we want
-    # to generally ignore these records
-    fails = test_stages[~test_stages.match & test_stages.off_rate.notnull()]
+    actual_aggregation_errors = test_stages[
+        ~test_stages.data_isclose & test_stages.data_ratio.notnull()
+    ]
 
     df1_name_simple = df1_name.replace("grab_", "")
     df2_name_simple = df2_name.replace("grab_", "")
     logger.info(
         f"Failures for {data_col} by {by_name} btwn {df1_name_simple} "
-        f"and {df2_name_simple}: {len(fails)}"
+        f"and {df2_name_simple}: {len(actual_aggregation_errors)}"
     )
     fail_path = (
         PATH_FAIL / f"fail_{data_col}_{by_name}_{df1_name_simple}_vs_"
         f"{df2_name_simple}.csv"
     )
-    fails_expected = pd.read_csv(fail_path).set_index(by)
+    expected_aggregation_errors = pd.read_csv(fail_path).set_index(by)
+    # the commented out lines here are here to help
     # try:
     pd.testing.assert_index_equal(
-        fails.index,
-        fails_expected.index,
+        actual_aggregation_errors.index,
+        expected_aggregation_errors.index,
         exact="equiv",
         check_order=False,
     )
     # except AssertionError:
-    #     fails.reset_index()[by].to_csv(fail_path, index=False)
+    #     actual_aggregation_errors.reset_index()[by].to_csv(fail_path, index=False)
