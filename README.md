@@ -1,5 +1,6 @@
 ![tox-pytest](https://github.com/catalyst-cooperative/rmi-ferc1-eia/actions/workflows/tox-pytest.yml/badge.svg)
 ![codecov](https://img.shields.io/codecov/c/github/catalyst-cooperative/rmi-ferc1-eia)
+![code style](https://img.shields.io/badge/code%20style-black-000000.svg)
 
 This repository is a collaboration between RMI and Catalyst Cooperative to connect FERC
 Form 1 plant records, EIA plant records and depreciation study records at the most
