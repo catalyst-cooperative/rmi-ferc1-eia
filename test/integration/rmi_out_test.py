@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 PK_UTILS = ["report_year", "data_source", "utility_id_pudl"]
 PK_PLANTS = ["report_year", "data_source", "utility_id_pudl", "plant_id_eia"]
-EXPECTED_ERRORS_PATH = pudl_rmi.INPUTS_DIR / "expected_errors"
+EXPECTED_ERRORS_DIR = pudl_rmi.INPUTS_DIR / "expected_errors"
 
 
 @pytest.mark.parametrize(
@@ -270,10 +270,11 @@ def test_consistency_of_data_stages(
         f"Failures for {data_col} by {by_name} btwn {df1_name} "
         f"and {df2_name}: {len(actual_aggregation_errors)}"
     )
-    expected_error_path = (
-        EXPECTED_ERRORS_PATH / f"fail_{data_col}_{by_name}_{df1_name}_vs_{df2_name}.csv"
+    expected_errors_path = (
+        EXPECTED_ERRORS_DIR
+        / f"expected_errors_{data_col}_{by_name}_{df1_name}_vs_{df2_name}.csv"
     )
-    expected_aggregation_errors = pd.read_csv(expected_error_path).set_index(by)
+    expected_aggregation_errors = pd.read_csv(expected_errors_path).set_index(by)
     # the commented out lines here are here to help
     # try:
     pd.testing.assert_index_equal(
