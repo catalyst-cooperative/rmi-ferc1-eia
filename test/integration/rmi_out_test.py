@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 PK_UTILS = ["report_year", "data_source", "utility_id_pudl"]
 PK_PLANTS = ["report_year", "data_source", "utility_id_pudl", "plant_id_eia"]
-PATH_FAIL = pudl_rmi.INPUTS_DIR / "validation"
+EXPECTED_ERRORS_PATH = pudl_rmi.INPUTS_DIR / "expected_errors"
 
 
 @pytest.mark.parametrize(
@@ -41,7 +41,7 @@ def test_pudl_engine(pudl_engine, table_name):
 def test_ppl_out(rmi_out, request):
     """Test generation of the EIA Plant Parts List."""
     clobber = not request.config.getoption("--cached-plant-parts-eia")
-    ppl = rmi_out.grab_plant_part_list(clobber=clobber)
+    ppl = rmi_out.plant_part_list(clobber=clobber)
     assert not ppl.empty
     for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
         if ppl_df in rmi_out.pudl_out._dfs:
@@ -51,27 +51,27 @@ def test_ppl_out(rmi_out, request):
 def test_deprish_out(rmi_out, request):
     """Test compilation of depreciation data."""
     clobber = not request.config.getoption("--cached-deprish")
-    deprish = rmi_out.grab_deprish(clobber=clobber)
+    deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
 
 
 def test_deprish_to_eia_out(rmi_out, request):
     """Test fuzzy matching of depreciation data to EIA Plant Parts List."""
     clobber = not request.config.getoption("--cached-deprish-eia")
-    deprish_to_eia = rmi_out.grab_deprish_to_eia(clobber=clobber)
+    deprish_to_eia = rmi_out.deprish_to_eia(clobber=clobber)
     assert not deprish_to_eia.empty
 
 
 def test_ferc1_to_eia(rmi_out, request):
     """Test linkage of FERC 1 data to EIA PPL using record linkage."""
     clobber = not request.config.getoption("--cached-ferc1-eia")
-    ferc1_to_eia = rmi_out.grab_ferc1_to_eia(clobber=clobber)
+    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber)
     assert not ferc1_to_eia.empty
 
 
 def test_deprish_to_ferc1(rmi_out):
     """Test linkage of Depriciation data to FERC 1 data."""
-    deprish_to_ferc1 = rmi_out.grab_deprish_to_ferc1(clobber=True)
+    deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True)
     assert not deprish_to_ferc1.empty
 
 
@@ -94,8 +94,8 @@ def agg_test_data(
     """
     return (
         pd.merge(
-            group_sum_col(df1, data_col=data_col, by=by),
-            group_sum_col(df2, data_col=data_col, by=by),
+            group_sum_col(df1.pipe(_add_data_source), data_col=data_col, by=by),
+            group_sum_col(df2.pipe(_add_data_source), data_col=data_col, by=by),
             right_index=True,
             left_index=True,
             suffixes=("_1", "_2"),
@@ -150,46 +150,51 @@ def _add_data_source(df):
 @pytest.mark.parametrize(
     "df1_name,df2_name,data_col,by_name",
     [
-        ("grab_deprish", "grab_deprish_to_eia", "plant_balance_w_common", "utilities"),
         (
-            "grab_deprish",
-            "grab_deprish_to_eia",
-            "plant_balance_w_common",
-            "plants",
-        ),
-        (
-            "grab_deprish_to_eia",
-            "grab_deprish_to_ferc1",
+            "deprish",
+            "deprish_to_eia",
             "plant_balance_w_common",
             "utilities",
         ),
         (
-            "grab_deprish_to_eia",
-            "grab_deprish_to_ferc1",
+            "deprish",
+            "deprish_to_eia",
             "plant_balance_w_common",
             "plants",
         ),
         (
-            "grab_deprish",
-            "grab_deprish_to_ferc1",
+            "deprish_to_eia",
+            "deprish_to_ferc1",
             "plant_balance_w_common",
             "utilities",
         ),
         (
-            "grab_deprish",
-            "grab_deprish_to_ferc1",
+            "deprish_to_eia",
+            "deprish_to_ferc1",
             "plant_balance_w_common",
             "plants",
         ),
         (
-            "grab_ferc1_to_eia",
-            "grab_deprish_to_ferc1",
+            "deprish",
+            "deprish_to_ferc1",
+            "plant_balance_w_common",
+            "utilities",
+        ),
+        (
+            "deprish",
+            "deprish_to_ferc1",
+            "plant_balance_w_common",
+            "plants",
+        ),
+        (
+            "ferc1_to_eia",
+            "deprish_to_ferc1",
             "capex_total",
             "utilities",
         ),
         (
-            "grab_ferc1_to_eia",
-            "grab_deprish_to_ferc1",
+            "ferc1_to_eia",
+            "deprish_to_ferc1",
             "capex_total",
             "plants",
         ),
@@ -246,9 +251,9 @@ def test_consistency_of_data_stages(
             "This test only takes `plants` or `utilities` as an argument for `by_name`"
         )
 
-    test_stages = agg_test_data(
-        df1=rmi_out.__getattribute__(df1_name)().pipe(_add_data_source),
-        df2=rmi_out.__getattribute__(df2_name)().pipe(_add_data_source),
+    agg_test = agg_test_data(
+        df1=rmi_out.__getattribute__(df1_name)(),
+        df2=rmi_out.__getattribute__(df2_name)(),
         data_col=data_col,
         by=by,
     )
@@ -257,21 +262,18 @@ def test_consistency_of_data_stages(
     # effectively propegated through each of these stages that require a match
     # to EIA. the `data_ratio` column being null is an indication that either df1
     # or df2 has a null data_col.
-    actual_aggregation_errors = test_stages[
-        ~test_stages.data_isclose & test_stages.data_ratio.notnull()
+    actual_aggregation_errors = agg_test[
+        ~agg_test.data_isclose & agg_test.data_ratio.notnull()
     ]
 
-    df1_name_simple = df1_name.replace("grab_", "")
-    df2_name_simple = df2_name.replace("grab_", "")
     logger.info(
-        f"Failures for {data_col} by {by_name} btwn {df1_name_simple} "
-        f"and {df2_name_simple}: {len(actual_aggregation_errors)}"
+        f"Failures for {data_col} by {by_name} btwn {df1_name} "
+        f"and {df2_name}: {len(actual_aggregation_errors)}"
     )
-    fail_path = (
-        PATH_FAIL / f"fail_{data_col}_{by_name}_{df1_name_simple}_vs_"
-        f"{df2_name_simple}.csv"
+    expected_error_path = (
+        EXPECTED_ERRORS_PATH / f"fail_{data_col}_{by_name}_{df1_name}_vs_{df2_name}.csv"
     )
-    expected_aggregation_errors = pd.read_csv(fail_path).set_index(by)
+    expected_aggregation_errors = pd.read_csv(expected_error_path).set_index(by)
     # the commented out lines here are here to help
     # try:
     pd.testing.assert_index_equal(
@@ -281,4 +283,4 @@ def test_consistency_of_data_stages(
         check_order=False,
     )
     # except AssertionError:
-    #     actual_aggregation_errors.reset_index()[by].to_csv(fail_path, index=False)
+    #     actual_aggregation_errors.reset_index()[by].to_csv(expected_error_path, index=False)

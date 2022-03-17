@@ -55,14 +55,14 @@ class Output:
             )
 
     # @profile
-    def grab_plant_part_list(self, clobber=False):
+    def plant_part_list(self, clobber=False):
         """
         Get the EIA plant-parts; generate it or get if from a file.
 
         If you generate the PPE, it will be saved at the file path given. The
         EIA plant-parts is generated via the pudl_out object.
 
-        TODO: Change to ``grab_plant_parts_eia()`` when there aren't a bunch of
+        TODO: Change to ``plant_parts_eia()`` when there aren't a bunch of
         branches using these bbs.
 
         Args:
@@ -87,7 +87,7 @@ class Output:
         return plant_parts_eia
 
     # @profile
-    def grab_deprish(self, clobber=False):
+    def deprish(self, clobber=False):
         """
         Generate or grab the cleaned deprecaition studies.
 
@@ -108,7 +108,7 @@ class Output:
         return deprish
 
     # @profile
-    def grab_deprish_to_eia(
+    def deprish_to_eia(
         self,
         clobber: bool = False,
         clobber_deprish: bool = False,
@@ -141,10 +141,8 @@ class Output:
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber_any:
             deprish_eia = pudl_rmi.connect_deprish_to_eia.execute(
-                deprish=self.grab_deprish(clobber=clobber_deprish),
-                plant_parts_eia=self.grab_plant_part_list(
-                    clobber=clobber_plant_parts_eia
-                ),
+                deprish=self.deprish(clobber=clobber_deprish),
+                plant_parts_eia=self.plant_part_list(clobber=clobber_plant_parts_eia),
                 save_to_xlsx=save_to_xlsx,
             )
             deprish_eia.to_pickle(file_path)
@@ -152,7 +150,7 @@ class Output:
             deprish_eia = pd.read_pickle(file_path)
         return deprish_eia
 
-    def grab_ferc1_to_eia(self, clobber=False, clobber_plant_parts_eia=False):
+    def ferc1_to_eia(self, clobber=False, clobber_plant_parts_eia=False):
         """
         Generate or grab a connection between FERC1 and EIA.
 
@@ -177,7 +175,7 @@ class Output:
             )
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
                 self.pudl_out,
-                self.grab_plant_part_list(clobber=clobber_plant_parts_eia),
+                self.plant_part_list(clobber=clobber_plant_parts_eia),
             )
             # export
             ferc1_eia.to_pickle(file_path)
@@ -187,7 +185,7 @@ class Output:
         return ferc1_eia
 
     # @profile
-    def grab_deprish_to_ferc1(
+    def deprish_to_ferc1(
         self,
         clobber=False,
         clobber_plant_parts_eia=False,
@@ -235,11 +233,9 @@ class Output:
                 f"{file_path}. Generating a new output."
             )
             deprish_ferc1 = pudl_rmi.connect_deprish_to_ferc1.execute(
-                plant_parts_eia=self.grab_plant_part_list(
-                    clobber=clobber_plant_parts_eia
-                ),
-                deprish_eia=self.grab_deprish_to_eia(clobber=clobber_deprish_eia),
-                ferc1_eia=self.grab_ferc1_to_eia(clobber=clobber_ferc1_eia),
+                plant_parts_eia=self.plant_part_list(clobber=clobber_plant_parts_eia),
+                deprish_eia=self.deprish_to_eia(clobber=clobber_deprish_eia),
+                ferc1_eia=self.ferc1_to_eia(clobber=clobber_ferc1_eia),
             )
             # export
             deprish_ferc1.to_pickle(file_path)
@@ -249,7 +245,7 @@ class Output:
             deprish_ferc1 = pd.read_pickle(file_path)
         return deprish_ferc1
 
-    def grab_all(self, clobber_all=False):
+    def all(self, clobber_all=False):
         """
         Gotta catch em all. Get all of the RMI outputs.
 
@@ -279,11 +275,11 @@ class Output:
             pandas.DataFrame: a table of the conneciton between the
                 depreciation studies and the FERC1 plants.
         """
-        ppl = self.grab_plant_part_list(clobber=clobber_all)
-        d = self.grab_deprish(clobber=clobber_all)
-        de = self.grab_deprish_to_eia(clobber=clobber_all)
-        fe = self.grab_ferc1_to_eia(clobber=clobber_all)
-        df = self.grab_deprish_to_ferc1(clobber=clobber_all)
+        ppl = self.plant_part_list(clobber=clobber_all)
+        d = self.deprish(clobber=clobber_all)
+        de = self.deprish_to_eia(clobber=clobber_all)
+        fe = self.ferc1_to_eia(clobber=clobber_all)
+        df = self.deprish_to_ferc1(clobber=clobber_all)
         return ppl, d, de, fe, df
 
 
@@ -316,22 +312,22 @@ def main():
         fill_net_gen=True,
     )
     rmi_out = Output(pudl_out)
-    ppl = rmi_out.grab_plant_part_list(clobber=True)
+    ppl = rmi_out.plant_part_list(clobber=True)
     del ppl
     for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
         if ppl_df in rmi_out.pudl_out._dfs:
             del rmi_out.pudl_out._dfs[ppl_df]
 
-    deprish = rmi_out.grab_deprish(clobber=True)
+    deprish = rmi_out.deprish(clobber=True)
     del deprish
 
-    deprish_to_eia = rmi_out.grab_deprish_to_eia(clobber=True)
+    deprish_to_eia = rmi_out.deprish_to_eia(clobber=True)
     del deprish_to_eia
 
-    ferc1_to_eia = rmi_out.grab_ferc1_to_eia(clobber=True)
+    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=True)
     del ferc1_to_eia
 
-    deprish_to_ferc1 = rmi_out.grab_deprish_to_ferc1(clobber=True)
+    deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True)
     del deprish_to_ferc1
 
 
