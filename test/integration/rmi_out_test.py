@@ -274,9 +274,12 @@ def test_consistency_of_data_stages(
         f"{df2_name_simple}.csv"
     )
     fails_expected = pd.read_csv(fail_path).set_index(by)
+    # try:
     pd.testing.assert_index_equal(
         fails.index,
         fails_expected.index,
         exact="equiv",
         check_order=False,
     )
+    # except AssertionError:
+    #     fails.reset_index()[by].to_csv(fail_path, index=False)
