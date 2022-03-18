@@ -100,7 +100,7 @@ def _pct_diff(df, col):
     ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
 
 
-def is_best_match(df):
+def is_best_match(df):  # not currently included!
     """Return a string indicating whether FERC-EIA match is immediately passable.
 
     The process of manually checking all of the FERC-EIA matches made by the machine
@@ -215,18 +215,6 @@ def _prep_ferc_eia(ferc1_eia, pudl_out):
     check_connections.insert(19, "utility_name_eia", check_connections.utility_name)
     check_connections = check_connections.drop(columns=["utility_name"])
 
-    # Add column with excel formula to check if the override record id is the same
-    # as the AI assigend id.
-    check_connections = check_connections.reset_index().assign(
-        used_match_record=lambda x: (  # can this be moved to prep?
-            "=(F"
-            + (x.index + 2).astype("str")
-            + "=K"
-            + (x.index + 2).astype("str")
-            + ")"
-        )
-    )
-
     return check_connections
 
 
@@ -267,7 +255,7 @@ def _prep_deprish(deprish, pudl_out):
     return deprish_out
 
 
-def generate_input_dfs(pudl_out, rmi_out):
+def _generate_input_dfs(pudl_out, rmi_out):
     """Load and prep and all the input tables."""
     logger.debug("Generating inputs")
     inputs_dict = {
@@ -294,6 +282,26 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years):
         ), "Your subset is more than 500,000 rows...this \
             is going to make excel reaaalllllyyy slow. Try entering a smaller utility \
             or year subset"
+
+        if df_name == "ferc_eia":
+            # Add column with excel formula to check if the override record id is the
+            # same as the AI assigend id. Doing this here instead of prep_ferc_eia
+            # because it is based on index number which is changes when you take a
+            # subset of the data.
+            subset_df = (
+                subset_df.reset_index()
+                .assign(
+                    used_match_record=lambda x: (  # can this be moved to prep?
+                        "=(J"
+                        + (x.index + 2).astype("str")
+                        + "=F"
+                        + (x.index + 2).astype("str")
+                        + ")"
+                    )
+                )
+                .drop(columns=["index"])
+            )
+
         util_year_subset_dict[f"{df_name}_util_year_subset"] = subset_df
 
     return util_year_subset_dict
