@@ -57,7 +57,7 @@ relevant_cols_ferc_eia = [
     "installation_year_eia",
 ]
 
-relevant_cols_mul = [
+relevant_cols_ppl = [
     "record_id_eia",
     "report_year",
     "utility_id_pudl",
@@ -232,7 +232,7 @@ def _prep_ppl(ppl, pudl_out):
             on=["utility_id_eia", "report_date"],
             how="left",
             validate="m:1",
-        )[relevant_cols_mul]
+        )[relevant_cols_ppl]
         .copy()
     )
 
@@ -339,75 +339,37 @@ def generate_override_tools(pudl_out, rmi_out, util_dict, years):
         _output_override_sheet(util_year_subset_dict, util_name)
 
 
-# Removed deprish for now b/c not working
-def output_override_tools(ferc_eia, ppl, deprish, util_ids, util_name, years, pudl_out):
-    """Create output spreadsheets based on specified utilities and years.
-
-    This is the function that brings all the steps together. It loads the input tables,
-    preps them, segements them by year and utility, and outputs them into spreadsheets
-    in a folder called overrides.
-
-    """
-    logger.info(f"Making override file for {util_name.upper()}")
-
-    # Load, prep and get subsets for each table: FERC-EIA, PPL, Deprish
-    logger.info("Loading ferc-eia subset")
-    ferc_eia_subset = (
-        ferc_eia.pipe(_prep_ferc_eia, pudl_out)
-        .pipe(_get_util_year_subsets, util_ids, years)
-        .reset_index(drop=True)
-        # Create a column that produces an excel function telling the user whether their
-        # selected match matches that used by the record linkage ML or not.
-        .assign(
-            used_match_record=lambda x: (  # can this be moved to prep?
-                "=(F"
-                + (x.index + 2).astype("str")
-                + "=K"
-                + (x.index + 2).astype("str")
-                + ")"
-            )
-        )
-    )
-
-    logger.info("Loading plant part list subset")
-    ppl_subset = ppl.pipe(_prep_ppl, pudl_out).pipe(
-        _get_util_year_subsets, util_ids, years
-    )
-
-    logger.info("Loading depreciation subset")
-    deprish_subset = _get_util_year_subsets(deprish, util_ids, years, deprish=True)
-
-    # Create a dict of each df and the tab name you want to give it in the output sheet
-    tool_dict = {
-        "ferc_eia_util_subset": ferc_eia_subset,
-        "mul_util_subset": ppl_subset,
-        "deprish_util_subset": deprish_subset,
-    }
-
-    # Make sure overrides dir exists
-    if not os.path.isdir(output_path / "overrides"):
-        os.mkdir(output_path / "overrides")
-
-    # Enable unique file names and put all files in directory called overrides
-    new_output_path = (
-        output_path / "overrides" / f"{util_name}_fix_FERC-EIA_overrides.xlsx"
-    )
-
-    # Output file to a folder called overrides
-    logger.info("Outputing table subsets to tabs\n")
-    writer = pd.ExcelWriter(new_output_path, engine="xlsxwriter")
-    for tab, df in tool_dict.items():
-        df.to_excel(writer, sheet_name=tab, index=False)
-    writer.save()
-
-
 # --------------------------------------------------------------------------------------
 # Upload Changes to Training Data
 # --------------------------------------------------------------------------------------
 
 
+def _check_id_consistency(id_type, df, actual_ids, error_message):
+    """Check for rogue FERC or EIA ids that don't exist."""
+    logger.debug(f"Checking {id_type} record id consistency for {error_message}")
+
+    if id_type not in ["ferc", "eia"]:
+        raise ValueError("id_type must be either 'ferc' or 'eia'.")
+    if id_type == "eia":
+        id_col = "record_id_eia_override_1"
+    elif id_type == "ferc":
+        id_col = "record_id_ferc1"
+
+    assert (
+        len(bad_ids := df[~df[id_col].isin(actual_ids)][id_col].to_list()) == 0
+    ), f"{id_col} {error_message}: {bad_ids}"
+
+
+# Also check for duplicate id values and utility id consistency etc.
+
+
 def validate_override_fixes(
-    validated_connections, ferc1_eia, training_data, expect_override_overrides=False
+    validated_connections,
+    utils_eia860,
+    ppl,
+    ferc1_eia,
+    training_data,
+    expect_override_overrides=False,
 ):
     """Process the verified and/or fixed matches.
 
@@ -434,81 +396,104 @@ def validate_override_fixes(
     logger.info("Validating overrides")
 
     # Make sure there are no rouge descriptions in the verified field (besides TRUE)
-    match_language = validated_connections.verified.unique()
+    match_language = validated_connections.verified.dropna().unique()
     assert (
-        len(outliers := [x for x in match_language if x not in [True, False, pd.NA]])
-        == 0
-    ), f"All correct matches must be marked TRUE; found {outliers}"
+        len(outliers := [x for x in match_language if x not in [1, 0]]) == 0
+    ), f"All validated matches/overrides must be marked 1; found {outliers}"
 
-    # Get TRUE records
-    true_connections = validated_connections[validated_connections["verified"]].copy()
+    # Get records with an override
+    true_connections = validated_connections[
+        validated_connections["verified"] == 1
+    ].copy()
 
-    # Make sure that the eia and ferc ids haven't been tampered with
+    # From validated records, get only records with an override
+    only_overrides = (
+        true_connections.dropna(subset=["record_id_eia_override_1"])
+        .reset_index()
+        .copy()
+    )
+
+    # Make sure that the override EIA ids actually match those in the original FERC-EIA
+    # record linkage.
+    actual_eia_ids = ppl.record_id_eia.unique()
+    _check_id_consistency(
+        "eia", only_overrides, actual_eia_ids, "values that don't exist"
+    )
+
+    # It's unlikely that this changed, but check FERC id too just in case!
+    actual_ferc_ids = ferc1_eia.record_id_ferc1.unique()
+    _check_id_consistency(
+        "ferc", true_connections, actual_ferc_ids, "values that don't exist"
+    )
+
+    # Make sure there are no duplicate EIA id overrides
+    logger.debug("Checking for duplicate override ids")
     assert (
         len(
-            bad_eia := [
-                x
-                for x in true_connections.dropna().record_id_eia_override_1.unique()
-                if x not in ferc1_eia.record_id_eia.unique()
+            override_dups := only_overrides[
+                only_overrides["record_id_eia_override_1"].duplicated(keep=False)
             ]
         )
         == 0
-    ), f"Found record_id_eia_override_1 values that aren't in the existing FERC-EIA \
-          connection: {bad_eia}"
+    ), f"Found record_id_eia_override_1 duplicates: \
+    {override_dups.record_id_eia_override_1.unique()}"
+
+    # Make sure the EIA utility id from the override matches the PUDL id from the FERC
+    # record. To do this, we'll make a dictionary mapping PUDL id to a list of EIA ids
+    logger.debug("Checking for mismatched utility ids")
+    assert ~utils_eia860.duplicated(subset=["report_year", "record_id_eia"]).any()
+    # Make a dictionary of PUDL id to EIA id (in some cases it is 1:m)
+    eia_id_list_series = utils_eia860.groupby("utility_id_pudl").apply(
+        lambda x: x.utility_id_eia.unique().tolist()
+    )
+    eia_id_dict = dict(zip(eia_id_list_series.index, eia_id_list_series))
+    # Add a column that extracts the utility id eia from record_id_eia_override_1
+    only_overrides[
+        "utility_id_eia_override"
+    ] = only_overrides.record_id_eia_override_1.str.extract(r"(\d+$)")
+    # For some reason I can't just add .astype("Int64 to the prior step...")
+    only_overrides[
+        "utility_id_eia_override"
+    ] = only_overrides.utility_id_eia_override.astype("Int64")
+
     assert (
         len(
-            bad_ferc := [
-                x
-                for x in true_connections.dropna().record_id_ferc1.unique()
-                if x not in ferc1_eia.record_id_ferc1.unique()
+            mismatched_utilities := only_overrides[
+                ~only_overrides.apply(
+                    lambda x: x.utility_id_eia_override
+                    in eia_id_dict[x.utility_id_pudl],
+                    axis=1,
+                )
             ]
         )
         == 0
-    ), f"Found record_id_ferc1 values that aren't in the existing FERC-EIA \
-        connection: {bad_ferc}"
+    ), f"Found mismatched utilities: \
+    {mismatched_utilities.utility_id_eia_override_1}"
 
-    # Make sure the year in the suggested eia id overrides match the year in the
-    # report_year column
-    year_ser = true_connections.record_id_eia_override_1.str.extract(r"(_20\d{2})")[
+    # Make sure the year in the EIA id overrides match the year in the report_year
+    # column.
+    logger.debug("Checking that year in override id matches report year")
+    year_ser = only_overrides.record_id_eia_override_1.str.extract(r"(_20\d{2})")[
         0
     ].str.replace("_", "")
     year_ser_int = pd.to_numeric(year_ser, errors="coerce").astype("Int64")
     assert (
-        len(bad_eia := true_connections["report_year"].compare(year_ser_int)) == 0
+        len(bad_eia_year := only_overrides["report_year"].compare(year_ser_int)) == 0
     ), f"Found record_id_eia_override_1 values that don't correspond to the right \
-        report year: {bad_eia}"
+        report year:\
+        {[only_overrides.iloc[x].record_id_eia_override_1 for x in bad_eia_year.index]}"
 
+    # If you don't expect to override values that have already been overridden, make
+    # sure the ids you fixed aren't already in the training data.
     if not expect_override_overrides:
-        # Make sure that these aren't already in the overrides (this should be
-        # impossible, but just in case)
-        assert (
-            len(
-                bad_eia := [
-                    x
-                    for x in true_connections.record_id_eia_override_1.unique()
-                    if x
-                    in training_data.dropna(
-                        subset=["record_id_eia"]
-                    ).record_id_eia.unique()
-                ]
-            )
-            == 0
-        ), f"Found record_id_eia_override_1 values that are already in the existing \
-            FERC-EIA training data: {bad_eia}"
-        assert (
-            len(
-                bad_ferc := [
-                    x
-                    for x in true_connections.record_id_ferc1.unique()
-                    if x
-                    in training_data.dropna(
-                        subset=["record_id_eia"]
-                    ).record_id_ferc1.unique()
-                ]
-            )
-            == 0
-        ), f"Found record_id_ferc1 values that are already in the existing FERC-EIA \
-            training data: {bad_ferc}"
+        existing_training_eia_ids = training_data.record_id_eia.dropna().unique()
+        _check_id_consistency(
+            "eia", only_overrides, existing_training_eia_ids, "already in training"
+        )
+        existing_training_ferc_ids = training_data.record_id_ferc1.dropna().unique()
+        _check_id_consistency(
+            "ferc", true_connections, existing_training_ferc_ids, "already in training"
+        )
 
     return true_connections
 
