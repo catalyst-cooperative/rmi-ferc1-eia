@@ -1,10 +1,11 @@
 """A module for data validation and QA/QC of the RMI outputs."""
 
 import logging
+from typing import List
+
 import numpy as np
 import pandas as pd
 import sqlalchemy as sa
-from typing import List
 
 logger = logging.getLogger(__name__)
 
