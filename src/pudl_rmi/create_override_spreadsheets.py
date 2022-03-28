@@ -9,8 +9,8 @@ humans might be able to make sense of based on past or surrounding records.
 
 This module creates an output spreadsheet, based on a certain utility, that makes the
 matching and machine-matched human validation process much easier. It also contains
-functions that will read those new/updated/validated matches from the spreadsheet and
-incorporate them into the existing training data.
+functions that will read those new/updated/validated matches from the spreadsheet,
+validate them, and incorporate them into the existing training data.
 
 """
 import logging
@@ -85,7 +85,7 @@ relevant_cols_ppl = [
 
 output_path = pathlib.Path().cwd().parent / "outputs"
 fixed_overrides_path = pathlib.Path().cwd().parent / "add_to_training"
-training_path = pathlib.Path().cwd().parent / "inputs" / "train_ferc1_to_eia_copy.csv"
+training_path = pathlib.Path().cwd().parent / "inputs" / "train_ferc1_eia.csv"
 training_data = pd.read_csv(training_path)
 
 # --------------------------------------------------------------------------------------
@@ -322,7 +322,18 @@ def _output_override_sheet(util_year_subset_dict, util_name):
 
 
 def generate_override_tools(pudl_out, rmi_out, util_dict, years):
-    """Generate inputs and generate override sheets."""
+    """Generate inputs and generate override sheets.
+
+    Args:
+        pudl_out (PudlTabl): the pudl_out object generated in a notebook and passed in.
+        rmi_out (Output): the rmi_out object generated in a notebook and passed in.
+        util_dict (dict): A dictionary with keys that are the names of utility
+            parent companies and values that are lists of subsidiary utility_id_eia
+            values. EIA values are used instead of PUDL in this case because PUDL values
+            are subject to change.
+        years (list): A list of the years you'd like to add to the override sheets.
+
+    """
     # Generate full input tables
     inputs_dict = _generate_input_dfs(pudl_out, rmi_out)
 
@@ -345,7 +356,18 @@ def generate_override_tools(pudl_out, rmi_out, util_dict, years):
 
 
 def _check_id_consistency(id_type, df, actual_ids, error_message):
-    """Check for rogue FERC or EIA ids that don't exist."""
+    """Check for rogue FERC or EIA ids that don't exist.
+
+    Args:
+        id_type (str): A string, either 'ferc' or 'eia' indicating whether to check
+            ferc or eia id columns.
+        actual_ids (list): A list of the ferc or eia ids that are valid and come from
+            either the ppl or official ferc-eia record linkage.
+        error_message (str): A short string to indicate the type of error you're
+            checking for. This could be looking for values that aren't in the official
+            list or values that are already in the training data.
+
+    """
     logger.debug(f"Checking {id_type} record id consistency for {error_message}")
 
     if id_type not in ["ferc", "eia"]:
@@ -360,10 +382,7 @@ def _check_id_consistency(id_type, df, actual_ids, error_message):
     ), f"{id_col} {error_message}: {bad_ids}"
 
 
-# Also check for duplicate id values and utility id consistency etc.
-
-
-def validate_override_fixes(
+def _validate_override_fixes(
     validated_connections,
     utils_eia860,
     ppl,
@@ -375,19 +394,25 @@ def validate_override_fixes(
 
     Args:
         validated_connections (pd.DataFrame): A dataframe in the add_to_training
-            directory that is ready to be added to validated and subsumed into the
+            directory that is ready to be added to be validated and subsumed into the
             training data.
+        utils_eia860 (pd.DataFrame): A dataframe resulting from the
+            pudl_out.utils_eia860() function.
         ferc1_eia (pd.DataFrame): The current FERC-EIA table
         expect_override_overrides (boolean): Whether you expect the tables to have
             overridden matches already in the training data.
     Raises:
-        AssertionError: If there are ferc record ids that aren't in the original
-            FERC-EIA connection
-        AssertionError: If there are eia override id records that aren't in the original
-            FERC-EIA connection
-        AssertionError: If there are eia override id records that don't correspond to
-            the correct report year
-        AssertionError: If you didn't expect to override overrides but the data does
+        AssertionError: If there are EIA override id records that aren't in the original
+            FERC-EIA connection.
+        AssertionError: If there are FERC record ids that aren't in the original
+            FERC-EIA connection.
+        AssertionError: If there are EIA override ids that are duplicated throughout the
+            override document.
+        AssertionError: If the utility id in the EIA override id doesn't match the pudl
+            id cooresponding with the FERC record.
+        AssertionError: If there are EIA override id records that don't correspond to
+            the correct report year.
+        AssertionError: If you didn't expect to override overrides but the data does.
     Returns:
         pd.DataFrame: The validated FERC-EIA dataframe you're trying to add to the
             training data.
@@ -441,16 +466,23 @@ def validate_override_fixes(
     # Make sure the EIA utility id from the override matches the PUDL id from the FERC
     # record. To do this, we'll make a dictionary mapping PUDL id to a list of EIA ids
     logger.debug("Checking for mismatched utility ids")
-    assert ~utils_eia860.duplicated(subset=["report_year", "record_id_eia"]).any()
+    assert ~utils_eia860.duplicated(subset=["report_date", "utility_id_eia"]).any()
     # Make a dictionary of PUDL id to EIA id (in some cases it is 1:m)
     eia_id_list_series = utils_eia860.groupby("utility_id_pudl").apply(
         lambda x: x.utility_id_eia.unique().tolist()
     )
     eia_id_dict = dict(zip(eia_id_list_series.index, eia_id_list_series))
-    # Add a column that extracts the utility id eia from record_id_eia_override_1
+    # Add a column that extracts the utility id eia from record_id_eia_override_1. This
+    # gets a little wonky because sometimes it ends with the eia id: _55555 and
+    # sometimes it ends with a string: _55555_retired. This regex gets both and
+    # converts them to integers.
     only_overrides[
         "utility_id_eia_override"
-    ] = only_overrides.record_id_eia_override_1.str.extract(r"(\d+$)")
+    ] = only_overrides.record_id_eia_override_1.str.extract(r"(\d+_*[a-z]*$)")[
+        0
+    ].str.extract(
+        r"(\d+)"
+    )
     # For some reason I can't just add .astype("Int64 to the prior step...")
     only_overrides[
         "utility_id_eia_override"
@@ -468,7 +500,7 @@ def validate_override_fixes(
         )
         == 0
     ), f"Found mismatched utilities: \
-    {mismatched_utilities.utility_id_eia_override_1}"
+    {mismatched_utilities.record_id_eia_override_1}"
 
     # Make sure the year in the EIA id overrides match the year in the report_year
     # column.
@@ -498,39 +530,52 @@ def validate_override_fixes(
     return true_connections
 
 
-def add_to_training(new_overrides, training_data):
+def _add_to_training(new_overrides, training_data):
     """Add the new overrides to the old override sheet."""
     logger.info("Combining all new overrides with existing training data")
     training_data_out = training_data.append(
-        new_overrides[["record_id_eia", "record_id_ferc1", "signature_1", "notes"]]
+        new_overrides[
+            ["record_id_eia", "record_id_ferc1", "signature_1", "signature_2", "notes"]
+        ]
     ).set_index(["record_id_eia", "record_id_ferc1"])
 
     return training_data_out
 
 
-def validate_and_add_to_training(ferc1_eia, expect_override_overrides=False):
+def validate_and_add_to_training(pudl_out, rmi_out, expect_override_overrides=False):
     """Validate, combine, and add overrides to the training data.
 
     Validating and combinging the records so you only have to loop through the files
     once. Runs the validate_override_fixes() function and add_to_training.
 
     Args:
+        pudl_out (PudlTabl): the pudl_out object generated in a notebook and passed in.
+        rmi_out (Output): the rmi_out object generated in a notebook and passed in.
         expect_override_overrides (bool): This value is explicitly assigned at the top
             of the notebook.
-        ferc1_eia (pandas.DataFrame): The current FERC-EIA connection table, not the
-            overrides. This is passed to the validate_override_fixes() function to
-            verify that a record in the override sheet shows up in the FERC-EIA sheet.
 
     Returns:
         pandas.DataFrame: A DataFrame with all of the new overrides combined.
     """
+    # Define all relevant tables
+    ferc1_eia = rmi_out.grab_ferc1_to_eia()
+    ppl = rmi_out.grab_plant_part_list().reset_index()
+    utils_df = pudl_out.utils_eia860()
+
     all_overrides = pd.DataFrame(
-        columns=["record_id_eia", "record_id_ferc1", "signature_1", "notes"]
+        columns=[
+            "record_id_eia",
+            "record_id_ferc1",
+            "signature_1",
+            "signature_2",
+            "notes",
+        ]
     )
 
     # Loop through all the files, validate, and combine them.
     all_files = os.listdir(fixed_overrides_path)
     good_files = [file for file in all_files if file.endswith(".xlsx")]
+
     for file in good_files:
         logger.info(f"Processing fixes in {file}")
         file_df = (
@@ -539,7 +584,9 @@ def validate_and_add_to_training(ferc1_eia, expect_override_overrides=False):
             )
             .assign(verified=lambda x: x.verified.astype("boolean").fillna(False))
             .pipe(
-                validate_override_fixes,
+                _validate_override_fixes,
+                utils_df,
+                ppl,
                 ferc1_eia,
                 training_data,
                 expect_override_overrides=expect_override_overrides,
@@ -552,12 +599,18 @@ def validate_and_add_to_training(ferc1_eia, expect_override_overrides=False):
             )
         )
         all_overrides = all_overrides.append(
-            file_df[["record_id_eia", "record_id_ferc1", "signature_1", "notes"]]
+            file_df[
+                [
+                    "record_id_eia",
+                    "record_id_ferc1",
+                    "signature_1",
+                    "signature_2",
+                    "notes",
+                ]
+            ]
         )
 
     # Add the records to the training data
     logger.info("Adding overrides to training data")
-    new_training_df = add_to_training(all_overrides, training_data)
+    new_training_df = _add_to_training(all_overrides, training_data)
     new_training_df.to_csv(training_path)
-
-    return new_training_df
