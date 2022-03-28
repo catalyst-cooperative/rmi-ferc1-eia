@@ -219,7 +219,7 @@ def _prep_ferc_eia(ferc1_eia, pudl_out):
 
 
 def _prep_ppl(ppl, pudl_out):
-    """Prep MUL for use in override output sheet pre-utility subgroups."""
+    """Prep PPL for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping Plant Parts Table")
 
     # Add utilty name eia and only take relevant columns
@@ -321,7 +321,7 @@ def _output_override_sheet(util_year_subset_dict, util_name):
     writer.save()
 
 
-def generate_override_tools(pudl_out, rmi_out, util_dict, years):
+def generate_override_tools(pudl_out, rmi_out, util_dict, years) -> None:
     """Generate inputs and generate override sheets.
 
     Args:
@@ -542,7 +542,9 @@ def _add_to_training(new_overrides, training_data):
     return training_data_out
 
 
-def validate_and_add_to_training(pudl_out, rmi_out, expect_override_overrides=False):
+def validate_and_add_to_training(
+    pudl_out, rmi_out, expect_override_overrides=False
+) -> None:
     """Validate, combine, and add overrides to the training data.
 
     Validating and combinging the records so you only have to loop through the files
