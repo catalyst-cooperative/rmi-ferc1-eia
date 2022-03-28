@@ -1,14 +1,22 @@
+![tox-pytest](https://github.com/catalyst-cooperative/rmi-ferc1-eia/actions/workflows/tox-pytest.yml/badge.svg)
+![codecov](https://img.shields.io/codecov/c/github/catalyst-cooperative/rmi-ferc1-eia)
+![code style](https://img.shields.io/badge/code%20style-black-000000.svg)
+
 This repository is a collaboration between RMI and Catalyst Cooperative to connect FERC
 Form 1 plant records, EIA plant records and depreciation study records at the most
 granular level.
 
 ## Installation
+
 To install the software in this repository, clone it to your computer using git. If
 you're authenticating using SSH:
+
 ```sh
 git clone git@github.com:catalyst-cooperative/rmi-ferc1-eia.git
 ```
+
 Or if you're authenticating via HTTPS:
+
 ```sh
 git clone https://github.com/catalyst-cooperative/rmi-ferc1-eia.git
 ```
@@ -86,10 +94,12 @@ overwrite the pre-processed data.
   from [The Turing Way](https://the-turing-way.netlify.app/welcome.html).
 
 ## Process Overview
+
 Below is a visual overview of the main processes in this repo:
 ![Design overview:](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/main/rmi_design.png?raw=true)
 
 Each of the outputs shown above have a dedicated module:
+
 * EIA Master Unit List: [`make_plant_parts_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/make_plant_parts_eia.py)
 * EIA & Depreciation Connected: [`connect_deprish_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_deprish_to_eia.py)
 * EIA & FERC Connected: [`connect_ferc1_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_ferc1_to_eia.py)

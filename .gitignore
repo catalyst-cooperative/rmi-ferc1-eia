@@ -9,3 +9,9 @@
 **/*.db
 **/*.pq
 **/*.swp
+.hypothesis
+.tox
+.env
+coverage.xml
+.coverage
+.vscode
