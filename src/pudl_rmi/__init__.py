@@ -10,7 +10,8 @@ import pudl_rmi.connect_deprish_to_ferc1
 import pudl_rmi.connect_ferc1_to_eia
 import pudl_rmi.coordinate
 import pudl_rmi.deprish
-import pudl_rmi.make_plant_parts_eia  # noqa: F401
+import pudl_rmi.make_plant_parts_eia
+import pudl_rmi.validate  # noqa: F401
 
 REPO_DIR = Path(__file__).resolve().parent.parent.parent
 INPUTS_DIR = Path(os.environ.get("PUDL_RMI_INPUTS_DIR", REPO_DIR / "inputs"))

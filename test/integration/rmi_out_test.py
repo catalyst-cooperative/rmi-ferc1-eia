@@ -94,8 +94,12 @@ def agg_test_data(
     """
     return (
         pd.merge(
-            group_sum_col(df1.pipe(_add_data_source), data_col=data_col, by=by),
-            group_sum_col(df2.pipe(_add_data_source), data_col=data_col, by=by),
+            group_sum_col(
+                df1.pipe(pudl_rmi.validate.add_data_source), data_col=data_col, by=by
+            ),
+            group_sum_col(
+                df2.pipe(pudl_rmi.validate.add_data_source), data_col=data_col, by=by
+            ),
             right_index=True,
             left_index=True,
             suffixes=("_1", "_2"),
@@ -124,27 +128,6 @@ def group_sum_col(df, data_col: str, by: List[str]) -> pd.DataFrame:
         .sum(min_count=1)
     )
     return summed_out
-
-
-def _add_data_source(df):
-    """
-    Add a data_source column with 'FERC' and 'PUC'.
-
-    The depreciation data includes a `data_source` column as a part of the
-    primary key of that data set. This is because there are sometimes we have
-    depreciation study from both `FERC` and `PUC` for the same utility and
-    plants. Because of this, in order to compare the FERC plant input tables to
-    the FERC-EIA-Depreciation tables we need to add *both* versions of the
-    depreciation `data_source`.
-    """
-    if "data_source" not in df:
-        df = pd.concat(
-            [
-                df.assign(data_source="PUC"),
-                df.assign(data_source="FERC"),
-            ]
-        )
-    return df
 
 
 @pytest.mark.parametrize(
