@@ -20,10 +20,12 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+import pudl_rmi
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-relevant_cols_ferc_eia = [
+RELEVANT_COLS_FERC_EIA = [
     "record_id_ferc1",
     "record_id_eia",
     "true_gran",
@@ -57,7 +59,7 @@ relevant_cols_ferc_eia = [
     "installation_year_eia",
 ]
 
-relevant_cols_ppl = [
+RELEVANT_COLS_PPL = [
     "record_id_eia",
     "report_year",
     "utility_id_pudl",
@@ -83,10 +85,12 @@ relevant_cols_ppl = [
     "heat_rate_mmbtu_mwh",
 ]
 
-output_path = pathlib.Path().cwd().parent / "outputs"
-fixed_overrides_path = pathlib.Path().cwd().parent / "add_to_training"
-training_path = pathlib.Path().cwd().parent / "inputs" / "train_ferc1_eia.csv"
-training_data = pd.read_csv(training_path)
+# not sure whether to add this to __init__ b/c not in input or outputs file...
+VALID_OVERRIDES_PATH = pathlib.Path().cwd().parent / "add_to_training"
+
+# Some of these DFs are defined in the functions themselves vs. as global variables.
+# I'm not sure which is best...
+TRAINING_DATA = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
 
 # --------------------------------------------------------------------------------------
 # Generate Override Tools
@@ -126,7 +130,7 @@ def is_best_match(df):  # not currently included!
 def _prep_ferc_eia(ferc1_eia, pudl_out):
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
-    check_connections = ferc1_eia[relevant_cols_ferc_eia].copy()
+    check_connections = ferc1_eia[RELEVANT_COLS_FERC_EIA].copy()
 
     # Add a column to tell whether it's a good match, who verified / made the match,
     # and any notes about weirdness.
@@ -232,7 +236,7 @@ def _prep_ppl(ppl, pudl_out):
             on=["utility_id_eia", "report_date"],
             how="left",
             validate="m:1",
-        )[relevant_cols_ppl]
+        )[RELEVANT_COLS_PPL]
         .copy()
     )
 
@@ -310,7 +314,7 @@ def _output_override_sheet(util_year_subset_dict, util_name):
     """Put three tables from in the inputs_dict into excel tabs and output."""
     # Enable unique file names and put all files in directory called overrides
     new_output_path = (
-        output_path / "overrides" / f"{util_name}_fix_FERC-EIA_overrides.xlsx"
+        pudl_rmi.OUTPUTS_DIR / "overrides" / f"{util_name}_fix_FERC-EIA_overrides.xlsx"
     )
     # Output file to a folder called overrides
     logger.info("Outputing table subsets to tabs\n")
@@ -337,8 +341,8 @@ def generate_override_tools(pudl_out, rmi_out, util_dict, years) -> None:
     inputs_dict = _generate_input_dfs(pudl_out, rmi_out)
 
     # Make sure overrides dir exists
-    if not os.path.isdir(output_path / "overrides"):
-        os.mkdir(output_path / "overrides")
+    if not os.path.isdir(pudl_rmi.OUTPUTS_DIR / "overrides"):
+        os.mkdir(pudl_rmi.OUTPUTS_DIR / "overrides")
 
     # For each utility, make an override sheet with the correct input table slices
     for util_name, util_id_eia_list in util_dict.items():
@@ -570,14 +574,14 @@ def validate_and_add_to_training(
     )
 
     # Loop through all the files, validate, and combine them.
-    all_files = os.listdir(fixed_overrides_path)
+    all_files = os.listdir(VALID_OVERRIDES_PATH)
     good_files = [file for file in all_files if file.endswith(".xlsx")]
 
     for file in good_files:
         logger.info(f"Processing fixes in {file}")
         file_df = (
             pd.read_excel(
-                (fixed_overrides_path / file), sheet_name="ferc_eia_util_subset"
+                (VALID_OVERRIDES_PATH / file), sheet_name="ferc_eia_util_subset"
             )
             .assign(verified=lambda x: x.verified.astype("boolean").fillna(False))
             .pipe(
@@ -610,4 +614,4 @@ def validate_and_add_to_training(
     # Add the records to the training data
     logger.info("Adding overrides to training data")
     new_training_df = _add_to_training(all_overrides, training_data)
-    new_training_df.to_csv(training_path)
+    new_training_df.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
