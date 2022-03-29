@@ -422,16 +422,19 @@ def _validate_override_fixes(
 
     """
     logger.info("Validating overrides")
-
+    # Make sure verified col is boolean
+    validated_connections = validated_connections.assign(
+        verified=lambda x: x.verified.astype("boolean").fillna(False)
+    )
     # Make sure there are no rouge descriptions in the verified field (besides TRUE)
     match_language = validated_connections.verified.dropna().unique()
     assert (
-        len(outliers := [x for x in match_language if x not in [1, 0]]) == 0
-    ), f"All validated matches/overrides must be marked 1; found {outliers}"
+        len(outliers := [x for x in match_language if x not in [True, False]]) == 0
+    ), f"All validated matches/overrides must be marked TRUE; found {outliers}"
 
     # From validated records, get only records with an override
     only_overrides = (
-        validated_connections[validated_connections["verified"] == 1]
+        validated_connections[validated_connections["verified"]]
         .dropna(subset=["record_id_eia_override_1"])
         .reset_index()
         .copy()
@@ -526,19 +529,47 @@ def _validate_override_fixes(
             "ferc", only_overrides, existing_training_ferc_ids, "already in training"
         )
 
-    return only_overrides
+    # Only return the results that have been verified
+    verified_connections = validated_connections[
+        validated_connections["verified"]
+    ].copy()
+
+    return verified_connections
 
 
-def _add_to_training(new_overrides, training_data):
+def _add_to_training(new_overrides):
     """Add the new overrides to the old override sheet."""
     logger.info("Combining all new overrides with existing training data")
-    training_data_out = training_data.append(
+    current_training = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
+    new_training = (
         new_overrides[
             ["record_id_eia", "record_id_ferc1", "signature_1", "signature_2", "notes"]
         ]
-    ).set_index(["record_id_eia", "record_id_ferc1"])
+        .copy()
+        .drop_duplicates(subset=["record_id_eia", "record_id_ferc1"])
+        .set_index(["record_id_eia", "record_id_ferc1"])
+    )
+    logger.debug(f"Found {len(new_training)} new overrides")
+    # Combine new and old training data
+    training_data_out = current_training.append(new_training).drop_duplicates(
+        subset=["record_id_eia", "record_id_ferc1"]
+    )
+    # Output combined training data
+    training_data_out.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV, index=False)
 
-    return training_data_out
+
+def _add_to_null_overrides(null_matches):
+    """Take record_id_ferc1 values verified to have no EIA match and add them to csv."""
+    logger.info("Adding record_id_ferc1 values with no EIA match to null_overrides csv")
+    # Get new null matches
+    new_null_matches = null_matches[["record_id_ferc1"]].copy()
+    logger.debug(f"Found {len(new_null_matches)} new null matches")
+    # Get current null matches
+    current_null_matches = pd.read_csv(pudl_rmi.NULL_OVERRIDES)
+    # Combine new and current record_id_ferc1 values that have no EIA match
+    out_null_matches = current_null_matches.append(new_null_matches).drop_duplicates()
+    # Write the combined values out to the same location as before
+    out_null_matches.to_csv(pudl_rmi.NULL_OVERRIDES, index=False)
 
 
 def validate_and_add_to_training(
@@ -562,7 +593,6 @@ def validate_and_add_to_training(
     ferc1_eia = rmi_out.ferc1_to_eia()
     ppl = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
-
     all_overrides = pd.DataFrame(
         columns=[
             "record_id_eia",
@@ -572,6 +602,7 @@ def validate_and_add_to_training(
             "notes",
         ]
     )
+    all_null_matches = pd.DataFrame(columns=["record_id_ferc1"])
 
     # Loop through all the files, validate, and combine them.
     all_files = os.listdir(VALID_OVERRIDES_PATH)
@@ -583,7 +614,6 @@ def validate_and_add_to_training(
             pd.read_excel(
                 (VALID_OVERRIDES_PATH / file), sheet_name="ferc_eia_util_subset"
             )
-            .assign(verified=lambda x: x.verified.astype("boolean").fillna(False))
             .pipe(
                 _validate_override_fixes,
                 utils_df,
@@ -599,19 +629,13 @@ def validate_and_add_to_training(
                 }
             )
         )
-        all_overrides = all_overrides.append(
-            file_df[
-                [
-                    "record_id_eia",
-                    "record_id_ferc1",
-                    "signature_1",
-                    "signature_2",
-                    "notes",
-                ]
-            ]
-        )
+        # Get just the overrides and combine
+        only_overrides = file_df[file_df["record_id_eia"].notna()].copy()
+        all_overrides = all_overrides.append(only_overrides)
+        # Get just the null matches and combine
+        only_null_matches = file_df[file_df["record_id_eia"].isna()].copy()
+        all_null_matches = all_null_matches.append(only_null_matches)
 
-    # Add the records to the training data
-    logger.info("Adding overrides to training data")
-    new_training_df = _add_to_training(all_overrides, TRAINING_DATA)
-    new_training_df.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
+    # Add the records to the training data and null overrides
+    _add_to_training(all_overrides)
+    _add_to_null_overrides(all_null_matches)
