@@ -263,7 +263,6 @@ def _generate_input_dfs(pudl_out, rmi_out):
         "ppl": rmi_out.grab_plant_part_list().pipe(_prep_ppl, pudl_out),
         "deprish": rmi_out.grab_deprish().pipe(_prep_deprish, pudl_out),
     }
-    logger.info("")
 
     return inputs_dict
 
@@ -382,7 +381,7 @@ def _check_id_consistency(id_type, df, actual_ids, error_message):
     ), f"{id_col} {error_message}: {bad_ids}"
 
 
-def _validate_override_fixes(
+def validate_override_fixes(
     validated_connections,
     utils_eia860,
     ppl,
@@ -426,14 +425,10 @@ def _validate_override_fixes(
         len(outliers := [x for x in match_language if x not in [1, 0]]) == 0
     ), f"All validated matches/overrides must be marked 1; found {outliers}"
 
-    # Get records with an override
-    true_connections = validated_connections[
-        validated_connections["verified"] == 1
-    ].copy()
-
     # From validated records, get only records with an override
     only_overrides = (
-        true_connections.dropna(subset=["record_id_eia_override_1"])
+        validated_connections[validated_connections["verified"] == 1]
+        .dropna(subset=["record_id_eia_override_1"])
         .reset_index()
         .copy()
     )
@@ -448,7 +443,7 @@ def _validate_override_fixes(
     # It's unlikely that this changed, but check FERC id too just in case!
     actual_ferc_ids = ferc1_eia.record_id_ferc1.unique()
     _check_id_consistency(
-        "ferc", true_connections, actual_ferc_ids, "values that don't exist"
+        "ferc", only_overrides, actual_ferc_ids, "values that don't exist"
     )
 
     # Make sure there are no duplicate EIA id overrides
@@ -524,10 +519,10 @@ def _validate_override_fixes(
         )
         existing_training_ferc_ids = training_data.record_id_ferc1.dropna().unique()
         _check_id_consistency(
-            "ferc", true_connections, existing_training_ferc_ids, "already in training"
+            "ferc", only_overrides, existing_training_ferc_ids, "already in training"
         )
 
-    return true_connections
+    return only_overrides
 
 
 def _add_to_training(new_overrides, training_data):
