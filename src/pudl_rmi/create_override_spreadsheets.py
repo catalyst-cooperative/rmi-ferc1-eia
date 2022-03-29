@@ -205,11 +205,18 @@ def _prep_ferc_eia(ferc1_eia, pudl_out):
     check_connections.insert(9, "record_id_ferc1", record_id_ferc1)
 
     # Add utility name eia
-    utils = pudl_out.utils_eia860().assign(report_year=lambda x: x.report_date.dt.year)[
-        ["utility_id_eia", "utility_name_eia", "report_year"]
-    ]
+    utils = (
+        pudl_out.utils_eia860()
+        .assign(report_year=lambda x: x.report_date.dt.year)[
+            ["utility_id_eia", "utility_name_eia", "report_year"]
+        ]
+        .copy()
+    )
+
     check_connections = pd.merge(
-        check_connections,
+        check_connections.dropna(
+            subset=["record_id_ferc1"]
+        ),  # dropna for now becuase somehow there is a full NA row in ferc-eia....figure out later
         utils,
         on=["utility_id_eia", "report_year"],
         how="left",
