@@ -263,9 +263,9 @@ def _generate_input_dfs(pudl_out, rmi_out):
     """Load and prep and all the input tables."""
     logger.debug("Generating inputs")
     inputs_dict = {
-        "ferc_eia": rmi_out.grab_ferc1_to_eia().pipe(_prep_ferc_eia, pudl_out),
-        "ppl": rmi_out.grab_plant_part_list().pipe(_prep_ppl, pudl_out),
-        "deprish": rmi_out.grab_deprish().pipe(_prep_deprish, pudl_out),
+        "ferc_eia": rmi_out.ferc1_to_eia().pipe(_prep_ferc_eia, pudl_out),
+        "ppl": rmi_out.plant_parts_eia().pipe(_prep_ppl, pudl_out),
+        "deprish": rmi_out.deprish().pipe(_prep_deprish, pudl_out),
     }
 
     return inputs_dict
@@ -385,7 +385,7 @@ def _check_id_consistency(id_type, df, actual_ids, error_message):
     ), f"{id_col} {error_message}: {bad_ids}"
 
 
-def validate_override_fixes(
+def _validate_override_fixes(
     validated_connections,
     utils_eia860,
     ppl,
@@ -559,8 +559,8 @@ def validate_and_add_to_training(
         pandas.DataFrame: A DataFrame with all of the new overrides combined.
     """
     # Define all relevant tables
-    ferc1_eia = rmi_out.grab_ferc1_to_eia()
-    ppl = rmi_out.grab_plant_part_list().reset_index()
+    ferc1_eia = rmi_out.ferc1_to_eia()
+    ppl = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
 
     all_overrides = pd.DataFrame(
@@ -589,7 +589,7 @@ def validate_and_add_to_training(
                 utils_df,
                 ppl,
                 ferc1_eia,
-                training_data,
+                TRAINING_DATA,
                 expect_override_overrides=expect_override_overrides,
             )
             .rename(
@@ -613,5 +613,5 @@ def validate_and_add_to_training(
 
     # Add the records to the training data
     logger.info("Adding overrides to training data")
-    new_training_df = _add_to_training(all_overrides, training_data)
+    new_training_df = _add_to_training(all_overrides, TRAINING_DATA)
     new_training_df.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
