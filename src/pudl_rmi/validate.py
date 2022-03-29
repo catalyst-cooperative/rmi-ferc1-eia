@@ -22,7 +22,7 @@ RMI_TO_PUDL_COLS = {
 
 RMI_TO_PUDL_FERC_ACCT_NAME = {
     "other_fossil": "Other",
-    "hydro": "Hydrauli1c",
+    "hydro": "Hydraulic",
     "regional_transmission_and_market_operation": "Transmission",
 }
 
@@ -50,6 +50,7 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
         npb.convert_dtypes(convert_floating=False)
         .rename(columns=RMI_TO_PUDL_COLS)
         .replace({"ferc_acct_name": RMI_TO_PUDL_FERC_ACCT_NAME})
+        .assign(report_date=lambda x: pd.to_datetime(x.report_year, format="%Y"))
         .merge(  # we need the pudl id!!
             utils_f1[["utility_id_ferc1", "utility_id_pudl"]],
             on=["utility_id_ferc1"],
@@ -80,6 +81,49 @@ def add_data_source(df: pd.DataFrame) -> pd.DataFrame:
             ]
         )
     return df
+
+
+def group_sum_cols(df, data_cols: List[str], by: List[str]) -> pd.DataFrame:
+    """Groupby sum a specific table's data cols."""
+    # convert date to year bc many of the og depish studies are EOY
+    summed_out = (
+        df.assign(report_year=lambda x: x.report_date.dt.year)
+        .astype({"report_year": pd.Int64Dtype()})
+        .groupby(by=by, dropna=True)[data_cols]
+        .sum(min_count=1)
+    )
+    return summed_out
+
+
+def agg_test_data(
+    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: List[str], by: List[str], **kwarg
+) -> pd.DataFrame:
+    """
+    Merge two grouped input tables to determine if summed data column are equal.
+
+    Args:
+        df1: One dataframe to sum and check consistency with ``df2``.
+        df2: Other dataframe to sum and check consistency against ``df1``.
+        data_cols: data columns to check. Columns must be in both ``df1`` and
+            ``df2``.
+    """
+    test = pd.merge(
+        group_sum_cols(df1.pipe(add_data_source), data_cols=data_cols, by=by),
+        group_sum_cols(df2.pipe(add_data_source), data_cols=data_cols, by=by),
+        right_index=True,
+        left_index=True,
+        suffixes=("_1", "_2"),
+        how="outer",
+    ).astype("float64")
+    for data_col in data_cols:
+        test.loc[:, f"{data_col}_isclose"] = np.isclose(
+            test[f"{data_col}_1"], test[f"{data_col}_2"], equal_nan=True, **kwarg
+        )
+        test.loc[:, f"{data_col}_ratio"] = test[f"{data_col}_1"] / test[f"{data_col}_2"]
+        logger.info(
+            f"{data_col} close records: {len(test[test[f'{data_col}_isclose']])/len(test):.02%}"
+        )
+    return test.sort_index()
 
 
 def test_df_vs_net_plant_balance(
@@ -118,27 +162,13 @@ def test_df_vs_net_plant_balance(
     """
     pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
     npb = download_and_clean_net_plant_balance(pudl_engine)
-    test = pd.merge(
-        (ferc_deprish_eia.groupby(pk_utils_acct)[data_cols].sum(min_count=1)),
-        add_data_source(npb).set_index(pk_utils_acct)[data_cols],
-        suffixes=("_fde", "_npb"),
-        left_index=True,
-        right_index=True,
-        how="left",
-    ).astype("float64")
+    test = agg_test_data(
+        df1=ferc_deprish_eia,
+        df2=npb,
+        data_cols=data_cols,
+        by=pk_utils_acct,
+        rtol=5e-02,
+        atol=5e-02,
+    )
 
-    for data_col in data_cols:
-        test.loc[:, f"{data_col}_isclose"] = np.isclose(
-            test[f"{data_col}_fde"],
-            test[f"{data_col}_npb"],
-            equal_nan=True,
-            rtol=5e-02,
-            atol=5e-02,
-        )
-        test.loc[:, f"{data_col}_ratio"] = (
-            test[f"{data_col}_fde"] / test[f"{data_col}_npb"]
-        )
-        logger.info(
-            f"{data_col} close records: {len(test[test[f'{data_col}_isclose']])/len(test):.02%}"
-        )
     return test
