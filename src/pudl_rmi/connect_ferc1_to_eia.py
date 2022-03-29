@@ -81,6 +81,9 @@ def execute(pudl_out, plant_parts_eia):
     )
     # add capex (this should be moved into pudl_out.plants_steam_ferc1)
     connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
+    # Override specified record_id_ferc1 values with NA record_id_eia
+    connects_ferc1_eia = add_null_overrides(connects_ferc1_eia)
+
     return connects_ferc1_eia
 
 
@@ -1416,3 +1419,34 @@ def add_mean_cap_additions(steam_df):
         )
     )
     return df
+
+
+def add_null_overrides(connects_ferc1_eia):
+    """Override known null matches with pd.NA.
+
+    There is no way to indicate in the training data that certain FERC records have no
+    proper EIA match. That is to say--you can't specifiy a blank match or tell the AI
+    not to match a given record. Because we've gone through by hand and know for a fact
+    that some FERC records have no EIA match (even when you aggregate generators), we
+    have to add in these null matches after the fact.
+
+    This function reads in a list of record_id_ferc1 values that are known to have no
+    cooresponding EIA record match and makes sure they are mapped as NA in the final
+    record linkage output. It also updates the match_type field to indicate that this
+    value has been overriden.
+
+    """
+    logger.info("Overriding specified record_id_ferc1 values with NA record_id_eia")
+    # Get record_id_ferc1 values that should be overriden to have no EIA match
+    null_overrides = pd.read_csv(pudl_rmi.NULL_OVERRIDES)
+    # Make sure there is content!
+    assert ~null_overrides.empty
+    # Set two values on slice of ferc1-eia that has only record_id_ferc1 values from
+    # the null_overrides dataframe: 1) set record_id_eia to NA, 2) set match type to
+    # "overridden"
+    connects_ferc1_eia.loc[
+        connects_ferc1_eia["record_id_ferc1"].isin(null_overrides.record_id_ferc1),
+        ["record_id_eia", "match_type"],
+    ] = [pd.NA, "overridden"]
+
+    return connects_ferc1_eia

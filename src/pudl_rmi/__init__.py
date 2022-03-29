@@ -49,7 +49,8 @@ FERC1_EIA_PKL: Path = OUTPUTS_DIR / "ferc1_eia.pkl.gz"
 """Path to connection between FERC1 plants and the EIA plant-part list."""
 DEPRISH_FERC1_PKL: Path = OUTPUTS_DIR / "deprish_ferc1.pkl.gz"
 """Path to connection between depreciation data and FERC1 plants."""
-
+NULL_OVERRIDES: Path = INPUTS_DIR / "null_overrides.csv"
+"""Path to list of record_id_ferc1 values with no EIA match."""
 
 __author__ = "Catalyst Cooperative"
 __contact__ = "pudl@catalyst.coop"
