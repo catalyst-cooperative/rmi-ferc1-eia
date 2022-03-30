@@ -118,7 +118,10 @@ def agg_test_data(
     ).astype("float64")
     for data_col in data_cols:
         test.loc[:, f"{data_col}_isclose"] = np.isclose(
-            test[f"{data_col}_1"], test[f"{data_col}_2"], equal_nan=True, **kwarg
+            test[f"{data_col}_1"],
+            test[f"{data_col}_2"],
+            equal_nan=True,
+            **kwarg,
         )
         test.loc[:, f"{data_col}_ratio"] = test[f"{data_col}_1"] / test[f"{data_col}_2"]
         logger.info(
@@ -168,8 +171,8 @@ def test_df_vs_net_plant_balance(
         df2=npb,
         data_cols=data_cols,
         by=pk_utils_acct,
-        rtol=5e-02,
-        atol=5e-02,
+        rtol=rtol,
+        atol=atol,
     )
 
     return test
