@@ -1441,12 +1441,30 @@ def add_null_overrides(connects_ferc1_eia):
     null_overrides = pd.read_csv(pudl_rmi.NULL_OVERRIDES)
     # Make sure there is content!
     assert ~null_overrides.empty
-    # Set two values on slice of ferc1-eia that has only record_id_ferc1 values from
-    # the null_overrides dataframe: 1) set record_id_eia to NA, 2) set match type to
-    # "overridden"
+    # List of EIA columns to null. Ideally would like to get this from elsewhere, but
+    # compiling this here for now...
+    eia_cols_to_null = [
+        "plant_name_new",
+        "plant_part",
+        "ownership",
+        "generator_id",
+        "unit_code_pudl",
+        "prime_mover_code",
+        "energy_source_code_1",
+        "technology_description",
+        "true_gran",
+        "appro_part_label",
+        "record_count",
+        "fraction_owned",
+        "ownership_dupe",
+        "operational_status",
+        "operational_status_pudl",
+    ] + [x for x in connects_ferc1_eia.columns if x.endswith("eia")]
+    # Make all EIA values NA for record_id_ferc1 values in the Null overrides list and
+    # make the match_type column say "overriden"
     connects_ferc1_eia.loc[
         connects_ferc1_eia["record_id_ferc1"].isin(null_overrides.record_id_ferc1),
-        ["record_id_eia", "match_type"],
-    ] = [pd.NA, "overridden"]
+        eia_cols_to_null + ["match_type"],
+    ] = [np.nan] * len(eia_cols_to_null) + ["overridden"]
 
     return connects_ferc1_eia
