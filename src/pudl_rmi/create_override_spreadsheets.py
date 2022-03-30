@@ -554,7 +554,7 @@ def _add_to_training(new_overrides):
         ]
         .copy()
         .drop_duplicates(subset=["record_id_eia", "record_id_ferc1"])
-        .set_index(["record_id_eia", "record_id_ferc1"])
+        # .set_index(["record_id_eia", "record_id_ferc1"])
     )
     logger.debug(f"Found {len(new_training)} new overrides")
     # Combine new and old training data
@@ -618,9 +618,7 @@ def validate_and_add_to_training(
     for file in good_files:
         logger.info(f"Processing fixes in {file}")
         file_df = (
-            pd.read_excel(
-                (VALID_OVERRIDES_PATH / file), sheet_name="ferc_eia_util_subset"
-            )
+            pd.read_excel((VALID_OVERRIDES_PATH / file))
             .pipe(
                 _validate_override_fixes,
                 utils_df,
