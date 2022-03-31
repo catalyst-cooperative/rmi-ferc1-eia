@@ -51,7 +51,10 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
         npb.convert_dtypes(convert_floating=False)
         .rename(columns=RMI_TO_PUDL_COLS)
         .replace({"ferc_acct_name": RMI_TO_PUDL_FERC_ACCT_NAME})
-        .assign(report_date=lambda x: pd.to_datetime(x.report_year, format="%Y"))
+        .assign(
+            report_date=lambda x: pd.to_datetime(x.report_year, format="%Y"),
+            capex_total=lambda x: x.plant_balance_w_common,
+        )  # plant balance is also comparable to capex_total in FERC1
         .merge(  # we need the pudl id!!
             utils_f1[["utility_id_ferc1", "utility_id_pudl"]],
             on=["utility_id_ferc1"],
