@@ -70,12 +70,22 @@ def add_data_source(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add a data_source column with 'FERC' and 'PUC'.
 
-    The depreciation data includes a `data_source` column as a part of the
-    primary key of that data set. This is because there are sometimes we have
-    depreciation study from both `FERC` and `PUC` for the same utility and
-    plants. Because of this, in order to compare the FERC plant input tables to
-    the FERC-EIA-Depreciation tables we need to add *both* versions of the
-    depreciation `data_source`.
+    If a data frame is to be compare to depreciation studies, we need to
+    duplicate records with both data depreciation sources. The depreciation
+    studies are sourced from both ``FERC`` and ``PUC`` studies - sometimes from
+    both sources same utility/year. We never want to combine depreciation data
+    from different data sources, so the ``data_source`` column will always be
+    included in the primary key columns - or the columns to group by in
+    :func:``group_sum_cols``. Because :func:``agg_test_data`` uses the index
+    columns to merge both datasets - and those indexes are a result of the
+    groupby in :func:``group_sum_cols`` - we need to add the ``data_source``
+    column to the non-depreciation data frame.
+
+    We do this by duplicating records with both ``FERC`` and ``PUC`` as the
+    ``data_source``. We do this instead of grouping-by different column and
+    then merging on the columns without ``data_source`` because using the full
+    index with ``data_source`` is much more natural and true to the depreciation
+    data.
     """
     if "data_source" not in df:
         df = pd.concat(
@@ -105,20 +115,31 @@ def agg_test_data(
     """
     Merge two grouped input tables to determine if summed data column are equal.
 
+    For each column in data_cols, the output will include the grouped sum of
+    the column from df1 and df2 with ``_1`` and ``_2`` suffixes respectively,
+    as well as TWO additional columns:
+    * data column name with ``_isclose`` suffix: a boolean column which is
+      generated from checking if the sum of that data column in df1 and df2 are
+      close calcuated using ``np.isclose``
+    *  data column name with ``_ratio`` suffix: a ratio column is the divsion
+      of the sum of the data column from df1 and df2.
+
     Args:
         df1: One dataframe to sum and check consistency with ``df2``.
         df2: Other dataframe to sum and check consistency against ``df1``.
         data_cols: data columns to check. Columns must be in both ``df1`` and
             ``df2``.
+        **kwarg: arguments to be passed into ``np.isclose``
     """
     test = pd.merge(
-        group_sum_cols(df1.pipe(add_data_source), data_cols=data_cols, by=by),
-        group_sum_cols(df2.pipe(add_data_source), data_cols=data_cols, by=by),
+        group_sum_cols(add_data_source(df1), data_cols=data_cols, by=by),
+        group_sum_cols(add_data_source(df2), data_cols=data_cols, by=by),
         right_index=True,
         left_index=True,
         suffixes=("_1", "_2"),
         how="outer",
     ).astype("float64")
+    # add two column to indicate how close each data_col is from each input
     for data_col in data_cols:
         test.loc[:, f"{data_col}_isclose"] = np.isclose(
             test[f"{data_col}_1"],
@@ -127,15 +148,14 @@ def agg_test_data(
             **kwarg,
         )
         test.loc[:, f"{data_col}_ratio"] = test[f"{data_col}_1"] / test[f"{data_col}_2"]
-        logger.info(
-            f"{data_col} close records: {len(test[test[f'{data_col}_isclose']])/len(test):.02%}"
-        )
+        isclose_fraction = test[f"{data_col}_isclose"].sum() / len(test)
+        logger.info(f"{data_col} close records: {isclose_fraction:.02%}")
     return test.sort_index()
 
 
-def test_df_vs_net_plant_balance(
+def validate_df_vs_net_plant_balance(
     ferc_deprish_eia: pd.DataFrame,
-    pudl_engine: sa.engine.Engine,
+    net_plant_balance,
     data_cols: List = [
         "plant_balance_w_common",
         "book_reserve_w_common",
@@ -156,26 +176,20 @@ def test_df_vs_net_plant_balance(
     calculate a ratio of the FERC-Deprish-EIA column divided by the Net Plant
     Balance column.
 
-    Question: Originally I passed in npb instead of generating it within this
-    function and just had a little wrapper function but that also felt bad. Any
-    Suggestions here?
-
     Args:
         ferc_deprish_eia: table of FERC-Deprish-EIA output.
         pudl_engine: A connection engine for the PUDL DB.
         data_cols: list of columns to compare.
-        rtol: The relative tolerance parameter from ``np.isclose``. Default is 5e-02.
-        atol: The absolute tolerance parameter from ``np.isclose``. Default is 5e-02.
+        rtol: The relative tolerance parameter from ``np.isclose``.
+        atol: The absolute tolerance parameter from ``np.isclose``.
     """
     pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
-    npb = download_and_clean_net_plant_balance(pudl_engine)
     test = agg_test_data(
         df1=ferc_deprish_eia,
-        df2=npb,
+        df2=net_plant_balance,
         data_cols=data_cols,
         by=pk_utils_acct,
         rtol=rtol,
         atol=atol,
     )
-
     return test
