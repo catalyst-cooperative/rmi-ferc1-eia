@@ -153,9 +153,9 @@ def agg_test_data(
     return test.sort_index()
 
 
-def validate_df_vs_net_plant_balance(
+def compare_df_vs_net_plant_balance(
     ferc_deprish_eia: pd.DataFrame,
-    net_plant_balance,
+    net_plant_balance: pd.DataFrame,
     data_cols: List = [
         "plant_balance_w_common",
         "book_reserve_w_common",
@@ -176,9 +176,16 @@ def validate_df_vs_net_plant_balance(
     calculate a ratio of the FERC-Deprish-EIA column divided by the Net Plant
     Balance column.
 
+    For each of the columns in ``data_cols``, this function does two things:
+    * Adds a boolean column that indicates whether the ``ferc_deprish_eia`` and
+      net plant balcn versions of the aggregated data column are sufficiently
+      similar (based on the values of rtol and atol).
+    * Calculate the ratio between the aggregated data columns values so the user
+      can see how similar or different they are to each other.
+
     Args:
         ferc_deprish_eia: table of FERC-Deprish-EIA output.
-        pudl_engine: A connection engine for the PUDL DB.
+        net_plant_balance: the FERC1 Net Plant Balance table. Result of :func:`download_and_clean_net_plant_balance`
         data_cols: list of columns to compare.
         rtol: The relative tolerance parameter from ``np.isclose``.
         atol: The absolute tolerance parameter from ``np.isclose``.
