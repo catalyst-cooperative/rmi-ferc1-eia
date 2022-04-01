@@ -184,7 +184,7 @@ def validate_df_vs_net_plant_balance(
         atol: The absolute tolerance parameter from ``np.isclose``.
     """
     pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
-    test = agg_test_data(
+    compare = agg_test_data(
         df1=ferc_deprish_eia,
         df2=net_plant_balance,
         data_cols=data_cols,
@@ -192,4 +192,4 @@ def validate_df_vs_net_plant_balance(
         rtol=rtol,
         atol=atol,
     )
-    return test
+    return compare
