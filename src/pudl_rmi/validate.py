@@ -71,11 +71,11 @@ def add_data_source(df: pd.DataFrame) -> pd.DataFrame:
     Add a data_source column with 'FERC' and 'PUC'.
 
     If a data frame is to be compare to depreciation studies, we need to
-    duplicate records with both data depreciation sources. The depreciation
+    duplicate records with both depreciation data sources. The depreciation
     studies are sourced from both ``FERC`` and ``PUC`` studies - sometimes from
-    both sources same utility/year. We never want to combine depreciation data
-    from different data sources, so the ``data_source`` column will always be
-    included in the primary key columns - or the columns to group by in
+    both sources for the same utility/year. We never want to combine depreciation
+    data from different data sources, so the ``data_source`` column will always
+    be included in the primary key columns - or the columns to group by in
     :func:``group_sum_cols``. Because :func:``agg_test_data`` uses the index
     columns to merge both datasets - and those indexes are a result of the
     groupby in :func:``group_sum_cols`` - we need to add the ``data_source``
@@ -85,7 +85,7 @@ def add_data_source(df: pd.DataFrame) -> pd.DataFrame:
     ``data_source``. We do this instead of grouping-by different column and
     then merging on the columns without ``data_source`` because using the full
     index with ``data_source`` is much more natural and true to the depreciation
-    data.
+    data and makes the merge faster.
     """
     if "data_source" not in df:
         df = pd.concat(
@@ -139,7 +139,12 @@ def agg_test_data(
         suffixes=("_1", "_2"),
         how="outer",
     ).astype("float64")
-    # add two column to indicate how close each data_col is from each input
+    # Add two columns indicating the similarity of the values of data_col in df1
+    # and df2.
+    # data_col_isclose is a boolean indicating whether they're similar enough
+    # for us to consider them equal.
+    # data_col_ratio is the ratio between the aggregated data_col in df1 and df2
+    # (df1 / df2).
     for data_col in data_cols:
         test.loc[:, f"{data_col}_isclose"] = np.isclose(
             test[f"{data_col}_1"],
