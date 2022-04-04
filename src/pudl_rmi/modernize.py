@@ -6,9 +6,10 @@ modernizable records that we've been using to mock up the modernization process
 for Duke.
 """
 
-import pandas as pd
-import numpy as np
 import logging
+
+import numpy as np
+import pandas as pd
 
 import pudl_rmi
 

@@ -1,8 +1,9 @@
 """Convert RMI outputs into model output format."""
 
-import pandas as pd
-from typing import Dict
 import logging
+from typing import Dict
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
