@@ -154,7 +154,7 @@ def agg_test_data(
 
 
 def compare_df_vs_net_plant_balance(
-    ferc_deprish_eia: pd.DataFrame,
+    df: pd.DataFrame,
     net_plant_balance: pd.DataFrame,
     data_cols: List = [
         "plant_balance_w_common",
@@ -165,7 +165,7 @@ def compare_df_vs_net_plant_balance(
     atol: float = 5e-02,
 ) -> pd.DataFrame:
     """
-    Compare FERC-Deprish-EIA output to FERC1 Net Plant Balance totals.
+    Compare any of the FERC-Deprish-EIA outputs to FERC1 Net Plant Balance totals.
 
     The FERC1 Net Plant Balance table includes utility-FERC account level totals
     of several key financial data points. This function compares the utility-FERC
@@ -184,7 +184,7 @@ def compare_df_vs_net_plant_balance(
       can see how similar or different they are to each other.
 
     Args:
-        ferc_deprish_eia: table of FERC-Deprish-EIA output.
+        df: on of the FERC-Deprish-EIA tables. Must have all of ``data_cols``.
         net_plant_balance: the FERC1 Net Plant Balance table. Result of :func:`download_and_clean_net_plant_balance`
         data_cols: list of columns to compare.
         rtol: The relative tolerance parameter from ``np.isclose``.
@@ -192,7 +192,7 @@ def compare_df_vs_net_plant_balance(
     """
     pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
     compare = agg_test_data(
-        df1=ferc_deprish_eia,
+        df1=df,
         df2=net_plant_balance,
         data_cols=data_cols,
         by=pk_utils_acct,
