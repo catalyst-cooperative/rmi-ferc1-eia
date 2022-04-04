@@ -135,7 +135,7 @@ UTILITY_RENAME: Dict = {
     "Duke Energy Corp": "Duke Energy Carolinas",
 }
 """
-EIA utility names (keys)to
+EIA utility names (keys) to Optimus-preferred names (values).
 """
 
 
@@ -146,6 +146,11 @@ def execute(
 ) -> pd.DataFrame:
     """
     Convert RMI outputs into optimus model inputs.
+
+    This function converts the Deprish-FERC-EIA output to the RMI Optimus format.
+    This conversion mostly consists of renaming columns and content. It also
+    adds two data columns from PUDL tables: ``state`` from the ``plants_entity_eia``
+    table and ``utility_id_pudl`` from ``utilities_eia``.
 
     Args:
         deprish_ferc1_eia: table of depreciation & FERC 1 & EIA data.
