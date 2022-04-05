@@ -158,23 +158,25 @@ def execute(
         plants_eia860: ``pudl_out.plants_eia860()``
         utils_eia860: ``pudl_out.utils_eia860()``
     """
-    # add plant state
+    # add plant state and the EIA utility name
     model_input = (
-        deprish_ferc1_eia.merge(
+        deprish_ferc1_eia.reset_index()  # reset index b4 merge bc it's prob 'record_id_eia'
+        .merge(
             plants_eia860[["plant_id_eia", "report_date", "state"]].drop_duplicates(),
             on=["plant_id_eia", "report_date"],
             validate="m:1",
             how="left",
         )
-        .merge(  # merge in the EIA utility name
-            utils_eia860[["utility_id_pudl", "utility_name_eia"]].drop_duplicates(),
+        .merge(
+            utils_eia860.sort_values(["report_date"], ascending=False)[
+                ["utility_id_pudl", "utility_name_eia"]
+            ].drop_duplicates(subset=["utility_id_pudl"]),
             on=["utility_id_pudl"],
             validate="m:1",
             how="left",
         )
         .replace({"utility_name_eia": UTILITY_RENAME})
-        .reset_index()
-        .dropna(subset=["record_id_eia"])
+        .dropna(subset=["record_id_eia"])  # this is the pk. it must be non-null
         .round({k: 1 for (k, v) in RENAME_COLS.items() if "($)" in v})
     )
 
