@@ -1,7 +1,7 @@
 """Convert RMI outputs into model output format."""
 
 import logging
-from typing import Dict
+from typing import Dict, List, Literal
 
 import pandas as pd
 
@@ -144,6 +144,7 @@ def execute(
     deprish_ferc1_eia: pd.DataFrame,
     plants_eia860: pd.DataFrame,
     utils_eia860: pd.DataFrame,
+    **kwargs,
 ) -> pd.DataFrame:
     """
     Convert RMI outputs into optimus model inputs.
@@ -157,7 +158,12 @@ def execute(
         deprish_ferc1_eia: table of depreciation & FERC 1 & EIA data.
         plants_eia860: ``pudl_out.plants_eia860()``
         utils_eia860: ``pudl_out.utils_eia860()``
+        kwargs: Additional kwargs to be passed into :func:``select_from_deprish_ferc1``
+            if you want to select specific utilities/years/data sources.
     """
+    # if there are kwargs, this means you want to select from deprish_ferc1_eia
+    if kwargs:
+        deprish_ferc1_eia = select_from_deprish_ferc1(deprish_ferc1_eia, **kwargs)
     # add plant state and the EIA utility name
     model_input = (
         deprish_ferc1_eia.reset_index()  # reset index b4 merge bc it's prob 'record_id_eia'
@@ -194,3 +200,52 @@ def execute(
     model_input = model_input.rename(columns=RENAME_COLS)[list(RENAME_COLS.values())]
 
     return model_input
+
+
+def select_from_deprish_ferc1(
+    deprish_ferc1_eia: pd.DataFrame,
+    util_id_pudls: List[int],
+    years: List[int],
+    priority_data_source: Literal["PUC", "FERC"] = "PUC",
+    include_non_priority_data_source: bool = True,
+) -> pd.DataFrame:
+    """
+    Select subset of Deprish-FERC1-EIA output.
+
+    Usually, we want to look at a particular utility or utilities from a
+    particular year or years from a particular depreciation data source.
+
+    The depreciation data source arw special arguments here because sometimes
+    the depreciation studies from one data source excludes plants or even whole
+    technology types (ex: a PUC study does not include hydro plants). This
+    function enables us to grab just one data source OR to prioritize a data
+    source and get any plants that are missing from the priority data source
+    from the other data source.
+
+    Args:
+        deprish_ferc1_eia: table of depreciation & FERC 1 & EIA data.
+        util_id_pudls: list of desired ``utility_id_pudl``'s to select for.
+        years: list of desired years to select for.
+        priority_data_source: depreciation data source to prioritize.
+        include_non_priority_data_source: If True, include records from
+            depreciation data sources other than the ``priority_data_source``
+            if there are plants that are not in the ``priority_data_source``.
+    """
+    util_all = deprish_ferc1_eia[
+        (
+            (deprish_ferc1_eia.report_year.isin(years))
+            & (deprish_ferc1_eia.utility_id_pudl.isin(util_id_pudls))
+        )
+    ]
+
+    util_source1 = util_all[util_all.data_source.isin([priority_data_source, pd.NA])]
+
+    if include_non_priority_data_source:
+        util_source2 = util_all[
+            ~util_all.plant_id_eia.isin(util_source1.plant_id_eia.unique())
+            & ~util_all.plant_id_eia.isnull()
+        ]
+        util_out = pd.concat([util_source1, util_source2])
+    else:
+        util_out = util_source1
+    return util_out.sort_index()
