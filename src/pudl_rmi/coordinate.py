@@ -189,6 +189,7 @@ class Output:
         self,
         clobber=False,
         clobber_plant_parts_eia=False,
+        clobber_deprish=False,
         clobber_deprish_eia=False,
         clobber_ferc1_eia=False,
     ):
@@ -206,6 +207,10 @@ class Output:
             clobber_plant_parts_eia (boolean): Generate and cache a new interim
                 output of the EIA plant part list and generate a new version of
                 the depreciaiton to FERC1 output. Default is False.
+            clobber_deprish : True if you want to regenerate the depreciation
+                data whether or not the output is already pickled. The
+                deprecaition data is an interim input to make the connection
+                between depreciation and EIA. Default is False.
             clobber_deprish_eia (boolean): Generate and cache a new interim
                 output of the connection between EIA and depreciation data and
                 generate a new version of the depreciaiton to FERC1 output.
@@ -234,7 +239,10 @@ class Output:
             )
             deprish_ferc1 = pudl_rmi.connect_deprish_to_ferc1.execute(
                 plant_parts_eia=self.plant_parts_eia(clobber=clobber_plant_parts_eia),
-                deprish_eia=self.deprish_to_eia(clobber=clobber_deprish_eia),
+                deprish_eia=self.deprish_to_eia(
+                    clobber=clobber_deprish_eia,
+                    clobber_deprish=clobber_deprish,
+                ),
                 ferc1_eia=self.ferc1_to_eia(clobber=clobber_ferc1_eia),
             )
             # export
@@ -244,6 +252,26 @@ class Output:
             logger.info(f"Reading the depreciation to FERC connection from {file_path}")
             deprish_ferc1 = pd.read_pickle(file_path)
         return deprish_ferc1
+
+    def optimus(self, clobber_ferc1_eia: bool = False, **kwargs):
+        """
+        Generate output in Optimus format.
+
+        Args:
+            clobber_ferc1_eia (boolean): Generate and cache a new interim
+                output of the connection between FERC and EIA and generate a
+                new version of the depreciaiton to FERC1 output.
+            kwargs: Additional kwargs to be passed into
+                :func:``pudl_rmi.formatter_optimus.select_from_deprish_ferc1``
+                if you want to select specific utilities/years/data sources.
+        """
+        optimus_out = pudl_rmi.formatter_optimus.execute(
+            deprish_ferc1_eia=self.deprish_to_ferc1(clobber=clobber_ferc1_eia),
+            plants_eia860=self.pudl_out.plants_eia860(),
+            utils_eia860=self.pudl_out.utils_eia860(),
+            **kwargs,
+        )
+        return optimus_out
 
     def run_all(self, clobber_all=False):
         """
