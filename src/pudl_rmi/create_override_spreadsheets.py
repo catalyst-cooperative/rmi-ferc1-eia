@@ -392,7 +392,7 @@ def _check_id_consistency(id_type, df, actual_ids, error_message):
     ), f"{id_col} {error_message}: {bad_ids}"
 
 
-def _validate_override_fixes(
+def validate_override_fixes(
     validated_connections,
     utils_eia860,
     ppl,
@@ -620,7 +620,7 @@ def validate_and_add_to_training(
         file_df = (
             pd.read_excel((VALID_OVERRIDES_PATH / file))
             .pipe(
-                _validate_override_fixes,
+                validate_override_fixes,
                 utils_df,
                 ppl,
                 ferc1_eia,
