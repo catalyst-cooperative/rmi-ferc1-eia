@@ -89,7 +89,7 @@ RELEVANT_COLS_PPL = [
 # --------------------------------------------------------------------------------------
 
 
-def _pct_diff(df, col):
+def _pct_diff(df, col) -> None:
     """Calculate percent difference between EIA and FERC versions of a column."""
     df.loc[
         (df[f"{col}_eia"] > 0) & (df[f"{col}_ferc1"] > 0), f"{col}_pct_diff"
@@ -119,7 +119,7 @@ def is_best_match(df):  # not currently included!
     return "_".join(message)
 
 
-def _prep_ferc_eia(ferc1_eia, pudl_out):
+def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
     check_connections = ferc1_eia[RELEVANT_COLS_FERC_EIA].copy()
@@ -221,8 +221,8 @@ def _prep_ferc_eia(ferc1_eia, pudl_out):
     return check_connections
 
 
-def _prep_ppl(ppl, pudl_out):
-    """Prep PPL for use in override output sheet pre-utility subgroups."""
+def _prep_ppl(ppl, pudl_out) -> pd.DataFrame:
+    """Prep PPL table for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping Plant Parts Table")
 
     # Add utilty name eia and only take relevant columns
@@ -242,7 +242,7 @@ def _prep_ppl(ppl, pudl_out):
     return ppl_out
 
 
-def _prep_deprish(deprish, pudl_out):
+def _prep_deprish(deprish, pudl_out) -> pd.DataFrame:
     """Prep depreciation data for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping Deprish Data")
 
@@ -258,8 +258,19 @@ def _prep_deprish(deprish, pudl_out):
     return deprish_out
 
 
-def _generate_input_dfs(pudl_out, rmi_out):
-    """Load and prep and all the input tables."""
+def _generate_input_dfs(pudl_out, rmi_out) -> dict:
+    """Load ferc_eia, ppl, and deprish tables into a dictionary.
+
+    Loading all of these tables once is much faster than loading then repreatedly for
+    every utility/year iteration. These tables will be segmented by utility and year
+    in _get_util_year_subsets() and loaded as seperate tabs in a spreadsheet in
+    _output_override_sheet().
+
+    Returns:
+        dict: A dictionary where keys are string names for ferc_eia, ppl, and deprish
+            tables and values are the actual tables in full.
+
+    """
     logger.debug("Generating inputs")
     inputs_dict = {
         "ferc_eia": rmi_out.ferc1_to_eia().pipe(_prep_ferc_eia, pudl_out),
@@ -270,8 +281,28 @@ def _generate_input_dfs(pudl_out, rmi_out):
     return inputs_dict
 
 
-def _get_util_year_subsets(inputs_dict, util_id_eia_list, years):
-    """Get utility and year subsets for each of the input dfs."""
+def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
+    """Get utility and year subsets for each of the input dfs.
+
+    After generating the dictionary with all of the inputs tables loaded, we'll want to
+    create subsets of each of those tables based on the utility and year inputs we're
+    given. This function takes the input dict generated in _generate_input_dfs() and
+    outputs an updated version with df values pertaining to the utilities in
+    util_id_eia_list and years in years.
+
+    Args:
+        inputs_dict (dict): The output of running _generation_input_dfs()
+        util_id_eia_list (list): A list of the utility_id_eia values you want to
+            include in a single spreadsheet output. Generally this is a list of the
+            subsidiaries that pertain to a single parent company.
+        years (list): A list of the years you'd like to add to the override sheets.
+
+    Returns:
+        dict: A subset of the inputs_dict that contains versions of the value dfs that
+            pertain only to the utilites and years specified in util_id_eia_list and
+            years.
+
+    """
     util_year_subset_dict = {}
     for df_name, df in inputs_dict.items():
         logger.debug(f"Getting utility-year subset for {df_name}")
@@ -309,8 +340,17 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years):
     return util_year_subset_dict
 
 
-def _output_override_sheet(util_year_subset_dict, util_name):
-    """Put three tables from in the inputs_dict into excel tabs and output."""
+def _output_override_spreadsheet(util_year_subset_dict, util_name) -> None:
+    """Output spreadsheet with tabs for ferc-eia, ppl, deprish for one utility.
+
+    Args:
+        util_year_subset_dict (dict): The output from _get_util_year_subsets()
+        util_name (str): A string indicating the name of the utility that you are
+            creating an override sheet for. The string will be used as the suffix for
+            the name of the excel file. Ex: for util_name = "BHE", the file name will be
+            BHE_fix_FERC-EIA_overrides.xlsx.
+
+    """
     # Enable unique file names and put all files in directory called overrides
     new_output_path = (
         pudl_rmi.OUTPUTS_DIR / "overrides" / f"{util_name}_fix_FERC-EIA_overrides.xlsx"
@@ -323,8 +363,11 @@ def _output_override_sheet(util_year_subset_dict, util_name):
     writer.save()
 
 
-def generate_override_tools(pudl_out, rmi_out, util_dict, years) -> None:
-    """Generate inputs and generate override sheets.
+def generate_all_override_spreadsheets(pudl_out, rmi_out, util_dict, years) -> None:
+    """Output override spreadsheets for all specified utilities and years.
+
+    These manual override files will be output to a folder called "overrides" in the
+    output directory.
 
     Args:
         pudl_out (PudlTabl): the pudl_out object generated in a notebook and passed in.
@@ -349,7 +392,7 @@ def generate_override_tools(pudl_out, rmi_out, util_dict, years) -> None:
         util_year_subset_dict = _get_util_year_subsets(
             inputs_dict, util_id_eia_list, years
         )
-        _output_override_sheet(util_year_subset_dict, util_name)
+        _output_override_spreadsheet(util_year_subset_dict, util_name)
 
 
 # --------------------------------------------------------------------------------------
@@ -357,7 +400,7 @@ def generate_override_tools(pudl_out, rmi_out, util_dict, years) -> None:
 # --------------------------------------------------------------------------------------
 
 
-def _check_id_consistency(id_type, df, actual_ids, error_message):
+def _check_id_consistency(id_type, df, actual_ids, error_message) -> None:
     """Check for rogue FERC or EIA ids that don't exist.
 
     Args:
@@ -391,7 +434,7 @@ def validate_override_fixes(
     ferc1_eia,
     training_data,
     expect_override_overrides=False,
-):
+) -> pd.DataFrame:
     """Process the verified and/or fixed matches.
 
     Args:
@@ -536,7 +579,7 @@ def validate_override_fixes(
     return verified_connections
 
 
-def _add_to_training(new_overrides):
+def _add_to_training(new_overrides) -> None:
     """Add the new overrides to the old override sheet."""
     logger.info("Combining all new overrides with existing training data")
     current_training = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
@@ -557,7 +600,7 @@ def _add_to_training(new_overrides):
     training_data_out.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV, index=False)
 
 
-def _add_to_null_overrides(null_matches):
+def _add_to_null_overrides(null_matches) -> None:
     """Take record_id_ferc1 values verified to have no EIA match and add them to csv."""
     logger.info("Adding record_id_ferc1 values with no EIA match to null_overrides csv")
     # Get new null matches
