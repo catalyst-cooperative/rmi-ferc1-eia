@@ -1441,6 +1441,7 @@ def add_null_overrides(connects_ferc1_eia):
     null_overrides = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
     # Make sure there is content!
     assert ~null_overrides.empty
+    logger.debug(f"Found {len(null_overrides)} null overrides")
     # List of EIA columns to null. Ideally would like to get this from elsewhere, but
     # compiling this here for now...
     eia_cols_to_null = [
