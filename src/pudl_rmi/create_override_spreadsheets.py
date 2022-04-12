@@ -15,7 +15,6 @@ validate them, and incorporate them into the existing training data.
 """
 import logging
 import os
-import pathlib
 
 import numpy as np
 import pandas as pd
@@ -84,9 +83,6 @@ RELEVANT_COLS_PPL = [
     "fuel_cost_per_mmbtu",
     "heat_rate_mmbtu_mwh",
 ]
-
-# not sure whether to add this to __init__ b/c not in input or outputs file...
-VALID_OVERRIDES_PATH = pathlib.Path().cwd().parent / "add_to_training"
 
 # --------------------------------------------------------------------------------------
 # Generate Override Tools
@@ -596,7 +592,7 @@ def validate_and_add_to_training(
     ferc1_eia_df = rmi_out.ferc1_to_eia()
     ppl_df = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
-    training_df = pd.read_csv(pudl_out.TRAIN_FERC1_EIA_CSV)
+    training_df = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
     all_overrides = pd.DataFrame(
         columns=[
             "record_id_eia",
@@ -609,13 +605,14 @@ def validate_and_add_to_training(
     all_null_matches = pd.DataFrame(columns=["record_id_ferc1"])
 
     # Loop through all the files, validate, and combine them.
-    all_files = os.listdir(VALID_OVERRIDES_PATH)
-    good_files = [file for file in all_files if file.endswith(".xlsx")]
+    path_to_new_training = pudl_rmi.INPUTS_DIR / "add_to_training"
+    all_files = os.listdir(path_to_new_training)
+    excel_files = [file for file in all_files if file.endswith(".xlsx")]
 
-    for file in good_files:
+    for file in excel_files:
         logger.info(f"Processing fixes in {file}")
         file_df = (
-            pd.read_excel((VALID_OVERRIDES_PATH / file))
+            pd.read_excel(path_to_new_training / file)
             .pipe(
                 validate_override_fixes,
                 utils_df,
