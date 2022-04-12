@@ -124,27 +124,37 @@ def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     logger.debug("Prepping FERC-EIA table")
     check_connections = ferc1_eia[RELEVANT_COLS_FERC_EIA].copy()
 
-    # Add a column to tell whether it's a good match, who verified / made the match,
-    # and any notes about weirdness.
-    check_connections.insert(0, "verified", np.nan)
-    check_connections.insert(1, "used_match_record", np.nan)
-    check_connections.insert(2, "signature_1", np.nan)
-    check_connections.insert(3, "signature_2", np.nan)
-    check_connections.insert(4, "notes", np.nan)
-    check_connections.insert(6, "record_id_eia_override_1", np.nan)
-    check_connections.insert(7, "record_id_eia_override_2", np.nan)
-    check_connections.insert(8, "record_id_eia_override_3", np.nan)
-    check_connections.insert(9, "best_match", np.nan)
+    # Add columns for user input and percent diff. These lists are specificalled
+    # ordered so that they appear in the df as they appear in each list.
+    ordered_input_values_cols = [
+        "verified",
+        "used_match_record",
+        "signature_1",
+        "signature_2",
+        "notes",
+        "record_id_override_1",
+        "record_id_override_2",
+        "record_id_override_3",
+        "best_match",
+    ]
+    ordered_pct_diff_cols = [
+        "fuel_type_code_pudl_diff",
+        "net_generation_mwh_pct_diff",
+        "capacity_mw_pct_diff",
+        "capacity_factor_pct_diff",
+        "total_fuel_cost_pct_diff",
+        "total_mmbtu_pct_diff",
+        "fuel_cost_per_mmbtu_pct_diff",
+        "installation_year_diff",
+    ]
 
-    # put these in the right order to be filled in by pct_diff
-    check_connections.insert(26, "fuel_type_code_pudl_diff", np.nan)
-    check_connections.insert(29, "net_generation_mwh_pct_diff", np.nan)
-    check_connections.insert(32, "capacity_mw_pct_diff", np.nan)
-    check_connections.insert(35, "capacity_factor_pct_diff", np.nan)
-    check_connections.insert(38, "total_fuel_cost_pct_diff", np.nan)
-    check_connections.insert(41, "total_mmbtu_pct_diff", np.nan)
-    check_connections.insert(44, "fuel_cost_per_mmbtu_pct_diff", np.nan)
-    check_connections.insert(47, "installation_year_diff", np.nan)
+    for row in range(0, len(ordered_input_values_cols)):
+        check_connections.insert(row, ordered_input_values_cols[row], np.nan)
+
+    pct_diff_col_loc = check_connections.columns.get_loc("fuel_type_code_pudl_eia") + 1
+    for col in ordered_pct_diff_cols:
+        check_connections.insert(pct_diff_col_loc, col, np.nan)
+        pct_diff_col_loc = pct_diff_col_loc + 3
 
     # Fix some column names
     check_connections.rename(
