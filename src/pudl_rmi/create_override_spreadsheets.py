@@ -572,11 +572,11 @@ def _add_to_null_overrides(null_matches):
     new_null_matches = null_matches[["record_id_ferc1"]].copy()
     logger.debug(f"Found {len(new_null_matches)} new null matches")
     # Get current null matches
-    current_null_matches = pd.read_csv(pudl_rmi.NULL_OVERRIDES)
+    current_null_matches = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
     # Combine new and current record_id_ferc1 values that have no EIA match
     out_null_matches = current_null_matches.append(new_null_matches).drop_duplicates()
     # Write the combined values out to the same location as before
-    out_null_matches.to_csv(pudl_rmi.NULL_OVERRIDES, index=False)
+    out_null_matches.to_csv(pudl_rmi.NULL_FERC1_EIA_CSV, index=False)
 
 
 def validate_and_add_to_training(

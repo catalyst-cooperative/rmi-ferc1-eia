@@ -1438,7 +1438,7 @@ def add_null_overrides(connects_ferc1_eia):
     """
     logger.info("Overriding specified record_id_ferc1 values with NA record_id_eia")
     # Get record_id_ferc1 values that should be overriden to have no EIA match
-    null_overrides = pd.read_csv(pudl_rmi.NULL_OVERRIDES)
+    null_overrides = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
     # Make sure there is content!
     assert ~null_overrides.empty
     # List of EIA columns to null. Ideally would like to get this from elsewhere, but
