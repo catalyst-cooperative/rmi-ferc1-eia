@@ -88,10 +88,6 @@ RELEVANT_COLS_PPL = [
 # not sure whether to add this to __init__ b/c not in input or outputs file...
 VALID_OVERRIDES_PATH = pathlib.Path().cwd().parent / "add_to_training"
 
-# Some of these DFs are defined in the functions themselves vs. as global variables.
-# I'm not sure which is best...
-TRAINING_DATA = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
-
 # --------------------------------------------------------------------------------------
 # Generate Override Tools
 # --------------------------------------------------------------------------------------
@@ -597,9 +593,10 @@ def validate_and_add_to_training(
         pandas.DataFrame: A DataFrame with all of the new overrides combined.
     """
     # Define all relevant tables
-    ferc1_eia = rmi_out.ferc1_to_eia()
-    ppl = rmi_out.plant_parts_eia().reset_index()
+    ferc1_eia_df = rmi_out.ferc1_to_eia()
+    ppl_df = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
+    training_df = pd.read_csv(pudl_out.TRAIN_FERC1_EIA_CSV)
     all_overrides = pd.DataFrame(
         columns=[
             "record_id_eia",
@@ -622,9 +619,9 @@ def validate_and_add_to_training(
             .pipe(
                 validate_override_fixes,
                 utils_df,
-                ppl,
-                ferc1_eia,
-                TRAINING_DATA,
+                ppl_df,
+                ferc1_eia_df,
+                training_df,
                 expect_override_overrides=expect_override_overrides,
             )
             .rename(
