@@ -312,9 +312,10 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
     util_year_subset_dict = {}
     for df_name, df in inputs_dict.items():
         logger.debug(f"Getting utility-year subset for {df_name}")
-        in_year_range = df["report_year"].isin(years)
-        in_eia_util_list = df["utility_id_eia"].isin(util_id_eia_list)
-        subset_df = df[in_year_range & in_eia_util_list].copy()
+        subset_df = df[
+            (df["report_year"].isin(years))
+            & (df["utility_id_eia"].isin(util_id_eia_list))
+        ].copy()
         # Make sure dfs aren't too big...
         assert (
             len(subset_df) < 500000
