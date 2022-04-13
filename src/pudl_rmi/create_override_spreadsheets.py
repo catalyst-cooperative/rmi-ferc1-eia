@@ -219,10 +219,10 @@ def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
         on=["utility_id_eia", "report_year"],
         how="left",
         validate="m:1",
-    ).rename(columns={"utility_name_eia": "utility_name"})
+    )
 
-    check_connections.insert(19, "utility_name_eia", check_connections.utility_name)
-    check_connections = check_connections.drop(columns=["utility_name"])
+    utility_name_eia = check_connections.pop("utility_name")
+    check_connections.insert(19, "utility_name_eia", utility_name_eia)
 
     return check_connections
 
