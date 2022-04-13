@@ -317,11 +317,12 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
             & (df["utility_id_eia"].isin(util_id_eia_list))
         ].copy()
         # Make sure dfs aren't too big...
-        assert (
-            len(subset_df) < 500000
-        ), "Your subset is more than 500,000 rows...this \
-            is going to make excel reaaalllllyyy slow. Try entering a smaller utility \
-            or year subset"
+        if len(subset_df) < 500000:
+            raise AssertionError(
+                "Your subset is more than 500,000 rows...this \
+                is going to make excel reaaalllllyyy slow. Try entering a smaller utility \
+                or year subset"
+            )
 
         if df_name == "ferc_eia":
             # Add column with excel formula to check if the override record id is the
