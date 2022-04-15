@@ -443,7 +443,7 @@ def validate_override_fixes(
     training_data,
     expect_override_overrides=False,
 ) -> pd.DataFrame:
-    """Process the verified and/or fixed matches.
+    """Process the verified and/or fixed matches and look for human error.
 
     Args:
         validated_connections (pd.DataFrame): A dataframe in the add_to_training
@@ -472,15 +472,15 @@ def validate_override_fixes(
 
     """
     logger.info("Validating overrides")
-    # Make sure verified col is boolean
-    validated_connections = validated_connections.assign(
-        verified=lambda x: x.verified.astype("boolean").fillna(False)
+    # When there are NA values in the verified column in the excel doc, it seems that
+    # the TRUE values become 1.0 and the column becomes a type float. Let's replace
+    # those here and make it a boolean.
+    validated_connections["verified"] = validated_connections["verified"].replace(
+        {1: True, np.nan: False}
     )
-    # Make sure there are no rouge descriptions in the verified field (besides TRUE)
-    match_language = validated_connections.verified.dropna().unique()
-    assert (
-        len(outliers := [x for x in match_language if x not in [True, False]]) == 0
-    ), f"All validated matches/overrides must be marked TRUE; found {outliers}"
+    # Make sure the verified column doesn't contain non-boolean outliers. This will fail
+    # if there are bad values.
+    validated_connections.astype({"verified": pd.BooleanDtype()})
 
     # From validated records, get only records with an override
     only_overrides = (
