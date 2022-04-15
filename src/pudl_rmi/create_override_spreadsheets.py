@@ -520,7 +520,7 @@ def validate_override_fixes(
     # record_id_eia_override_1.
     logger.debug("Checking for mismatched utility ids")
     only_overrides = only_overrides.merge(
-        ppl[["record_id_eia", "utility_id_eia"]],
+        ppl[["record_id_eia", "utility_id_eia"]].drop_duplicates(),
         left_on="record_id_eia_override_1",
         right_on="record_id_eia",
         how="left",
@@ -529,7 +529,7 @@ def validate_override_fixes(
     # Now merge the utility_id_pudl from EIA in so that you can compare it with the
     # utility_id_pudl from FERC that's already in the overrides
     only_overrides = only_overrides.merge(
-        utils_eia860[["utility_id_eia", "utility_id_pudl"]],
+        utils_eia860[["utility_id_eia", "utility_id_pudl"]].drop_duplicates(),
         left_on="utility_id_eia_ppl",
         right_on="utility_id_eia",
         how="left",
@@ -537,11 +537,14 @@ def validate_override_fixes(
     )
     # Now we can actually compare the two columns
     if (
-        only_overrides["utility_id_pudl"] != only_overrides["utility_id_pudl_utils"]
-    ).any():
-        raise AssertionError(
-            "Found mismatched utilities"
-        )  # Add in an f-string to show WHICH utilitie
+        len(
+            bad_utils := only_overrides["utility_id_pudl"].compare(
+                only_overrides["utility_id_pudl_utils"]
+            )
+        )
+        > 0
+    ):
+        raise AssertionError(f"Found mismatched utilities: {bad_utils}")
 
     # # Compare utility_id_eia from record_id_eia_override_1 to the pudl_id from
     # # utils_eia860 and make sure that matches the pudl_id from ferc in the overrides
@@ -581,15 +584,26 @@ def validate_override_fixes(
     # Make sure the year in the EIA id overrides match the year in the report_year
     # column.
     logger.debug("Checking that year in override id matches report year")
-    year_ser = only_overrides.record_id_eia_override_1.str.extract(r"(_20\d{2})")[
-        0
-    ].str.replace("_", "")
-    year_ser_int = pd.to_numeric(year_ser, errors="coerce").astype("Int64")
-    assert (
-        len(bad_eia_year := only_overrides["report_year"].compare(year_ser_int)) == 0
-    ), f"Found record_id_eia_override_1 values that don't correspond to the right \
-        report year:\
-        {[only_overrides.iloc[x].record_id_eia_override_1 for x in bad_eia_year.index]}"
+    only_overrides = only_overrides.merge(
+        ppl[["record_id_eia", "report_year"]].drop_duplicates(),
+        left_on="record_id_eia_override_1",
+        right_on="record_id_eia",
+        how="left",
+        suffixes=("", "_ppl"),
+    )
+    if (
+        len(
+            bad_eia_year := only_overrides["report_year"].compare(
+                only_overrides["report_year_ppl"]
+            )
+        )
+        > 0
+    ):
+        raise AssertionError(
+            f"Found record_id_eia_override_1 values that don't correspond to the right \
+            report year:\
+            {[only_overrides.iloc[x].record_id_eia_override_1 for x in bad_eia_year.index]}"
+        )
 
     # If you don't expect to override values that have already been overridden, make
     # sure the ids you fixed aren't already in the training data.
