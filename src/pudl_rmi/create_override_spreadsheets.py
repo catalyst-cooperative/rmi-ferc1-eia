@@ -465,7 +465,8 @@ def validate_override_fixes(
             id cooresponding with the FERC record.
         AssertionError: If there are EIA override id records that don't correspond to
             the correct report year.
-        AssertionError: If you didn't expect to override overrides but the data does.
+        AssertionError: If you didn't expect to override overrides but the new training
+            data implies an override to the existing training data.
     Returns:
         pd.DataFrame: The validated FERC-EIA dataframe you're trying to add to the
             training data.
