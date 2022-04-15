@@ -683,19 +683,19 @@ def validate_and_add_to_training(
     ppl_df = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
     training_df = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
-    all_overrides = pd.DataFrame(
-        columns=[
-            "record_id_eia",
-            "record_id_ferc1",
-            "signature_1",
-            "signature_2",
-            "notes",
-        ]
-    )
-    all_null_matches = pd.DataFrame(columns=["record_id_ferc1"])
+    path_to_new_training = pudl_rmi.INPUTS_DIR / "add_to_training"
+    override_cols = [
+        "record_id_eia",
+        "record_id_ferc1",
+        "signature_1",
+        "signature_2",
+        "notes",
+    ]
+    null_match_cols = ["record_id_ferc1"]
+    all_overrides_list = []
+    all_null_matches_list = []
 
     # Loop through all the files, validate, and combine them.
-    path_to_new_training = pudl_rmi.INPUTS_DIR / "add_to_training"
     all_files = os.listdir(path_to_new_training)
     excel_files = [file for file in all_files if file.endswith(".xlsx")]
 
@@ -718,13 +718,19 @@ def validate_and_add_to_training(
                 }
             )
         )
-        # Get just the overrides and combine
-        only_overrides = file_df[file_df["record_id_eia"].notna()].copy()
-        all_overrides = all_overrides.append(only_overrides)
-        # Get just the null matches and combine
-        only_null_matches = file_df[file_df["record_id_eia"].isna()].copy()
-        all_null_matches = all_null_matches.append(only_null_matches)
+        # Get just the overrides and combine them to full list of overrides
+        only_overrides = file_df[file_df["record_id_eia"].notna()][override_cols].copy()
+        all_overrides_list.append(only_overrides)
+        # Get just the null matches and combine them to full list of overrides
+        only_null_matches = file_df[file_df["record_id_eia"].isna()][
+            null_match_cols
+        ].copy()
+        all_null_matches_list.append(only_null_matches)
+
+    # Combine all training data and null matches
+    all_overrides_df = pd.concat(all_overrides_list)
+    all_null_matches_df = pd.concat(all_null_matches_list)
 
     # Add the records to the training data and null overrides
-    _add_to_training(all_overrides)
-    _add_to_null_overrides(all_null_matches)
+    _add_to_training(all_overrides_df)
+    _add_to_null_overrides(all_null_matches_df)
