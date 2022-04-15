@@ -518,27 +518,15 @@ def validate_override_fixes(
     # Make sure the EIA utility id from the override matches the PUDL id from the FERC
     # record. To do this, we'll make a dictionary mapping PUDL id to a list of EIA ids
     logger.debug("Checking for mismatched utility ids")
-    assert ~utils_eia860.duplicated(subset=["report_date", "utility_id_eia"]).any()
-    # Make a dictionary of PUDL id to EIA id (in some cases it is 1:m)
     eia_id_list_series = utils_eia860.groupby("utility_id_pudl").apply(
         lambda x: x.utility_id_eia.unique().tolist()
     )
     eia_id_dict = dict(zip(eia_id_list_series.index, eia_id_list_series))
-    # Add a column that extracts the utility id eia from record_id_eia_override_1. This
-    # gets a little wonky because sometimes it ends with the eia id: _55555 and
-    # sometimes it ends with a string: _55555_retired. This regex gets both and
-    # converts them to integers.
+    # Map utility_id_eia from PPL onto each record_id_eia_override_1.
+    record_id_util_id_dict = dict(zip(ppl["record_id_eia"], ppl["utility_id_eia"]))
     only_overrides[
         "utility_id_eia_override"
-    ] = only_overrides.record_id_eia_override_1.str.extract(r"(\d+_*[a-z]*$)")[
-        0
-    ].str.extract(
-        r"(\d+)"
-    )
-    # For some reason I can't just add .astype("Int64 to the prior step...")
-    only_overrides[
-        "utility_id_eia_override"
-    ] = only_overrides.utility_id_eia_override.astype("Int64")
+    ] = only_overrides.record_id_eia_override_1.map(record_id_util_id_dict)
 
     assert (
         len(
