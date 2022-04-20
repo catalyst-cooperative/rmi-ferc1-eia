@@ -21,7 +21,7 @@ setup(
         "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@dev",
         "fuzzywuzzy~=0.18.0",
         "python-levenshtein~=0.12.2",
-        "recordlinkage~=0.14.0",
+        "recordlinkage>=0.14,<0.16",
     ],
     extras_require={
         "test": [
