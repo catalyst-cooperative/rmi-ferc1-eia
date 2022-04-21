@@ -89,7 +89,7 @@ class Output:
     # @profile
     def deprish(self, clobber=False):
         """
-        Generate or grab the cleaned deprecaition studies.
+        Generate or grab the cleaned depreciation studies.
 
         Args:
             clobber (boolean): True if you want to regenerate the depreciation
@@ -124,7 +124,7 @@ class Output:
                 pickled. Default is False.
             clobber_deprish : True if you want to regenerate the depreciation
                 data whether or not the output is already pickled. The
-                deprecaition data is an interim input to make the connection
+                depreciation data is an interim input to make the connection
                 between depreciation and EIA. Default is False.
             clobber_plant_parts_eia: True if you want to regenerate the EIA
                 plant-part list whether or not the output is already pickled.
@@ -209,7 +209,7 @@ class Output:
                 the depreciaiton to FERC1 output. Default is False.
             clobber_deprish : True if you want to regenerate the depreciation
                 data whether or not the output is already pickled. The
-                deprecaition data is an interim input to make the connection
+                depreciation data is an interim input to make the connection
                 between depreciation and EIA. Default is False.
             clobber_deprish_eia (boolean): Generate and cache a new interim
                 output of the connection between EIA and depreciation data and

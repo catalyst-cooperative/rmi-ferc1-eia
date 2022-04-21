@@ -46,11 +46,11 @@ def fake_duke_deprish_eia_for_mod(df_to_fake, ppe):
                 report_date=pd.to_datetime(fake_year, format="%Y"),
             )
             .replace(
-                {
+                to_replace={
                     "record_id_eia": "_2018_",
                     "line_id": "2018_",
                 },
-                {"record_id_eia": f"_{fake_year}_", "line_id": f"{fake_year}_"},
+                value={"record_id_eia": f"_{fake_year}_", "line_id": f"{fake_year}_"},
                 regex=True,
             )
         )

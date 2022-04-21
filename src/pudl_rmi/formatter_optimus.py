@@ -7,7 +7,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-RENAME_COLS = {
+RENAME_COLS: Dict = {
     "record_id_eia": "Unique_ID",
     "faked_1": "Scenario_Short",
     "utility_name_eia": "Utility",
@@ -112,7 +112,7 @@ RENAME_COLS = {
     "ferc_acct_name": "FERC Acct",
 }
 
-TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE = {
+TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE: Dict = {
     "Conventional Steam Coal": "Coal",
     "Natural Gas Fired Combined Cycle": "NaturalGasCC",
     "Natural Gas Fired Combustion Turbine": "NaturalGasCT",
@@ -173,7 +173,8 @@ def execute(
             validate="m:1",
             how="left",
         )
-        .merge(
+        .merge(  # sorting by report date to get the most recent utility name
+            # because they can change over time and rmi prefers the up-to-date names
             utils_eia860.sort_values(["report_date"], ascending=False)[
                 ["utility_id_pudl", "utility_name_eia"]
             ].drop_duplicates(subset=["utility_id_pudl"]),
