@@ -121,14 +121,13 @@ def agg_test_data(
     * data column name with ``_isclose`` suffix: a boolean column which is
       generated from checking if the sum of that data column in df1 and df2 are
       close calcuated using ``np.isclose``
-    *  data column name with ``_ratio`` suffix: a ratio column is the divsion
+    * data column name with ``_ratio`` suffix: a ratio column is the divsion
       of the sum of the data column from df1 and df2.
 
     Args:
         df1: One dataframe to sum and check consistency with ``df2``.
         df2: Other dataframe to sum and check consistency against ``df1``.
-        data_cols: data columns to check. Columns must be in both ``df1`` and
-            ``df2``.
+        data_cols: data columns to check. Columns must be in both ``df1`` and ``df2``.
         **kwarg: arguments to be passed into ``np.isclose``
     """
     test = pd.merge(
