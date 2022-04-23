@@ -110,7 +110,7 @@ def group_sum_cols(df, data_cols: List[str], by: List[str]) -> pd.DataFrame:
 
 
 def agg_test_data(
-    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: List[str], by: List[str], **kwarg
+    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: List[str], by: List[str], **kwargs
 ) -> pd.DataFrame:
     """
     Merge two grouped input tables to determine if summed data column are equal.
@@ -118,10 +118,11 @@ def agg_test_data(
     For each column in data_cols, the output will include the grouped sum of
     the column from df1 and df2 with ``_1`` and ``_2`` suffixes respectively,
     as well as TWO additional columns:
+
     * data column name with ``_isclose`` suffix: a boolean column which is
       generated from checking if the sum of that data column in df1 and df2 are
-      close calcuated using ``np.isclose``
-    *  data column name with ``_ratio`` suffix: a ratio column is the divsion
+      close calculated using ``np.isclose``
+    * data column name with ``_ratio`` suffix: a ratio column is the division
       of the sum of the data column from df1 and df2.
 
     Args:
@@ -129,7 +130,7 @@ def agg_test_data(
         df2: Other dataframe to sum and check consistency against ``df1``.
         data_cols: data columns to check. Columns must be in both ``df1`` and
             ``df2``.
-        **kwarg: arguments to be passed into ``np.isclose``
+        kwargs: arguments to be passed into ``np.isclose``
     """
     test = pd.merge(
         group_sum_cols(add_data_source(df1), data_cols=data_cols, by=by),
@@ -150,7 +151,7 @@ def agg_test_data(
             test[f"{data_col}_1"],
             test[f"{data_col}_2"],
             equal_nan=True,
-            **kwarg,
+            **kwargs,
         )
         test.loc[:, f"{data_col}_ratio"] = test[f"{data_col}_1"] / test[f"{data_col}_2"]
         isclose_fraction = test[f"{data_col}_isclose"].sum() / len(test)
