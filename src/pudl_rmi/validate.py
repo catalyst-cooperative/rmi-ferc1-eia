@@ -42,6 +42,7 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
 
     Args:
         pudl_engine: A connection engine for the PUDL DB.
+
     """
     utils_f1 = pd.read_sql("utilities_ferc1", pudl_engine)
     npb = pd.read_csv(
@@ -121,16 +122,16 @@ def agg_test_data(
 
     * data column name with ``_isclose`` suffix: a boolean column which is
       generated from checking if the sum of that data column in df1 and df2 are
-      close calculated using ``np.isclose``
-    * data column name with ``_ratio`` suffix: a ratio column is the division
-      of the sum of the data column from df1 and df2.
+      close calcuated using ``np.isclose``
+    * data column name with ``_ratio`` suffix: a ratio column is the divsion
+      of the sum of the data column from ``df1`` and ``df2``.
 
     Args:
         df1: One dataframe to sum and check consistency with ``df2``.
         df2: Other dataframe to sum and check consistency against ``df1``.
-        data_cols: data columns to check. Columns must be in both ``df1`` and
-            ``df2``.
+        data_cols: data columns to check. Columns must be in both ``df1`` and ``df2``.
         kwargs: arguments to be passed into ``np.isclose``
+
     """
     test = pd.merge(
         group_sum_cols(add_data_source(df1), data_cols=data_cols, by=by),
@@ -195,6 +196,7 @@ def compare_df_vs_net_plant_balance(
         data_cols: list of columns to compare.
         rtol: The relative tolerance parameter from ``np.isclose``.
         atol: The absolute tolerance parameter from ``np.isclose``.
+
     """
     pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
     compare = agg_test_data(
