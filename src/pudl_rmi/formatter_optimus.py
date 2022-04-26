@@ -160,6 +160,7 @@ def execute(
         utils_eia860: ``pudl_out.utils_eia860()``
         kwargs: Additional kwargs to be passed into :func:``select_from_deprish_ferc1``
             if you want to select specific utilities/years/data sources.
+
     """
     # if there are kwargs, this means you want to select from deprish_ferc1_eia
     if kwargs:
@@ -231,6 +232,7 @@ def select_from_deprish_ferc1(
         include_non_priority_data_source: If True, include records from
             depreciation data sources other than the ``priority_data_source``
             if there are plants that are not in the ``priority_data_source``.
+
     """
     util_all = deprish_ferc1_eia[
         (
