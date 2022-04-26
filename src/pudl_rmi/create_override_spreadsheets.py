@@ -18,6 +18,7 @@ import os
 
 import numpy as np
 import pandas as pd
+from typing import Literal
 
 import pudl_rmi
 
@@ -409,12 +410,17 @@ def generate_all_override_spreadsheets(pudl_out, rmi_out, util_dict, years) -> N
 # --------------------------------------------------------------------------------------
 
 
-def _check_id_consistency(id_type, df, actual_ids, error_message) -> None:
+def _check_id_consistency(
+    id_col: Literal["record_id_eia_override_1", "record_id_ferc1"],
+    df,
+    actual_ids,
+    error_message,
+) -> None:
     """Check for rogue FERC or EIA ids that don't exist.
 
     Args:
-        id_type (str): A string, either 'ferc' or 'eia' indicating whether to check
-            ferc or eia id columns.
+        id_col (str): The name of either the ferc record id column: record_id_ferc1 or
+            the eia record override column: record_id_eia_override_1.
         actual_ids (list): A list of the ferc or eia ids that are valid and come from
             either the ppl or official ferc-eia record linkage.
         error_message (str): A short string to indicate the type of error you're
@@ -422,14 +428,7 @@ def _check_id_consistency(id_type, df, actual_ids, error_message) -> None:
             list or values that are already in the training data.
 
     """
-    logger.debug(f"Checking {id_type} record id consistency for {error_message}")
-
-    if id_type not in ["ferc", "eia"]:
-        raise ValueError("id_type must be either 'ferc' or 'eia'.")
-    if id_type == "eia":
-        id_col = "record_id_eia_override_1"
-    elif id_type == "ferc":
-        id_col = "record_id_ferc1"
+    logger.debug(f"Checking {id_col} consistency for {error_message}")
 
     assert (
         len(bad_ids := df[~df[id_col].isin(actual_ids)][id_col].to_list()) == 0
@@ -496,13 +495,16 @@ def validate_override_fixes(
     # record linkage.
     actual_eia_ids = ppl.record_id_eia.unique()
     _check_id_consistency(
-        "eia", only_overrides, actual_eia_ids, "values that don't exist"
+        "record_id_eia_override_1",
+        only_overrides,
+        actual_eia_ids,
+        "values that don't exist",
     )
 
     # It's unlikely that this changed, but check FERC id too just in case!
     actual_ferc_ids = ferc1_eia.record_id_ferc1.unique()
     _check_id_consistency(
-        "ferc", only_overrides, actual_ferc_ids, "values that don't exist"
+        "record_id_ferc1", only_overrides, actual_ferc_ids, "values that don't exist"
     )
 
     # Make sure there are no duplicate EIA id overrides
@@ -612,11 +614,17 @@ def validate_override_fixes(
     if not expect_override_overrides:
         existing_training_eia_ids = training_data.record_id_eia.dropna().unique()
         _check_id_consistency(
-            "eia", only_overrides, existing_training_eia_ids, "already in training"
+            "record_id_eia_override_1",
+            only_overrides,
+            existing_training_eia_ids,
+            "already in training",
         )
         existing_training_ferc_ids = training_data.record_id_ferc1.dropna().unique()
         _check_id_consistency(
-            "ferc", only_overrides, existing_training_ferc_ids, "already in training"
+            "record_id_ferc1",
+            only_overrides,
+            existing_training_ferc_ids,
+            "already in training",
         )
 
     # Only return the results that have been verified
