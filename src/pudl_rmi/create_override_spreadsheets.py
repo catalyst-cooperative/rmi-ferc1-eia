@@ -97,29 +97,27 @@ def _pct_diff(df, col) -> None:
     ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
 
 
-def is_best_match(
-    df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3
-):  # not currently included!
-    """Return a string indicating whether FERC-EIA match is immediately passable.
+def _is_best_match(df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3) -> None:
+    """Fill the best_match column with strings to show cap, net_gen, inst_year match.
 
     The process of manually checking all of the FERC-EIA matches made by the machine
     learning algorithm is tedius. This function makes it easier to speed through the
     obviously good matches and pay more attention to those that are more questionable.
 
-    Currently, a "best match" is comprised of a FERC-EIA match with a capacity percent
+    By default, a "best match" is comprised of a FERC-EIA match with a capacity percent
     difference of less than 6%, a net generation percent difference of less than 6%,
     and an installation year difference of less than 3 years.
 
     """
-    message = []
-    if abs(df.capacity_mw_pct_diff) < cap_pct_diff:
-        message.append("cap")
-    if abs(df.net_generation_mwh_pct_diff) < net_gen_pct_diff:
-        message.append("net-gen")
-    if abs(df.installation_year_diff) < inst_year_diff:
-        message.append("inst-y")
+    best_cap = df.capacity_mw_pct_diff < cap_pct_diff
+    best_net_gen = df.net_generation_mwh_pct_diff < net_gen_pct_diff
+    best_inst_year = df.installation_year_diff < inst_year_diff
 
-    return "_".join(message)
+    df.loc[:, "best_match"] = df.best_match.fillna("")
+    df.loc[best_cap, "best_match"] = "cap"
+    df.loc[best_net_gen, "best_match"] = df.best_match + "_net-gen"
+    df.loc[best_inst_year, "best_match"] = df.best_match + "_inst_year"
+    df.loc[:, "best_match"] = df.best_match.replace(r"^_", "", regex=True)
 
 
 def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
@@ -181,7 +179,7 @@ def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
         _pct_diff(check_connections, col)
 
     # Add best match col
-    # check_connections["best_match"] = _is_best_match(check_connections)
+    _is_best_match(check_connections)
 
     # Add qualitative similarity columns (fuel_type_code_pudl)
     check_connections.loc[
