@@ -550,41 +550,6 @@ def validate_override_fixes(
     ):
         raise AssertionError(f"Found mismatched utilities: {bad_utils}")
 
-    # # Compare utility_id_eia from record_id_eia_override_1 to the pudl_id from
-    # # utils_eia860 and make sure that matches the pudl_id from ferc in the overrides
-    # utils = (
-    #     utils_eia860[["utility_id_eia", "utility_id_pudl"]]
-    #     .drop_duplicates()
-    #     .set_index("utility_id_eia")
-    # )
-    # only_overrides["utility_id_eia_override"]
-    #
-    # # To do this, we'll make a dictionary mapping PUDL id to a list of EIA ids
-    # logger.debug("Checking for mismatched utility ids")
-    # eia_id_list_series = utils_eia860.groupby("utility_id_pudl").apply(
-    #     lambda x: x.utility_id_eia.unique().tolist()
-    # )
-    # eia_id_dict = dict(zip(eia_id_list_series.index, eia_id_list_series))
-    # # Map utility_id_eia from PPL onto each record_id_eia_override_1.
-    # record_id_util_id_dict = dict(zip(ppl["record_id_eia"], ppl["utility_id_eia"]))
-    # only_overrides[
-    #     "utility_id_eia_override"
-    # ] = only_overrides.record_id_eia_override_1.map(record_id_util_id_dict)
-    #
-    # assert (
-    #     len(
-    #         mismatched_utilities := only_overrides[
-    #             ~only_overrides.apply(
-    #                 lambda x: x.utility_id_eia_override
-    #                 in eia_id_dict[x.utility_id_pudl],
-    #                 axis=1,
-    #             )
-    #         ]
-    #     )
-    #     == 0
-    # ), f"Found mismatched utilities: \
-    # {mismatched_utilities.record_id_eia_override_1}"
-
     # Make sure the year in the EIA id overrides match the year in the report_year
     # column.
     logger.debug("Checking that year in override id matches report year")
