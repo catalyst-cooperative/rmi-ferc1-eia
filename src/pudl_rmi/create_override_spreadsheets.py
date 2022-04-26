@@ -223,8 +223,10 @@ def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
         validate="m:1",
     )
 
-    utility_name_eia = check_connections.pop("utility_name")
+    utility_name_eia = check_connections.pop("utility_name_eia")
     check_connections.insert(19, "utility_name_eia", utility_name_eia)
+
+    # Attempt to add check column
 
     return check_connections
 
@@ -315,11 +317,10 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
     for df_name, df in inputs_dict.items():
         logger.debug(f"Getting utility-year subset for {df_name}")
         subset_df = df[
-            (df["report_year"].isin(years))
-            & (df["utility_id_eia"].isin(util_id_eia_list))
+            df["report_year"].isin(years) & df["utility_id_eia"].isin(util_id_eia_list)
         ].copy()
         # Make sure dfs aren't too big...
-        if len(subset_df) < 500000:
+        if len(subset_df) > 500000:
             raise AssertionError(
                 "Your subset is more than 500,000 rows...this \
                 is going to make excel reaaalllllyyy slow. Try entering a smaller utility \
@@ -329,20 +330,18 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
         if df_name == "ferc_eia":
             # Add column with excel formula to check if the override record id is the
             # same as the AI assigend id. Doing this here instead of prep_ferc_eia
-            # because it is based on index number which is changes when you take a
+            # because it is based on row index number which is changes when you take a
             # subset of the data.
-            subset_df = (
-                subset_df.reset_index()
-                .assign(
-                    used_match_record=lambda x: (  # can this be moved to prep?
-                        "=(J"
-                        + (x.index + 2).astype("str")
-                        + "=F"
-                        + (x.index + 2).astype("str")
-                        + ")"
-                    )
-                )
-                .drop(columns=["index"])
+            subset_df = subset_df.reset_index()
+            override_col_index = subset_df.columns.get_loc("record_id_override_1")
+            record_link_col_index = subset_df.columns.get_loc("record_id_eia")
+            subset_df["used_match_record"] = (
+                "="
+                + chr(ord("a") + override_col_index)
+                + (subset_df.index + 2).astype(str)
+                + "="
+                + chr(ord("a") + record_link_col_index)
+                + (subset_df.index + 2).astype(str)
             )
 
         util_year_subset_dict[f"{df_name}_util_year_subset"] = subset_df
