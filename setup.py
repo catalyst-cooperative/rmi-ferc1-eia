@@ -19,9 +19,9 @@ setup(
     version="0.1.0",
     install_requires=[
         "catalystcoop.pudl @ git+https://github.com/catalyst-cooperative/pudl.git@dev",
-        "fuzzywuzzy~=0.18.0",
-        "python-levenshtein~=0.12.2",
-        "recordlinkage~=0.14.0",
+        "fuzzywuzzy>=0.18,<0.19",
+        "python-levenshtein>=0.12,<0.13",
+        "recordlinkage>=0.14,<0.16",
     ],
     extras_require={
         "test": [
