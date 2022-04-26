@@ -96,7 +96,9 @@ def _pct_diff(df, col) -> None:
     ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
 
 
-def is_best_match(df):  # not currently included!
+def is_best_match(
+    df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3
+):  # not currently included!
     """Return a string indicating whether FERC-EIA match is immediately passable.
 
     The process of manually checking all of the FERC-EIA matches made by the machine
@@ -109,11 +111,11 @@ def is_best_match(df):  # not currently included!
 
     """
     message = []
-    if abs(df.capacity_mw_pct_diff) < 6:
+    if abs(df.capacity_mw_pct_diff) < cap_pct_diff:
         message.append("cap")
-    if abs(df.net_generation_mwh_pct_diff) < 6:
+    if abs(df.net_generation_mwh_pct_diff) < net_gen_pct_diff:
         message.append("net-gen")
-    if abs(df.installation_year_diff) < 3:
+    if abs(df.installation_year_diff) < inst_year_diff:
         message.append("inst-y")
 
     return "_".join(message)
