@@ -147,7 +147,7 @@ def _is_best_match(
     return df
 
 
-def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
+def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
     ferc1_eia_prep = ferc1_eia.copy()
@@ -263,7 +263,7 @@ def _generate_input_dfs(pudl_out, rmi_out) -> dict:
     """
     logger.debug("Generating inputs")
     inputs_dict = {
-        "ferc_eia": rmi_out.ferc1_to_eia().pipe(_prep_ferc_eia, pudl_out),
+        "ferc_eia": rmi_out.ferc1_to_eia().pipe(_prep_ferc1_eia, pudl_out),
         "ppl": rmi_out.plant_parts_eia().pipe(_prep_ppl, pudl_out),
         "deprish": rmi_out.deprish().pipe(_prep_deprish, pudl_out),
     }
