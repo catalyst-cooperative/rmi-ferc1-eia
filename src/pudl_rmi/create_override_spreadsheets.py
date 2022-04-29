@@ -15,49 +15,67 @@ validate them, and incorporate them into the existing training data.
 """
 import logging
 import os
+from typing import Dict, Literal
 
 import numpy as np
 import pandas as pd
-from typing import Literal
 
 import pudl_rmi
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-RELEVANT_COLS_FERC_EIA = [
-    "record_id_ferc1",
-    "record_id_eia",
-    "true_gran",
-    "report_year",
-    "match_type",
-    "plant_part",
-    "ownership",
-    "utility_id_eia",
-    "utility_id_pudl",
-    "utility_name_ferc1",
-    "plant_id_pudl",
-    "unit_id_pudl",
-    "generator_id",
-    "plant_name_ferc1",
-    "plant_name_new",
-    "fuel_type_code_pudl_ferc1",
-    "fuel_type_code_pudl_eia",
-    "net_generation_mwh_ferc1",
-    "net_generation_mwh_eia",
-    "capacity_mw_ferc1",
-    "capacity_mw_eia",
-    "capacity_factor_ferc1",
-    "capacity_factor_eia",
-    "total_fuel_cost_ferc1",
-    "total_fuel_cost_eia",
-    "total_mmbtu_ferc1",
-    "total_mmbtu_eia",
-    "fuel_cost_per_mmbtu_ferc1",
-    "fuel_cost_per_mmbtu_eia",
-    "installation_year_ferc1",
-    "installation_year_eia",
-]
+RENAME_COLS_FERC_EIA: Dict = {
+    "new_1": "verified",
+    "new_2": "used_match_record",
+    "new_3": "signature_1",
+    "new_4": "signature_2",
+    "new_5": "notes",
+    "new_6": "record_id_override_1",
+    "new_7": "record_id_override_2",
+    "new_8": "record_id_override_3",
+    "new_9": "best_match",
+    "record_id_ferc1": "record_id_ferc1",
+    "record_id_eia": "record_id_eia",
+    "true_gran": "true_gran",
+    "report_year": "report_year",
+    "match_type": "match_type",
+    "plant_part": "plant_part",
+    "ownership": "ownership",
+    "utility_id_eia": "utility_id_eia",
+    "utility_id_pudl_ferc1": "utility_id_pudl",
+    "utility_name_ferc1": "utility_name_ferc1",
+    "new_10": "utility_name_eia",
+    "plant_id_pudl_ferc1": "plant_id_pudl",
+    "unit_id_pudl": "unit_id_pudl",
+    "generator_id": "generator_id",
+    "plant_name_ferc1": "plant_name_ferc1",
+    "plant_name_new": "plant_name_eia",
+    "fuel_type_code_pudl_ferc1": "fuel_type_code_pudl_ferc1",
+    "fuel_type_code_pudl_eia": "fuel_type_code_pudl_eia",
+    "new_11": "fuel_type_code_pudl_diff",
+    "net_generation_mwh_ferc1": "net_generation_mwh_ferc1",
+    "net_generation_mwh_eia": "net_generation_mwh_eia",
+    "new_12": "net_generation_mwh_pct_diff",
+    "capacity_mw_ferc1": "capacity_mw_ferc1",
+    "capacity_mw_eia": "capacity_mw_eia",
+    "new_13": "capacity_mw_pct_diff",
+    "capacity_factor_ferc1": "capacity_factor_ferc1",
+    "capacity_factor_eia": "capacity_factor_eia",
+    "new_14": "capacity_factor_pct_diff",
+    "total_fuel_cost_ferc1": "total_fuel_cost_ferc1",
+    "total_fuel_cost_eia": "total_fuel_cost_eia",
+    "new_15": "total_fuel_cost_pct_diff",
+    "total_mmbtu_ferc1": "total_mmbtu_ferc1",
+    "total_mmbtu_eia": "total_mmbtu_eia",
+    "new_16": "total_mmbtu_pct_diff",
+    "fuel_cost_per_mmbtu_ferc1": "fuel_cost_per_mmbtu_ferc1",
+    "fuel_cost_per_mmbtu_eia": "fuel_cost_per_mmbtu_eia",
+    "new_17": "fuel_cost_per_mmbtu_pct_diff",
+    "installation_year_ferc1": "installation_year_ferc1",
+    "installation_year_eia": "installation_year_eia",
+    "new_18": "installation_year_diff",
+}
 
 RELEVANT_COLS_PPL = [
     "record_id_eia",
@@ -92,6 +110,9 @@ RELEVANT_COLS_PPL = [
 
 def _pct_diff(df, col) -> pd.DataFrame:
     """Calculate percent difference between EIA and FERC versions of a column."""
+    # Fed in the _pct_diff column so make sure it is neutral for this analysis
+    col = col.replace("_pct_diff", "")
+    # Fill in the _pct_diff column with the actual percent difference value
     df.loc[
         (df[f"{col}_eia"] > 0) & (df[f"{col}_ferc1"] > 0), f"{col}_pct_diff"
     ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
@@ -129,111 +150,65 @@ def _is_best_match(
 def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
-    check_connections = ferc1_eia[RELEVANT_COLS_FERC_EIA].copy()
+    ferc1_eia_prep = ferc1_eia.copy()
 
-    # Add columns for user input and percent diff. These lists are specificalled
-    # ordered so that they appear in the df as they appear in each list.
-    ordered_input_values_cols = [
-        "verified",
-        "used_match_record",
-        "signature_1",
-        "signature_2",
-        "notes",
-        "record_id_override_1",
-        "record_id_override_2",
-        "record_id_override_3",
-        "best_match",
-    ]
-    ordered_pct_diff_cols = [
-        "fuel_type_code_pudl_diff",
-        "net_generation_mwh_pct_diff",
-        "capacity_mw_pct_diff",
-        "capacity_factor_pct_diff",
-        "total_fuel_cost_pct_diff",
-        "total_mmbtu_pct_diff",
-        "fuel_cost_per_mmbtu_pct_diff",
-        "installation_year_diff",
+    # Add the new columns to the df
+    for new_col in [x for x in RENAME_COLS_FERC_EIA.keys() if "new_" in x]:
+        ferc1_eia_prep.loc[:, new_col] = pd.NA
+
+    # Rename the columns, and remove unwanted columns from ferc-eia table
+    ferc1_eia_prep = ferc1_eia_prep.rename(columns=RENAME_COLS_FERC_EIA)[
+        list(RENAME_COLS_FERC_EIA.values())
     ]
 
-    for row in range(0, len(ordered_input_values_cols)):
-        check_connections.insert(row, ordered_input_values_cols[row], np.nan)
+    # Add in pct diff values
+    for pct_diff_col in [x for x in RENAME_COLS_FERC_EIA.values() if "_pct_diff" in x]:
+        ferc1_eia_prep = _pct_diff(ferc1_eia_prep, pct_diff_col)
 
-    pct_diff_col_loc = check_connections.columns.get_loc("fuel_type_code_pudl_eia") + 1
-    for col in ordered_pct_diff_cols:
-        check_connections.insert(pct_diff_col_loc, col, np.nan)
-        pct_diff_col_loc = pct_diff_col_loc + 3
-
-    # Fix some column names
-    check_connections.rename(
-        columns={
-            "utility_id_pudl_ferc1": "utility_id_pudl",
-            "plant_id_pudl_ferc1": "plant_id_pudl",
-            "plant_name_new": "plant_name_eia",
-        },
-        inplace=True,
-    )
-
-    # Add pct diff columns
-    for col in [
-        "net_generation_mwh",
-        "capacity_mw",
-        "capacity_factor",
-        "total_fuel_cost",
-        "total_mmbtu",
-        "fuel_cost_per_mmbtu",
-    ]:
-        check_connections = _pct_diff(check_connections, col)
-
-    # Add best match col
-    check_connections = _is_best_match(check_connections)
-
-    # Add qualitative similarity columns (fuel_type_code_pudl)
-    check_connections.loc[
-        (check_connections.fuel_type_code_pudl_eia.notna())
-        & (check_connections.fuel_type_code_pudl_ferc1.notna()),
+    # Add in fuel_type_code_pudl diff (qualitative bool)
+    ferc1_eia_prep.loc[
+        ferc1_eia_prep.fuel_type_code_pudl_eia.notna()
+        & ferc1_eia_prep.fuel_type_code_pudl_ferc1.notna(),
         "fuel_type_code_pudl_diff",
-    ] = check_connections.fuel_type_code_pudl_eia == (
-        check_connections.fuel_type_code_pudl_ferc1
+    ] = ferc1_eia_prep.fuel_type_code_pudl_eia == (
+        ferc1_eia_prep.fuel_type_code_pudl_ferc1
     )
 
-    # Add quantitative similarity columns (installation year)
-    check_connections.loc[
+    # Add in installation_year diff (diff vs. pct_diff)
+    ferc1_eia_prep.loc[
         :, "installation_year_ferc1"
-    ] = check_connections.installation_year_ferc1.astype("Int64")
-    check_connections.loc[
-        (check_connections.installation_year_eia.notna())
-        & (check_connections.installation_year_ferc1.notna()),
+    ] = ferc1_eia_prep.installation_year_ferc1.astype("Int64")
+
+    ferc1_eia_prep.loc[
+        ferc1_eia_prep.installation_year_eia.notna()
+        & ferc1_eia_prep.installation_year_ferc1.notna(),
         "installation_year_diff",
     ] = (
-        check_connections.installation_year_eia
-        - check_connections.installation_year_ferc1
+        ferc1_eia_prep.installation_year_eia - ferc1_eia_prep.installation_year_ferc1
     )
 
-    # Move record_id_ferc1
-    record_id_ferc1 = check_connections.pop("record_id_ferc1")
-    check_connections.insert(9, "record_id_ferc1", record_id_ferc1)
+    # Add best match col
+    ferc1_eia_prep = _is_best_match(ferc1_eia_prep)
 
-    # Add utility name eia
-    utils = pudl_out.utils_eia860().assign(report_year=lambda x: x.report_date.dt.year)[
-        ["utility_id_eia", "utility_name_eia", "report_year"]
-    ]
-
-    check_connections = pd.merge(
-        check_connections.dropna(
-            subset=["record_id_ferc1"]
-        ),  # dropna for now becuase somehow there is a full NA row in ferc-eia....figure out later
-        utils,
+    # Add utility_name_eia
+    utils = pudl_out.utils_eia860().copy()
+    utils.loc[:, "report_year"] = utils.report_date.dt.year
+    ferc1_eia_prep = pd.merge(
+        ferc1_eia_prep,
+        utils[["utility_id_eia", "utility_name_eia", "report_year"]],
         on=["utility_id_eia", "report_year"],
         how="left",
         validate="m:1",
+        suffixes=("", "_merge"),
     )
+    # This bit is annoying -- I already have the utility_name_eia column defined and put
+    # in the correct order, but not I need to add it in again via merge. Mapping would
+    # be ideal, but it's slower. So, I'm just quickly popping the merge names and
+    # adding it to the blank utility_name_eia column.
+    util_name_eia_actual = ferc1_eia_prep.pop("utility_name_eia_merge")
+    ferc1_eia_prep.loc[:, "utility_name_eia"] = util_name_eia_actual
 
-    utility_name_eia = check_connections.pop("utility_name_eia")
-    check_connections.insert(19, "utility_name_eia", utility_name_eia)
-
-    # Attempt to add check column
-
-    return check_connections
+    return ferc1_eia_prep
 
 
 def _prep_ppl(ppl, pudl_out) -> pd.DataFrame:
@@ -337,7 +312,7 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
             # same as the AI assigend id. Doing this here instead of prep_ferc_eia
             # because it is based on row index number which is changes when you take a
             # subset of the data.
-            subset_df = subset_df.reset_index()
+            subset_df = subset_df.reset_index(drop=True)
             override_col_index = subset_df.columns.get_loc("record_id_override_1")
             record_link_col_index = subset_df.columns.get_loc("record_id_eia")
             subset_df["used_match_record"] = (
