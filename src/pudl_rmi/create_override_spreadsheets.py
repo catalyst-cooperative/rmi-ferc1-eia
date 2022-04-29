@@ -90,14 +90,18 @@ RELEVANT_COLS_PPL = [
 # --------------------------------------------------------------------------------------
 
 
-def _pct_diff(df, col) -> None:
+def _pct_diff(df, col) -> pd.DataFrame:
     """Calculate percent difference between EIA and FERC versions of a column."""
     df.loc[
         (df[f"{col}_eia"] > 0) & (df[f"{col}_ferc1"] > 0), f"{col}_pct_diff"
     ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
 
+    return df
 
-def _is_best_match(df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3) -> None:
+
+def _is_best_match(
+    df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3
+) -> pd.DataFrame:
     """Fill the best_match column with strings to show cap, net_gen, inst_year match.
 
     The process of manually checking all of the FERC-EIA matches made by the machine
@@ -118,6 +122,8 @@ def _is_best_match(df, cap_pct_diff=6, net_gen_pct_diff=6, inst_year_diff=3) -> 
     df.loc[best_net_gen, "best_match"] = df.best_match + "_net-gen"
     df.loc[best_inst_year, "best_match"] = df.best_match + "_inst_year"
     df.loc[:, "best_match"] = df.best_match.replace(r"^_", "", regex=True)
+
+    return df
 
 
 def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
@@ -176,10 +182,10 @@ def _prep_ferc_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
         "total_mmbtu",
         "fuel_cost_per_mmbtu",
     ]:
-        _pct_diff(check_connections, col)
+        check_connections = _pct_diff(check_connections, col)
 
     # Add best match col
-    _is_best_match(check_connections)
+    check_connections = _is_best_match(check_connections)
 
     # Add qualitative similarity columns (fuel_type_code_pudl)
     check_connections.loc[
