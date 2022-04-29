@@ -15,7 +15,7 @@ validate them, and incorporate them into the existing training data.
 """
 import logging
 import os
-from typing import Dict, Literal
+from typing import Dict, Literal, List
 
 import numpy as np
 import pandas as pd
@@ -77,7 +77,7 @@ RENAME_COLS_FERC_EIA: Dict = {
     "new_18": "installation_year_diff",
 }
 
-RELEVANT_COLS_PPL = [
+RELEVANT_COLS_PPL: List = [
     "record_id_eia",
     "report_year",
     "utility_id_pudl",
