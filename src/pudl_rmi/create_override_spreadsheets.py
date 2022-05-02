@@ -15,7 +15,7 @@ validate them, and incorporate them into the existing training data.
 """
 import logging
 import os
-from typing import Dict, Literal, List
+from typing import Dict, List, Literal
 
 import numpy as np
 import pandas as pd
