@@ -45,7 +45,7 @@ RENAME_COLS_FERC_EIA: Dict = {
     "utility_id_eia": "utility_id_eia",
     "utility_id_pudl_ferc1": "utility_id_pudl",
     "utility_name_ferc1": "utility_name_ferc1",
-    "new_10": "utility_name_eia",
+    "utility_name_eia": "utility_name_eia",
     "plant_id_pudl_ferc1": "plant_id_pudl",
     "unit_id_pudl": "unit_id_pudl",
     "generator_id": "generator_id",
@@ -53,28 +53,28 @@ RENAME_COLS_FERC_EIA: Dict = {
     "plant_name_new": "plant_name_eia",
     "fuel_type_code_pudl_ferc1": "fuel_type_code_pudl_ferc1",
     "fuel_type_code_pudl_eia": "fuel_type_code_pudl_eia",
-    "new_11": "fuel_type_code_pudl_diff",
+    "new_10": "fuel_type_code_pudl_diff",
     "net_generation_mwh_ferc1": "net_generation_mwh_ferc1",
     "net_generation_mwh_eia": "net_generation_mwh_eia",
-    "new_12": "net_generation_mwh_pct_diff",
+    "new_11": "net_generation_mwh_pct_diff",
     "capacity_mw_ferc1": "capacity_mw_ferc1",
     "capacity_mw_eia": "capacity_mw_eia",
-    "new_13": "capacity_mw_pct_diff",
+    "new_12": "capacity_mw_pct_diff",
     "capacity_factor_ferc1": "capacity_factor_ferc1",
     "capacity_factor_eia": "capacity_factor_eia",
-    "new_14": "capacity_factor_pct_diff",
+    "new_13": "capacity_factor_pct_diff",
     "total_fuel_cost_ferc1": "total_fuel_cost_ferc1",
     "total_fuel_cost_eia": "total_fuel_cost_eia",
-    "new_15": "total_fuel_cost_pct_diff",
+    "new_14": "total_fuel_cost_pct_diff",
     "total_mmbtu_ferc1": "total_mmbtu_ferc1",
     "total_mmbtu_eia": "total_mmbtu_eia",
-    "new_16": "total_mmbtu_pct_diff",
+    "new_15": "total_mmbtu_pct_diff",
     "fuel_cost_per_mmbtu_ferc1": "fuel_cost_per_mmbtu_ferc1",
     "fuel_cost_per_mmbtu_eia": "fuel_cost_per_mmbtu_eia",
-    "new_17": "fuel_cost_per_mmbtu_pct_diff",
+    "new_16": "fuel_cost_per_mmbtu_pct_diff",
     "installation_year_ferc1": "installation_year_ferc1",
     "installation_year_eia": "installation_year_eia",
-    "new_18": "installation_year_diff",
+    "new_17": "installation_year_diff",
 }
 
 RELEVANT_COLS_PPL: List = [
@@ -152,6 +152,18 @@ def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     logger.debug("Prepping FERC-EIA table")
     ferc1_eia_prep = ferc1_eia.copy()
 
+    # Add utility_name_eia - this must happen before renaming the cols or else there
+    # will be duplicate utility_name_eia columns.
+    utils = pudl_out.utils_eia860().copy()
+    utils.loc[:, "report_year"] = utils.report_date.dt.year
+    ferc1_eia_prep = pd.merge(
+        ferc1_eia_prep,
+        utils[["utility_id_eia", "utility_name_eia", "report_year"]],
+        on=["utility_id_eia", "report_year"],
+        how="left",
+        validate="m:1",
+    )
+
     # Add the new columns to the df
     for new_col in [x for x in RENAME_COLS_FERC_EIA.keys() if "new_" in x]:
         ferc1_eia_prep.loc[:, new_col] = pd.NA
@@ -189,24 +201,6 @@ def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
 
     # Add best match col
     ferc1_eia_prep = _is_best_match(ferc1_eia_prep)
-
-    # Add utility_name_eia
-    utils = pudl_out.utils_eia860().copy()
-    utils.loc[:, "report_year"] = utils.report_date.dt.year
-    ferc1_eia_prep = pd.merge(
-        ferc1_eia_prep,
-        utils[["utility_id_eia", "utility_name_eia", "report_year"]],
-        on=["utility_id_eia", "report_year"],
-        how="left",
-        validate="m:1",
-        suffixes=("", "_merge"),
-    )
-    # This bit is annoying -- I already have the utility_name_eia column defined and put
-    # in the correct order, but not I need to add it in again via merge. Mapping would
-    # be ideal, but it's slower. So, I'm just quickly popping the merge names and
-    # adding it to the blank utility_name_eia column.
-    util_name_eia_actual = ferc1_eia_prep.pop("utility_name_eia_merge")
-    ferc1_eia_prep.loc[:, "utility_name_eia"] = util_name_eia_actual
 
     return ferc1_eia_prep
 
