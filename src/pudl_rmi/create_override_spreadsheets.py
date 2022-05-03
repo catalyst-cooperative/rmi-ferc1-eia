@@ -231,9 +231,11 @@ def _prep_deprish(deprish, pudl_out) -> pd.DataFrame:
     logger.debug("Prepping Deprish Data")
 
     # Get utility_id_eia from EIA
-    util_df = pudl_out.utils_eia860()[["utility_id_pudl", "utility_id_eia"]]
+    util_df = pudl_out.utils_eia860()[
+        ["utility_id_pudl", "utility_id_eia"]
+    ].drop_duplicates()
     deprish.loc[:, "report_year"] = deprish.report_date.dt.year.astype("Int64")
-    deprish = deprish.merge(util_df, on=["report_year", "utility_id_pudl"], how="left")
+    deprish = deprish.merge(util_df, on=["utility_id_pudl"], how="left", validate="1:m")
 
     return deprish
 
