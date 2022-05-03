@@ -10,6 +10,7 @@ import pudl_rmi.connect_deprish_to_ferc1
 import pudl_rmi.connect_ferc1_to_eia
 import pudl_rmi.coordinate
 import pudl_rmi.deprish
+import pudl_rmi.formatter_optimus
 import pudl_rmi.make_plant_parts_eia
 import pudl_rmi.validate  # noqa: F401
 
