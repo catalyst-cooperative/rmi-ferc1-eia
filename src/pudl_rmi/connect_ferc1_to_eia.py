@@ -81,6 +81,9 @@ def execute(pudl_out, plant_parts_eia):
     )
     # add capex (this should be moved into pudl_out.plants_steam_ferc1)
     connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
+    # Override specified record_id_ferc1 values with NA record_id_eia
+    connects_ferc1_eia = add_null_overrides(connects_ferc1_eia)
+
     return connects_ferc1_eia
 
 
@@ -1172,6 +1175,10 @@ def prettyify_best_matches(
             warnings.warn(message)
             return no_ferc
         else:
+            logger.info(
+                "jsuk there are some FERC-EIA matches that aren't in the steam \
+                table but this is because they are linked to retired EIA generators."
+            )
             # raise AssertionError(message)
             warnings.warn(message)
 
@@ -1412,3 +1419,53 @@ def add_mean_cap_additions(steam_df):
         )
     )
     return df
+
+
+def add_null_overrides(connects_ferc1_eia):
+    """Override known null matches with pd.NA.
+
+    There is no way to indicate in the training data that certain FERC records have no
+    proper EIA match. That is to say--you can't specifiy a blank match or tell the AI
+    not to match a given record. Because we've gone through by hand and know for a fact
+    that some FERC records have no EIA match (even when you aggregate generators), we
+    have to add in these null matches after the fact.
+
+    This function reads in a list of record_id_ferc1 values that are known to have no
+    cooresponding EIA record match and makes sure they are mapped as NA in the final
+    record linkage output. It also updates the match_type field to indicate that this
+    value has been overriden.
+
+    """
+    logger.info("Overriding specified record_id_ferc1 values with NA record_id_eia")
+    # Get record_id_ferc1 values that should be overriden to have no EIA match
+    null_overrides = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
+    # Make sure there is content!
+    assert ~null_overrides.empty
+    logger.debug(f"Found {len(null_overrides)} null overrides")
+    # List of EIA columns to null. Ideally would like to get this from elsewhere, but
+    # compiling this here for now...
+    eia_cols_to_null = [
+        "plant_name_new",
+        "plant_part",
+        "ownership",
+        "generator_id",
+        "unit_code_pudl",
+        "prime_mover_code",
+        "energy_source_code_1",
+        "technology_description",
+        "true_gran",
+        "appro_part_label",
+        "record_count",
+        "fraction_owned",
+        "ownership_dupe",
+        "operational_status",
+        "operational_status_pudl",
+    ] + [x for x in connects_ferc1_eia.columns if x.endswith("eia")]
+    # Make all EIA values NA for record_id_ferc1 values in the Null overrides list and
+    # make the match_type column say "overriden"
+    connects_ferc1_eia.loc[
+        connects_ferc1_eia["record_id_ferc1"].isin(null_overrides.record_id_ferc1),
+        eia_cols_to_null + ["match_type"],
+    ] = [np.nan] * len(eia_cols_to_null) + ["overridden"]
+
+    return connects_ferc1_eia
