@@ -232,13 +232,10 @@ def _prep_deprish(deprish, pudl_out) -> pd.DataFrame:
 
     # Get utility_id_eia from EIA
     util_df = pudl_out.utils_eia860()[["utility_id_pudl", "utility_id_eia"]]
-    deprish_out = deprish.copy()
-    deprish_out.loc[:, "report_year"] = deprish_out.report_date.dt.year.astype("Int64")
-    deprish_out = deprish_out.merge(
-        util_df, on=["report_year", "utility_id_pudl"], how="left"
-    )
+    deprish.loc[:, "report_year"] = deprish.report_date.dt.year.astype("Int64")
+    deprish = deprish.merge(util_df, on=["report_year", "utility_id_pudl"], how="left")
 
-    return deprish_out
+    return deprish
 
 
 def _generate_input_dfs(pudl_out, rmi_out) -> dict:
