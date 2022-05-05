@@ -12,7 +12,7 @@ with ids and plants with ids reported in *seperate* tables. What a joy. In
 (often referred to as `plant_parts_eia` in this module) generated records
 for various levels or granularies of plant parts.
 
-For each of the FERC1 plant records we want to figure out if which EIA
+For each of the FERC1 plant records we want to figure out which EIA
 plant-parts record is the corresponding record. We do this with a record linkage/
 scikitlearn machine learning model. The recordlinkage package helps us create
 feature vectors (via `make_features`) for each candidate match between FERC
