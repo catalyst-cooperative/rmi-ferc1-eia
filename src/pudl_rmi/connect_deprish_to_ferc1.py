@@ -1,10 +1,10 @@
 """
-Connect the depreciation data with FERC1 steam plant records.
+Connect the depreciation data with FERC1 plant records from the combined FERC table.
 
-This module attempts to connect the depreciation data with FERC1 steam records
-through the EIA plant-part list. Both the depreciation records and FERC1 steam
-has been connected to the EIA plant-part list, which is a compilation of
-various possible combinations of generator records.
+This module attempts to connect the depreciation data with FERC1 records
+through the EIA plant-part list. Both the depreciation records and FERC1
+all plants tables have been connected to the EIA plant-part list, which
+is a compilation of various possible combinations of generator records.
 
 Some defintions:
 
