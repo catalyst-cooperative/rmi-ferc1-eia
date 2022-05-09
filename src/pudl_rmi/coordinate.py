@@ -79,6 +79,9 @@ class Output:
             )
             # actually make the master plant parts list
             plant_parts_eia = self.pudl_out.plant_parts_eia()
+            plant_parts_eia = plant_parts_eia[
+                ~plant_parts_eia.index.duplicated(keep="first")
+            ]
             # export
             plant_parts_eia.to_pickle(file_path)
         else:

@@ -128,7 +128,7 @@ class InputManager:
             ).astype({"installation_year": "float"})
             self.plant_parts_true_df = plant_parts_eia[
                 (plant_parts_eia["true_gran"]) & (~plant_parts_eia["ownership_dupe"])
-            ]
+            ].copy()
         return self.plant_parts_true_df
 
     def prep_train_connections(self, clobber=False):
