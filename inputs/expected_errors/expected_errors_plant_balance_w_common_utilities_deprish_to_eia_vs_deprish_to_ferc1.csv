@@ -1,5 +1,6 @@
 report_year,data_source,utility_id_pudl
 2013,PUC,81
+2013,PUC,302
 2014,MODERNIZED,81
 2015,MODERNIZED,81
 2015,PUC,18
@@ -8,6 +9,7 @@ report_year,data_source,utility_id_pudl
 2016,Hybrid,365
 2016,MODERNIZED,81
 2016,PUC,144
+2016,PUC,204
 2016,PUC - KS,159
 2016,PUC - MO,159
 2017,MODERNIZED,81
@@ -18,5 +20,7 @@ report_year,data_source,utility_id_pudl
 2018,MODERNIZED,81
 2018,PUC,90
 2018,PUC,121
+2018,PUC,171
+2018,PUC,302
 2019,FERC,89
 2019,FERC,284

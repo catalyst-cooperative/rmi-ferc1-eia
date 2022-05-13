@@ -227,10 +227,7 @@ def get_fuzzy_matches(deprish, ppe, key_deprish, key_ppe, threshold=75):
             lambda x: x[0] if x[1] >= threshold else None
         ),
     )
-
-    matches_perct = len(deprish[deprish.plant_name_match.notnull()]) / len(deprish)
-    logger.info(f"Matches: {matches_perct:.02%}")
-    logger.info(f"Matching resulted in {len(deprish)} connections.")
+    log_match_coverage(deprish=deprish, check_col="plant_name_match")
     return deprish
 
 
@@ -279,10 +276,17 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
                 )
             )
         )
+        log_match_coverage(deprish_match_full, "record_id_eia")
     except XLRDError:
         logger.info(f"No sheet {sheet_name_output}, so no overrides added.")
         deprish_match_full = deprish_match
     return deprish_match_full
+
+
+def log_match_coverage(deprish: pd.DataFrame, check_col: str) -> None:
+    """Log the coverage of the matches."""
+    matches_perct = len(deprish[deprish[check_col].notnull()]) / len(deprish)
+    logger.info(f"Matched {matches_perct:.02%} out of {len(deprish)}")
 
 
 def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
