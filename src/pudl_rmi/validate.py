@@ -45,6 +45,7 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
 
     """
     utils_f1 = pd.read_sql("utilities_ferc1", pudl_engine)
+    # primary key of the net plant balance table. we'll use to groupby
     pk_npb = [
         "utility_name_parent",
         "utility_name_ferc1",
