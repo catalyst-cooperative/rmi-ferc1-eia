@@ -22,7 +22,7 @@ RMI_TO_PUDL_COLS = {
 }
 
 RMI_TO_PUDL_FERC_ACCT_NAME = {
-    "other_fossil": "Other",
+    # "other_fossil": "Other",
     "hydro": "Hydraulic",
     "regional_transmission_and_market_operation": "Transmission",
 }
@@ -45,12 +45,29 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
 
     """
     utils_f1 = pd.read_sql("utilities_ferc1", pudl_engine)
+    # primary key of the net plant balance table. we'll use to groupby
+    pk_npb = [
+        "utility_name_parent",
+        "utility_name_ferc1",
+        "utility_id_ferc1",
+        "report_year",
+        "ferc_acct_name",
+    ]
     npb = pd.read_csv(
         "https://utilitytransitionhub.rmi.org/static/data_download/net_plant_balance.csv"
     )
-    npb = (
-        npb.convert_dtypes(convert_floating=False)
-        .rename(columns=RMI_TO_PUDL_COLS)
+    npb = npb.convert_dtypes(convert_floating=False).rename(columns=RMI_TO_PUDL_COLS)
+    # squish the OTHER ferc acct's back together
+    other_mask = npb.ferc_acct_name.isin(["renewables", "other_fossil"])
+    other = (
+        npb[other_mask]
+        .assign(ferc_acct_name="other")
+        .groupby(pk_npb, as_index=False)
+        .sum(min_count=1)
+    )
+    npb_out = (
+        pd.concat([npb[~other_mask], other])
+        .sort_values(pk_npb)
         .replace({"ferc_acct_name": RMI_TO_PUDL_FERC_ACCT_NAME})
         .assign(
             report_date=lambda x: pd.to_datetime(x.report_year, format="%Y"),
@@ -63,8 +80,8 @@ def download_and_clean_net_plant_balance(pudl_engine: sa.engine.Engine) -> pd.Da
             validate="m:1",
         )
     )
-    npb.loc[:, "ferc_acct_name"] = npb.ferc_acct_name.str.title()
-    return npb
+    npb_out.loc[:, "ferc_acct_name"] = npb_out.ferc_acct_name.str.title()
+    return npb_out
 
 
 def add_data_source(df: pd.DataFrame) -> pd.DataFrame:

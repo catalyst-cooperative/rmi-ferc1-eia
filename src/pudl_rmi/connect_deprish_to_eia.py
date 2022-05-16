@@ -48,6 +48,7 @@ PPE_COLS = [
     "energy_source_code_1",
     "technology_description",
     "ferc_acct_name",
+    "operating_year",
     "utility_id_eia",
     "utility_id_pudl",
     "true_gran",
