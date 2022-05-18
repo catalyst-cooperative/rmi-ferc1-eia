@@ -1,7 +1,7 @@
 """A module for data validation and QA/QC of the RMI outputs."""
 
 import logging
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -128,7 +128,12 @@ def group_sum_cols(df, data_cols: List[str], by: List[str]) -> pd.DataFrame:
 
 
 def agg_test_data(
-    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: List[str], by: List[str], **kwargs
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    data_cols: List[str],
+    by: List[str],
+    suffixes: Tuple[str, str] | None = None,
+    **kwargs,
 ) -> pd.DataFrame:
     """
     Merge two grouped input tables to determine if summed data column are equal.
@@ -150,12 +155,13 @@ def agg_test_data(
         kwargs: arguments to be passed into ``np.isclose``
 
     """
+    suffixes = suffixes if suffixes else ("_1", "_2")
     test = pd.merge(
         group_sum_cols(add_data_source(df1), data_cols=data_cols, by=by),
         group_sum_cols(add_data_source(df2), data_cols=data_cols, by=by),
         right_index=True,
         left_index=True,
-        suffixes=("_1", "_2"),
+        suffixes=suffixes,
         how="outer",
     ).astype("float64")
     # Add two columns indicating the similarity of the values of data_col in df1
@@ -166,12 +172,17 @@ def agg_test_data(
     # (df1 / df2).
     for data_col in data_cols:
         test.loc[:, f"{data_col}_isclose"] = np.isclose(
-            test[f"{data_col}_1"],
-            test[f"{data_col}_2"],
+            test[f"{data_col}{suffixes[1]}"],
+            test[f"{data_col}{suffixes[0]}"],
             equal_nan=True,
             **kwargs,
         )
-        test.loc[:, f"{data_col}_ratio"] = test[f"{data_col}_1"] / test[f"{data_col}_2"]
+        test.loc[:, f"{data_col}_ratio"] = (
+            test[f"{data_col}{suffixes[0]}"] / test[f"{data_col}{suffixes[1]}"]
+        )
+        test.loc[:, f"{data_col}_diff"] = (
+            test[f"{data_col}{suffixes[1]}"] - test[f"{data_col}{suffixes[0]}"]
+        )
         isclose_fraction = test[f"{data_col}_isclose"].sum() / len(test)
         logger.info(f"{data_col} close records: {isclose_fraction:.02%}")
     return test.sort_index()
@@ -221,6 +232,7 @@ def compare_df_vs_net_plant_balance(
         df2=net_plant_balance,
         data_cols=data_cols,
         by=pk_utils_acct,
+        suffixes=("", "_npb"),
         rtol=rtol,
         atol=atol,
     )
