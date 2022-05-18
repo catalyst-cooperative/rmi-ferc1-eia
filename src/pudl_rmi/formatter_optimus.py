@@ -4,6 +4,10 @@ import logging
 from typing import Dict, List, Literal
 
 import pandas as pd
+import pudl
+import sqlalchemy as sa
+
+from pudl_rmi import validate
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +148,7 @@ def execute(
     deprish_ferc1_eia: pd.DataFrame,
     plants_eia860: pd.DataFrame,
     utils_eia860: pd.DataFrame,
+    balancing_account: bool = True,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -166,6 +171,10 @@ def execute(
     if kwargs:
         deprish_ferc1_eia = select_from_deprish_ferc1(deprish_ferc1_eia, **kwargs)
     # add plant state and the EIA utility name
+    if balancing_account:
+        pudl_engine = sa.create_engine(pudl.workspace.setup.get_defaults()["pudl_db"])
+        net_plant_balance = validate.download_and_clean_net_plant_balance(pudl_engine)
+        deprish_ferc1_eia = add_balancing_account(deprish_ferc1_eia, net_plant_balance)
     model_input = (
         deprish_ferc1_eia.reset_index()  # reset index b4 merge bc it's prob 'record_id_eia'
         .merge(
@@ -252,3 +261,71 @@ def select_from_deprish_ferc1(
     else:
         util_out = util_source1
     return util_out.sort_index()
+
+
+def add_balancing_account(
+    ferc_deprish_eia: pd.DataFrame, net_plant_balance: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Add a balancing account record for every utility-ferc account.
+
+    Args:
+        ferc_deprish_eia: FERC1, depreciation and EIA data table. Result of
+            :meth:`pudl_rmi.coordinate.Output.deprish_to_ferc1()`
+        net_plant_balance: result of :func:`pudl_rmi.validate.download_and_clean_net_plant_balance`
+    """
+    compare_npb = validate.compare_df_vs_net_plant_balance(
+        df=ferc_deprish_eia,
+        net_plant_balance=net_plant_balance,
+        data_cols=[
+            "plant_balance_w_common",
+            "book_reserve_w_common",
+            "unaccrued_balance_w_common",
+        ],
+    ).sort_index()
+
+    pk_utils_acct = ["report_year", "data_source", "utility_id_pudl", "ferc_acct_name"]
+    compare_npb.loc[:, "depreciation_annual_epxns_w_common"] = ferc_deprish_eia.groupby(
+        pk_utils_acct
+    )["depreciation_annual_epxns_w_common"].mean()
+
+    balancing_records = (
+        compare_npb[
+            [
+                "plant_balance_w_common_diff",
+                "book_reserve_w_common_diff",
+                "unaccrued_balance_w_common_diff",
+                "depreciation_annual_epxns_w_common",
+            ]
+        ]
+        .dropna(how="all")
+        .rename(
+            columns={
+                "plant_balance_w_common_diff": "plant_balance_w_common",
+                "book_reserve_w_common_diff": "book_reserve_w_common",
+                "unaccrued_balance_w_common_diff": "unaccrued_balance_w_common",
+            }
+        )
+        .reset_index()
+        .assign(
+            plant_name_eia="balancing_account",
+            fraction_ownership=1,
+            depreciation_annual_epxns=lambda x: x.depreciation_annual_epxns_w_common
+            * x.plant_balance_w_common,
+            remaining_life_avg=lambda x: x.unaccrued_balance_w_common
+            / x.depreciation_annual_epxns,
+            record_id_eia=lambda x: (
+                x.plant_name_eia
+                + "_"
+                + x.report_year.astype(str)
+                + "_"
+                + x.data_source
+                + "_"
+                + x.utility_id_pudl.astype(str)
+            ),
+        )
+        .set_index(["record_id_eia"])
+    )
+    logger.info(f"adding {len(balancing_records)} balancing account records.")
+    ferc_deprish_eia = pd.concat([ferc_deprish_eia, balancing_records], join="outer")
+    return ferc_deprish_eia
