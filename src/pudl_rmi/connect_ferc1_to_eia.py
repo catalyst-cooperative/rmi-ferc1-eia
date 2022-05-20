@@ -214,7 +214,7 @@ class InputManager:
         """
         Prepare FERC1 plants data for record linkage with EIA plant-parts.
 
-        This method grabs two tables from `pudl_out` (`all_plants_ferc1`
+        This method grabs two tables from `pudl_out` (`plants_all_ferc1`
         and `fuel_by_plant_ferc1`) and ensures that the columns the same as
         their EIA counterparts, because the output of this method will be used
         to link FERC and EIA.
@@ -237,7 +237,7 @@ class InputManager:
 
             logger.info("Preparing the FERC1 tables.")
             self.plants_ferc1_df = (
-                self.pudl_out.all_plants_ferc1()
+                self.pudl_out.plants_all_ferc1()
                 .merge(
                     self.pudl_out.fbp_ferc1()[fbp_cols_to_use],
                     on=[
