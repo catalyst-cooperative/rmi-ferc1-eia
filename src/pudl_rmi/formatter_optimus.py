@@ -269,6 +269,23 @@ def add_balancing_account(
     """
     Add a balancing account record for every utility-ferc account.
 
+    The FERC1 net plant balance table includes utility-ferc account level
+    financial data points including: net plant balance (all the captial that has
+    been pour into an asset), book reserve (asset value that has been
+    depreciated), and unaccrued balance (asset value that has not been
+    depreciated).
+
+    This function generates new records for each utility-ferc account that
+    balances the depreciation study values with the FERC1 net plant balance
+    table. The assumption here is that the utility-level data should be more
+    acurate than the asset-level data points.
+
+    Implementation: this function takes an asset-level data table with
+    depreciation data, sums it by the utility-ferc account, merges the FERC1
+    data, calculates the difference for each of these data points, and finallly
+    uses those differences to generates new records that get added into the
+    original depreciation data.
+
     Args:
         ferc_deprish_eia: FERC1, depreciation and EIA data table. Result of
             :meth:`pudl_rmi.coordinate.Output.deprish_to_ferc1()`
@@ -306,7 +323,7 @@ def add_balancing_account(
                 "unaccrued_balance_w_common_diff": "unaccrued_balance_w_common",
             }
         )
-        .reset_index()
+        .reset_index()  # compare_npb's index is the utility-ferc accout pk's
         .assign(
             plant_name_eia="balancing_account",
             fraction_ownership=1,
