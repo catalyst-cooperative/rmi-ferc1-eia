@@ -1149,7 +1149,6 @@ def prettyify_best_matches(
             validate="1:1",
             indicator=True,
         ).assign(
-            opex_nonfuel=lambda x: (x.opex_production_total - x.opex_fuel),
             report_date=lambda x: pd.to_datetime(
                 x.report_year, format="%Y", errors="coerce"
             ),
