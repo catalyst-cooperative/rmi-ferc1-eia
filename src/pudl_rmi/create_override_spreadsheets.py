@@ -235,7 +235,7 @@ def _prep_deprish(deprish, pudl_out) -> pd.DataFrame:
         ["utility_id_pudl", "utility_id_eia"]
     ].drop_duplicates()
     deprish.loc[:, "report_year"] = deprish.report_date.dt.year.astype("Int64")
-    deprish = deprish.merge(util_df, on=["utility_id_pudl"], how="left", validate="1:m")
+    deprish = deprish.merge(util_df, on=["utility_id_pudl"], how="left")
 
     return deprish
 
