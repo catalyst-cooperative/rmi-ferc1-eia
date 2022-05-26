@@ -1,7 +1,7 @@
 """A module for data validation and QA/QC of the RMI outputs."""
+from __future__ import annotations
 
 import logging
-from typing import List
 
 import numpy as np
 import pandas as pd
@@ -115,7 +115,7 @@ def add_data_source(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def group_sum_cols(df, data_cols: List[str], by: List[str]) -> pd.DataFrame:
+def group_sum_cols(df, data_cols: list[str], by: list[str]) -> pd.DataFrame:
     """Groupby sum a specific table's data cols."""
     # convert date to year bc many of the og depish studies are EOY
     summed_out = (
@@ -128,7 +128,7 @@ def group_sum_cols(df, data_cols: List[str], by: List[str]) -> pd.DataFrame:
 
 
 def agg_test_data(
-    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: List[str], by: List[str], **kwargs
+    df1: pd.DataFrame, df2: pd.DataFrame, data_cols: list[str], by: list[str], **kwargs
 ) -> pd.DataFrame:
     """
     Merge two grouped input tables to determine if summed data column are equal.
@@ -180,7 +180,7 @@ def agg_test_data(
 def compare_df_vs_net_plant_balance(
     df: pd.DataFrame,
     net_plant_balance: pd.DataFrame,
-    data_cols: List = [
+    data_cols: list = [
         "plant_balance_w_common",
         "book_reserve_w_common",
         "unaccrued_balance_w_common",

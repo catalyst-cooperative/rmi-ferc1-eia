@@ -399,7 +399,7 @@ class Transformer:
         # and decimal rates (i.e. .882 for 88.2%).
         # numbers of decimals (e.g. 88.2% would either be represented as
         # 88.2 or .882). Some % columns have boolean columns (ending in
-        # type_pct) that we fleshed out to know wether the values were
+        # "type_pct") that we fleshed out to know wether the values were
         # reported as numbers or %s.
         to_num_cols = ["net_salvage_rate", "reserve_rate", "depreciation_annual_rate"]
         for col in to_num_cols:
@@ -701,7 +701,7 @@ class Transformer:
         # to fill it in, but drop all the other columns and merge them back in
         # after we are done using the weight_col
         # sometimes we are allocating the weight_col so we don't want doubles
-        cols = list(set([weight_col, split_col]))
+        cols = list({weight_col, split_col})
         filled_df = self.fill_in_df(deprish_w_c, common_allocated=False)[
             IDX_COLS_DEPRISH + cols + [f"{split_col}{COMMON_SUFFIX}"]
         ]

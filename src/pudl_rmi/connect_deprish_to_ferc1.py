@@ -54,9 +54,10 @@ Future Needs:
   allocate or aggregate an input record.
 
 """
+from __future__ import annotations
 
 import logging
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 import pandas as pd
 import pudl
@@ -66,13 +67,13 @@ from pudl_rmi import make_plant_parts_eia
 
 logger = logging.getLogger(__name__)
 
-SCALE_CAP_GEN_COST: "FieldTreatment" = {
+SCALE_CAP_GEN_COST: FieldTreatment = {
     "treatment_type": "scale",
     "allocator_cols": ["capacity_mw", "net_generation_mwh", "total_fuel_cost"],
 }
 
 
-META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
+META_DEPRISH_EIA: dict[str, FieldTreatment] = {
     "line_id": {"treatment_type": "str_concat"},
     "plant_balance_w_common": SCALE_CAP_GEN_COST,
     "book_reserve_w_common": SCALE_CAP_GEN_COST,
@@ -92,7 +93,7 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
 }
 
 
-META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
+META_FERC1_EIA: dict[str, FieldTreatment] = {
     "record_id_ferc1": {"treatment_type": "str_concat"},
     "capex_total": SCALE_CAP_GEN_COST,
     "capex_annual_addition": SCALE_CAP_GEN_COST,
@@ -320,8 +321,8 @@ class FieldTreatment(BaseModel):
 
     """
 
-    allocator_cols: Optional[List[str]]
-    wtavg_col: Optional[str]
+    allocator_cols: list[str] | None
+    wtavg_col: str | None
 
     treatment_type: Literal["scale", "str_concat", "wtavg"]
 
@@ -349,12 +350,12 @@ class PlantPartScaler(BaseModel):
 
     """
 
-    treatments: Dict[str, FieldTreatment]
-    ppe_pk: List[str] = ["record_id_eia"]
-    data_set_pk_cols: List[str]
+    treatments: dict[str, FieldTreatment]
+    ppe_pk: list[str] = ["record_id_eia"]
+    data_set_pk_cols: list[str]
     plant_part: Literal["plant_gen"]
 
-    def _get_treatment_cols(self, treatment_type: str) -> List[str]:
+    def _get_treatment_cols(self, treatment_type: str) -> list[str]:
         """Grab the columns which need a specific treatment type."""
         return [
             col
@@ -363,7 +364,7 @@ class PlantPartScaler(BaseModel):
         ]
 
     @property
-    def wtavg_dict(self) -> Dict:
+    def wtavg_dict(self) -> dict:
         """Grab the dict of columns that get a weighted average treatment."""
         return {
             wtavg_col: self.treatments[wtavg_col].wtavg_col
@@ -371,7 +372,7 @@ class PlantPartScaler(BaseModel):
         }
 
     @property
-    def allocator_cols_dict(self) -> Dict:
+    def allocator_cols_dict(self) -> dict:
         """Grab the columns from the metadata which need to be allocated."""
         return {
             allocate_col: self.treatments[allocate_col].allocator_cols
@@ -547,7 +548,7 @@ class PlantPartScaler(BaseModel):
         return df_out
 
     def broadcast_merge_to_plant_part(
-        self, data_to_scale: pd.DataFrame, cols_to_keep: List[str], ppe: pd.DataFrame
+        self, data_to_scale: pd.DataFrame, cols_to_keep: list[str], ppe: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Broadcast data with a variety of granularities to a single plant-part.
@@ -642,7 +643,7 @@ def str_concat(x):
 
 
 def _allocate_col(
-    to_allocate: pd.DataFrame, by: list, allocate_col: str, allocator_cols: List[str]
+    to_allocate: pd.DataFrame, by: list, allocate_col: str, allocator_cols: list[str]
 ) -> pd.Series:
     """
     Allocate larger dataset records porportionally by EIA plant-part columns.

@@ -7,6 +7,11 @@ repos:
   - id: python-check-blanket-noqa   # Prohibit overly broad QA exclusions.
   - id: python-no-eval              # Never use eval() it's dangerous.
   - id: python-no-log-warn          # logger.warning(), not old .warn()
+  - id: rst-backticks               # Find single rather than double backticks
+  - id: rst-directive-colons        # Missing double-colons after directives
+  - id: rst-inline-touching-normal  # Inline code should never touch normal text
+  - id: python-use-type-annotations # Use annotations not old-style type comments
+
 
 # Other file formatting, plus common Git mistakes & text file standardization:
 - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -22,18 +27,53 @@ repos:
   - id: trailing-whitespace     # Remove trailing whitespace.
   - id: name-tests-test         # Follow PyTest naming convention.
 
-# Format the code
-- repo: https://github.com/psf/black
-  rev: 22.3.0
+########################################################################################
+# Formatters: hooks that re-write Python and RST files
+########################################################################################
+# Convert relative imports to absolute imports
+- repo: https://github.com/MarcoGorelli/absolufy-imports
+  rev: v0.3.1
   hooks:
-  - id: black
-    language_version: python3.10
+  - id: absolufy-imports
 
 # Make sure import statements are sorted uniformly.
 - repo: https://github.com/PyCQA/isort
   rev: 5.10.1
   hooks:
   - id: isort
+
+# Remove f-string prefix when there's nothing in the string to format.
+- repo: https://github.com/dannysepler/rm_unneeded_f_str
+  rev: v0.1.0
+  hooks:
+  - id: rm-unneeded-f-str
+
+# Use built-in types for annotations as per PEP585, with __futures__ for Python 3.8/3.9
+# Note that this sometimes conflicts with Pydantic on Python 3.8/3.9
+- repo: https://github.com/sondrelg/pep585-upgrade
+  rev: 'v1.0'
+  hooks:
+  - id: upgrade-type-hints
+    args: ['--futures=true']
+
+# Update a bunch of Python syntax, using __futures__ for Python 3.8/3.9
+# Note that this sometimes conflicts with Pydantic on Python 3.8/3.9
+- repo: https://github.com/asottile/pyupgrade
+  rev: v2.32.1
+  hooks:
+  - id: pyupgrade
+    args: ['--py38-plus']
+
+# Deterministic python formatting:
+- repo: https://github.com/psf/black
+  rev: 22.3.0
+  hooks:
+  - id: black
+    language_version: python3.10
+
+########################################################################################
+# Linters: hooks that check but don't alter Python & RST files
+########################################################################################
 
 # Check for PEP8 non-compliance, code complexity, style, errors, etc:
 - repo: https://github.com/PyCQA/flake8
@@ -52,3 +92,18 @@ repos:
       - pyflakes
       - flake8-rst-docstrings
       - flake8-use-fstring
+
+########################################################################################
+# Configuration for pre-commit.ci
+########################################################################################
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+    For more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: main
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [unit-tests, nb-output-clear]
+  submodules: false

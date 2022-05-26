@@ -13,9 +13,11 @@ functions that will read those new/updated/validated matches from the spreadshee
 validate them, and incorporate them into the existing training data.
 
 """
+from __future__ import annotations
+
 import logging
 import os
-from typing import Dict, List, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -25,7 +27,7 @@ import pudl_rmi
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-RENAME_COLS_FERC_EIA: Dict = {
+RENAME_COLS_FERC_EIA: dict = {
     "new_1": "verified",
     "new_2": "used_match_record",
     "new_3": "signature_1",
@@ -77,7 +79,7 @@ RENAME_COLS_FERC_EIA: Dict = {
     "new_17": "installation_year_diff",
 }
 
-RELEVANT_COLS_PPL: List = [
+RELEVANT_COLS_PPL: list = [
     "record_id_eia",
     "report_year",
     "utility_id_pudl",

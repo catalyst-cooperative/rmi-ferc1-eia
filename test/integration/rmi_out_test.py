@@ -3,9 +3,10 @@ Test whether all of the FERC1/EIA/Depreciation outputs can be generated.
 
 This can take up to an hour to run.
 """
+from __future__ import annotations
 
 import logging
-from typing import List, Literal
+from typing import Literal
 
 import pandas as pd
 import pytest
@@ -136,7 +137,7 @@ def test_consistency_of_data_stages(
     rmi_out: pudl_rmi.coordinate.Output,
     df1_name: str,
     df2_name: str,
-    data_cols: List[str],
+    data_cols: list[str],
     by_name: Literal["plants", "utilities"],
 ):
     """

@@ -1,13 +1,14 @@
 """Convert RMI outputs into model output format."""
+from __future__ import annotations
 
 import logging
-from typing import Dict, List, Literal
+from typing import Literal
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-RENAME_COLS: Dict = {
+RENAME_COLS: dict = {
     "record_id_eia": "Unique_ID",
     "faked_1": "Scenario_Short",
     "utility_name_eia": "Utility",
@@ -112,7 +113,7 @@ RENAME_COLS: Dict = {
     "ferc_acct_name": "FERC Acct",
 }
 
-TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE: Dict = {
+TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE: dict = {
     "Conventional Steam Coal": "Coal",
     "Natural Gas Fired Combined Cycle": "NaturalGasCC",
     "Natural Gas Fired Combustion Turbine": "NaturalGasCT",
@@ -131,7 +132,7 @@ TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE: Dict = {
     # pd.NA: 'Battery'
 }
 
-UTILITY_RENAME: Dict = {
+UTILITY_RENAME: dict = {
     "Carolina Power & Light Co": "Duke Energy Progress",
     "Duke Energy Corp": "Duke Energy Carolinas",
 }
@@ -206,8 +207,8 @@ def execute(
 
 def select_from_deprish_ferc1(
     deprish_ferc1_eia: pd.DataFrame,
-    util_id_pudls: List[int],
-    years: List[int],
+    util_id_pudls: list[int],
+    years: list[int],
     priority_data_source: Literal["PUC", "FERC"] = "PUC",
     include_non_priority_data_source: bool = True,
 ) -> pd.DataFrame:
