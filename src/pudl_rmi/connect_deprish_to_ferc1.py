@@ -77,6 +77,7 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
     "plant_balance_w_common": SCALE_CAP_GEN_COST,
     "book_reserve_w_common": SCALE_CAP_GEN_COST,
     "unaccrued_balance_w_common": SCALE_CAP_GEN_COST,
+    "net_plant_balance_w_common": SCALE_CAP_GEN_COST,
     "net_salvage_w_common": SCALE_CAP_GEN_COST,
     "depreciation_annual_epxns_w_common": SCALE_CAP_GEN_COST,
     "depreciation_annual_rate": {
