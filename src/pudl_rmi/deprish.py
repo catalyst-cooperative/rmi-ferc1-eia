@@ -86,6 +86,7 @@ DOLLAR_COLS = [
     "unaccrued_balance",
     "net_salvage",
     "depreciation_annual_epxns",
+    "net_plant_balance",
 ]
 
 
@@ -190,7 +191,8 @@ class Transformer:
             # we need the dtypes assigned early in this process because the
             # next steps involve splitting and filling in the null columns.
             self.tidy_df = (
-                self.extract_df.convert_dtypes(convert_floating=False)
+                self.extract_df.assign(net_plant_balance=pd.NA)
+                .convert_dtypes(convert_floating=False)
                 .pipe(self.convert_rate_cols)
                 .pipe(self.correct_net_salvage_sign)
                 .assign(report_year=lambda x: x.report_date.dt.year)
@@ -366,13 +368,17 @@ class Transformer:
             filled_df[f"book_reserve{suffix}"] = filled_df[
                 f"book_reserve{suffix}"
             ].fillna(
-                filled_df[f"plant_balance{suffix}"]
+                (filled_df[f"plant_balance{suffix}"] * (1 - filled_df.net_salvage_rate))
                 - (
                     filled_df[f"depreciation_annual_epxns{suffix}"]
                     * filled_df.remaining_life_avg
                 )
             )
-
+            filled_df[f"net_plant_balance{suffix}"] = filled_df[
+                f"net_plant_balance{suffix}"
+            ].fillna(
+                filled_df[f"plant_balance{suffix}"] - filled_df[f"book_reserve{suffix}"]
+            )
         return filled_df
 
     def convert_rate_cols(self, tidy_df):
