@@ -101,9 +101,17 @@ getting in the way of letting us run all of the tests via github actions
 
 ### Regenerate All Outputs & Validate
 
-``sh
+The full CI tests can be run via `pytest` or `tox`. This will take a while because it regenerates all of the outputs and then runs relatively quick tests on those outputs.
+
+```sh
 pytest test/integration/rmi_out_test.py
-``
+```
+
+OR
+
+```sh
+tox
+```
 
 ### Validate Existing Outputs
 
@@ -114,9 +122,11 @@ data has or has not introduced errors. There are known errors being stored in
 the input directory (`pudl_rmi.INPUTS_DIR`). We expect most of these error exist
 because of missing connections between datasets.
 
-``sh
+Only run these tests if you *know* your cached outputs are up to date and consistent with each other.
+
+```sh
 pytest test/integration/rmi_out_test.py::test_consistency_of_data_stages
-``
+```
 
 
 ## Process Overview
