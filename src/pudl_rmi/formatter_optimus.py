@@ -338,6 +338,8 @@ def add_balancing_account(
                 + "_"
                 + x.data_source
                 + "_"
+                + x.ferc_acct_name
+                + "_"
                 + x.utility_id_pudl.astype(str)
             ),
         )
