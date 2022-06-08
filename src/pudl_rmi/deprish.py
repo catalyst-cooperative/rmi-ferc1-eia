@@ -190,6 +190,9 @@ class Transformer:
             # read in the depreciation sheet, assign types when required
             # we need the dtypes assigned early in this process because the
             # next steps involve splitting and filling in the null columns.
+            # the net_plant_balance doesn't exist in the studies, but we make
+            # it here as a null column to be filled in later because it is an
+            # expected column in many transformations bc it is in DOLLAR_COLS
             self.tidy_df = (
                 self.extract_df.assign(net_plant_balance=pd.NA)
                 .convert_dtypes(convert_floating=False)
