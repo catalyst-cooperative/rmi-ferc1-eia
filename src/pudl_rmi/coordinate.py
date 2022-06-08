@@ -231,7 +231,13 @@ class Output:
         file_path = pudl_rmi.DEPRISH_FERC1_PKL
         # if any of the clobbers are on, we want to regenerate the main output
         clobber_any = any(
-            [clobber, clobber_plant_parts_eia, clobber_deprish_eia, clobber_ferc1_eia]
+            [
+                clobber,
+                clobber_deprish,
+                clobber_plant_parts_eia,
+                clobber_deprish_eia,
+                clobber_ferc1_eia,
+            ]
         )
         check_is_file_or_not_exists(file_path)
 
