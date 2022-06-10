@@ -54,6 +54,11 @@ DEPRISH_FERC1_PKL: Path = OUTPUTS_DIR / "deprish_ferc1.pkl.gz"
 NULL_FERC1_EIA_CSV: Path = INPUTS_DIR / "null_ferc1_eia.csv"
 """Path to list of record_id_ferc1 values with no EIA match."""
 
+EQR_DATA_DIR: Path = INPUTS_DIR / "eqr_data"
+"""Path to raw EQR zipfiles."""
+EQR_DB_PATH: Path = OUTPUTS_DIR / "eqr.db"
+"""Path to procesesed EQR sqlite database."""
+
 __author__ = "Catalyst Cooperative"
 __contact__ = "pudl@catalyst.coop"
 __maintainer__ = "Catalyst Cooperative"

@@ -11,9 +11,9 @@ dependencies:
   # Tricky binary dependencies, best resolved w/ conda:
   - geopandas>=0.9,<0.11
   - pygeos>=0.10,<0.13
-  - python-snappy>=0.6,<1  # Ensures snappy-dev library gets installed
-  - numba>=0.55.1,<0.56  # not strictly necessary, but speeds some things up by 100x
-  - sqlite>=3.36,<4   # Required by PUDL 0.5.0 and later.
+  - python-snappy>=0.6,<1 # Ensures snappy-dev library gets installed
+  - numba>=0.55.1,<0.56 # not strictly necessary, but speeds some things up by 100x
+  - sqlite>=3.36,<4 # Required by PUDL 0.5.0 and later.
 
   # So we can run a notebook server
   - jupyterlab>=3.2,<4
@@ -25,12 +25,13 @@ dependencies:
   - plotly==5.4.0
 
   # Not normal Python packages that come from PyPI
-  - nodejs  # Useful for Jupyter Notebook Server
+  - nodejs # Useful for Jupyter Notebook Server
+  - tqdm
 
   - pip:
-    - simpledbf~=0.2.6
-    # Install the (local) pudl_rmi package such that we can do development work:
-    - --editable ./[test]
+      - simpledbf~=0.2.6
+      # Install the (local) pudl_rmi package such that we can do development work:
+      - --editable ./[test]
     # If you want to be able to make changes to the PUDL repo as well, you can install
     # it in editable mode with a line like the following. HOWEVER if you do that, you
     # MUST remove or comment out the github based dependency inside setup.py as
