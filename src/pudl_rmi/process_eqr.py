@@ -31,7 +31,7 @@ TABLE_DTYPES = {
     },
 }
 
-WORKING_PARTITIONS = {"years": [2020], "quarters": ["Q1", "Q2" "Q3", "Q4"]}
+WORKING_PARTITIONS = {"years": [2020], "quarters": ["Q1", "Q2", "Q3", "Q4"]}
 
 
 class FercEqrPartition(NamedTuple):
