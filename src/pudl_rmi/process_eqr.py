@@ -31,6 +31,17 @@ TABLE_DTYPES = {
     },
 }
 
+DATE_COLUMNS = {
+    "contracts": [
+        "contract_execution_date",
+        "commencement_date_of_contract_term",
+        "contract_termination_date",
+        "actual_termination_date",
+        "begin_date",
+        "end_date",
+    ],
+}
+
 WORKING_PARTITIONS = {"years": [2020], "quarters": ["Q1", "Q2", "Q3", "Q4"]}
 
 
@@ -80,20 +91,6 @@ def parse_command_line(argv):
     return arguments
 
 
-def convert_to_stringdtype(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert all columns with nans to StringDtypes.
-
-    This is a temporary fix to make sure pandas doesn't infer
-    the wrong datatype for a column. This will be removed once
-    we identify the correct types for all of the columns.
-    """
-    for column in df.columns:
-        if df[column].isnull().any():
-            df[column] = df[column].astype("string")
-    return df
-
-
 def extract_seller(seller_zip: zipfile.ZipFile, partition) -> None:
     """
     Extract the tables and load them to a sqlite db for a seller.
@@ -114,9 +111,8 @@ def extract_seller(seller_zip: zipfile.ZipFile, partition) -> None:
                     io.BytesIO(seller_zip.read(table_csv_path[0])),
                     encoding="ISO-8859-1",
                     dtype=TABLE_DTYPES.get(table_name),
-                    parse_dates=True,
+                    parse_dates=DATE_COLUMNS.get(table_name),
                 )
-                df = convert_to_stringdtype(df)
 
                 df["year"] = partition.year
                 df["quarter"] = partition.quarter
