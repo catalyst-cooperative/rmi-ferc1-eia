@@ -142,13 +142,13 @@ Each of the outputs shown above have a dedicated module:
 * Connected Depreciation & FERC: [`connect_ferc1_to_eia.py`](https://github.com/catalyst-cooperative/rmi-ferc1-eia/blob/master/connect_ferc1_to_eia.py)
 
 ## Process EQR
-This repo contains a prototype ETL for working with EQR data. To run the ETL you first need to download the quarters you want to process from https://eqrreportviewer.ferc.gov/. Each quarter zip file is 2-3 GB so it might take a while depending on your internet speed. Move the zip files into the `input/eqr_data` directory in this repo. Before you run the ETL you'll need to rebuild your environment so the `process_eqr` command is available.
+This repo contains a prototype ETL for working with EQR data. To run the ETL you first need to download the zip files for the quarters you want to process from https://eqrreportviewer.ferc.gov/. Each zip file is 2-3 GB so it might take a while depending on your internet speed. Move the zip files into the `input/eqr_data/` directory in this repo. Before you run the ETL you'll need to rebuild your environment so the `process_eqr` command is available.
 
 Once you have all of the raw data you want to process and your environment has been rebuilt you can run:
 ```
 process_eqr
 ```
-This will load all of the data in `outputs/eqr.db`. See the `process_eqr` options to rerun the ETL on specific partitions of data.
+This will load all of the data in `outputs/eqr.db`. Run `process_eqr --help` to see the commands options for rerunning the ETL on specific partitions of data.
 
 Make a copy of the `/notebooks/eqr/analysis-template.ipynb` to analyze the `contracts` and `identities` tables.
 

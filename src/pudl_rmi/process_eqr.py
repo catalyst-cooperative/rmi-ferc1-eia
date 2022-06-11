@@ -84,7 +84,7 @@ def parse_command_line(argv):
         "--clobber",
         action="store_true",
         default=False,
-        help="Clobber existing PUDL SQLite and Parquet outputs if they exist.",
+        help="Clobber existing EQR SQLite output.",
     )
 
     arguments = parser.parse_args(argv[1:])
