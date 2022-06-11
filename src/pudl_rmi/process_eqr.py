@@ -6,13 +6,13 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
-import coloredlogs
 
+import coloredlogs
 import pandas as pd
 import sqlalchemy as sa
 from tqdm import tqdm
 
-from pudl_rmi import EQR_DB_PATH, EQR_DATA_DIR
+from pudl_rmi import EQR_DATA_DIR, EQR_DB_PATH
 
 logger = logging.getLogger(__name__)
 
