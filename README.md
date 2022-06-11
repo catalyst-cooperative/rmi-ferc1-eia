@@ -150,3 +150,5 @@ process_eqr
 ```
 This will load all of the data in `outputs/eqr.db`. See the `process_eqr` options to rerun the ETL on specific partitions of data.
 
+Make a copy of the `/notebooks/eqr/analysis-template.ipynb` to analyze the `contracts` and `identities` tables.
+
