@@ -495,8 +495,8 @@ class PlantPartScaler(BaseModel):
         )
         dupe_mask = connected_to_scale.duplicated(subset=self.ppe_pk, keep=False)
         # two dfs
-        dupes = connected_to_scale[dupe_mask]
-        non_dupes = connected_to_scale[~dupe_mask]
+        dupes = connected_to_scale.loc[dupe_mask]
+        non_dupes = connected_to_scale.loc[~dupe_mask]
         # If there are no duplicate records, then the following aggs will fail
         # bc there is nothing to merge. So we're making a new df to output that
         # is these non_dupes. If ther are dupes, we'll aggregate them!
@@ -664,11 +664,11 @@ def _allocate_col(
         a series of the ``allocate_col`` scaled to the plant-part level.
 
     """
+    to_allocate = to_allocate.copy(deep=True)
     # add a total column for all of the allocate cols. This will enable us to
     # determine each records' proportion of the
     to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
-        to_allocate.loc[:, allocator_cols]
-        .groupby(by=by, dropna=False)
+        to_allocate.groupby(by=by, dropna=False)[allocator_cols]
         .transform(sum, min_count=1)
         .add_suffix("_total")
     )

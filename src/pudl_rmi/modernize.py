@@ -26,18 +26,22 @@ def fake_duke_deprish_eia_for_mod(df_to_fake, ppe):
     # og_index = df_to_fake.index.names
     # df_to_fake = df_to_fake.reset_index()
     fake_year_dfs = []
-    to_fake_2018 = df_to_fake[
-        df_to_fake.utility_id_pudl.isin([90, 97])
-        & (df_to_fake.report_date.dt.year == 2018)
-    ].reset_index()[
-        [
-            c
-            for c in df_to_fake.reset_index()
-            if c
-            in ["record_id_eia", "line_id"]  # core IDs
-            + pudl_rmi.deprish.IDX_COLS_DEPRISH  # deprish IDS
+    to_fake_2018 = (
+        df_to_fake[
+            df_to_fake.utility_id_pudl.isin([90, 97])
+            & (df_to_fake.report_date.dt.year == 2018)
         ]
-    ]
+        .reset_index()[
+            [
+                c
+                for c in df_to_fake.reset_index()
+                if c
+                in ["record_id_eia", "line_id"]  # core IDs
+                + pudl_rmi.deprish.IDX_COLS_DEPRISH  # deprish IDS
+            ]
+        ]
+        .copy()
+    )
     for fake_year in [2019, 2020]:
         fake_new_year = (
             to_fake_2018.copy()
