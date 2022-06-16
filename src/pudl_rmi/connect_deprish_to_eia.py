@@ -258,7 +258,7 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
             .any(axis="columns")
         ][
             RESTRICT_MATCH_COLS
-            + ["plant_part_name", "data_source"]
+            + ["plant_part_name", "data_source", "line_id"]
             + list(overrides_df.filter(like="record_id_eia_override").columns)
         ]
         logger.info(f"Adding {len(overrides_df)} overrides from {sheet_name_output}.")
@@ -267,7 +267,7 @@ def add_overrides(deprish_match, file_path_deprish, sheet_name_output):
             pd.merge(
                 deprish_match.convert_dtypes(convert_floating=False),
                 overrides_df.convert_dtypes(convert_floating=False),
-                on=RESTRICT_MATCH_COLS + ["plant_part_name", "data_source"],
+                on=RESTRICT_MATCH_COLS + ["plant_part_name", "data_source", "line_id"],
                 how="outer",
             )
             .drop_duplicates()
