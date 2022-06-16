@@ -664,7 +664,6 @@ def _allocate_col(
         a series of the ``allocate_col`` scaled to the plant-part level.
 
     """
-    to_allocate = to_allocate.copy(deep=True)
     # add a total column for all of the allocate cols. This will enable us to
     # determine each records' proportion of the
     to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
