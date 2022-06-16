@@ -35,7 +35,7 @@ RENAME_COLS: Dict = {
     "remaining_life_avg": "Current Remaining Accounting Life (Yrs)",
     "plant_balance_w_common": "Gross Plant Balance/Original Cost ($)",
     "book_reserve_w_common": "Book Reserve/Accumulated Depreciation ($)",
-    "unaccrued_balance_w_common": "Current Net Plant Balance ($)",
+    "net_plant_balance_w_common": "Current Net Plant Balance ($)",
     "depreciation_annual_epxns_w_common": "Annual Depreciation Expense ($)",
     "depreciation_annual_rate": "Depreciation Rate (%)",
     "net_salvage_w_common": "Decommissioning Cost ($)",
