@@ -194,7 +194,7 @@ class Transformer:
             # it here as a null column to be filled in later because it is an
             # expected column in many transformations bc it is in DOLLAR_COLS
             self.tidy_df = (
-                self.extract_df.assign(net_plant_balance=pd.NA)
+                self.extract_df.assign(net_plant_balance=np.nan)
                 .convert_dtypes(convert_floating=False)
                 .pipe(self.convert_rate_cols)
                 .pipe(self.correct_net_salvage_sign)
@@ -314,7 +314,9 @@ class Transformer:
         filled_df = deepcopy(df_to_fill)
         # replace the 0's with nulls. if left in, the 0's will produce inf's
         # and strange outputs for filled in outputs.
-        filled_df = filled_df.replace({0: np.nan})
+        filled_df = filled_df.replace({0: np.nan}).astype(
+            {"net_plant_balance": "float64"}
+        )
 
         # we need to be able to fill in the native columns as well as those
         # that have been augmented via
@@ -325,62 +327,39 @@ class Transformer:
         for _ in range(2):
             filled_df = _calculate_rate_cols(filled_df, suffix)
 
-            filled_df[f"depreciation_annual_epxns{suffix}"] = filled_df[
-                f"depreciation_annual_epxns{suffix}"
-            ].fillna(
-                (filled_df.depreciation_annual_rate)
-                * filled_df[f"plant_balance{suffix}"]
-            )
-            filled_df[f"net_salvage{suffix}"] = filled_df[
-                f"net_salvage{suffix}"
-            ].fillna(
-                filled_df[f"plant_balance{suffix}"]
-                - filled_df[f"book_reserve{suffix}"]
-                - filled_df[f"unaccrued_balance{suffix}"]
-            )
-            # filled_df[f"net_salvage{suffix}"] = (
-            #     filled_df[f"net_salvage{suffix}"].fillna(
-            #         (filled_df.net_salvage_rate) *
-            #         filled_df[f"book_reserve{suffix}"])
-            # )
-            filled_df[f"net_salvage_option3{suffix}"] = (
-                filled_df.net_salvage_rate
-            ) * filled_df[f"book_reserve{suffix}"]
-
-            filled_df[f"unaccrued_balance{suffix}"] = filled_df[
-                f"unaccrued_balance{suffix}"
-            ].fillna(
-                filled_df[f"plant_balance{suffix}"]
-                - filled_df[f"book_reserve{suffix}"]
-                - filled_df[f"net_salvage{suffix}"]
-            )
-            filled_df[f"unaccrued_balance{suffix}"] = filled_df[
-                f"unaccrued_balance{suffix}"
-            ].fillna(
-                filled_df[f"plant_balance{suffix}"]
-                * (filled_df["depreciation_annual_rate"])
-                * filled_df["remaining_life_avg"]
-            )
-            filled_df[f"book_reserve_og{suffix}"] = filled_df[f"book_reserve{suffix}"]
-            filled_df[f"book_reserve{suffix}"] = filled_df[
-                f"book_reserve{suffix}"
-            ].fillna(
-                ((1 - filled_df.net_salvage_rate) * filled_df[f"plant_balance{suffix}"])
-                - filled_df[f"unaccrued_balance{suffix}"]
-            )
-            filled_df[f"book_reserve{suffix}"] = filled_df[
-                f"book_reserve{suffix}"
-            ].fillna(
-                (filled_df[f"plant_balance{suffix}"] * (1 - filled_df.net_salvage_rate))
-                - (
-                    filled_df[f"depreciation_annual_epxns{suffix}"]
-                    * filled_df.remaining_life_avg
-                )
-            )
-            filled_df[f"net_plant_balance{suffix}"] = filled_df[
-                f"net_plant_balance{suffix}"
-            ].fillna(
-                filled_df[f"plant_balance{suffix}"] - filled_df[f"book_reserve{suffix}"]
+            filled_df = filled_df.fillna(
+                value={
+                    f"depreciation_annual_epxns{suffix}": (
+                        filled_df.depreciation_annual_rate
+                        * filled_df[f"plant_balance{suffix}"]
+                    ),
+                    f"net_salvage{suffix}": (
+                        filled_df[f"plant_balance{suffix}"]
+                        - filled_df[f"book_reserve{suffix}"]
+                        - filled_df[f"unaccrued_balance{suffix}"]
+                    ),
+                    f"unaccrued_balance{suffix}": (
+                        filled_df[f"plant_balance{suffix}"]
+                        - filled_df[f"book_reserve{suffix}"]
+                        - filled_df[f"net_salvage{suffix}"]
+                    ).fillna(
+                        filled_df[f"plant_balance{suffix}"]
+                        * (filled_df["depreciation_annual_rate"])
+                        * filled_df["remaining_life_avg"]
+                    ),
+                    f"book_reserve{suffix}": (
+                        filled_df[f"plant_balance{suffix}"]
+                        * (1 - filled_df.net_salvage_rate)
+                    )
+                    - (
+                        filled_df[f"depreciation_annual_epxns{suffix}"]
+                        * filled_df.remaining_life_avg
+                    ),
+                    f"net_plant_balance{suffix}": (
+                        filled_df[f"plant_balance{suffix}"]
+                        - filled_df[f"book_reserve{suffix}"]
+                    ),
+                }
             )
         return filled_df
 
@@ -422,6 +401,9 @@ class Transformer:
             {f"{k}_type_pct": pd.BooleanDtype() for k in rate_cols}
         )
         for rate_col in rate_cols:
+            logger.debug(
+                f"{rate_col} to fix: {len(tidy_df[tidy_df[f'{rate_col}_type_pct']])}"
+            )
             tidy_df.loc[tidy_df[f"{rate_col}_type_pct"], rate_col] = (
                 tidy_df.loc[tidy_df[f"{rate_col}_type_pct"], rate_col] / 100
             )
@@ -913,27 +895,27 @@ def _calculate_rate_cols(
             columns) or :py:const:`COMMON_SUFFIX`
 
     """
-    filled_df = df_to_fill.assign(
-        net_salvage_rate=lambda x: x.net_salvage_rate.fillna(
-            x[f"net_salvage{suffix}"] / x[f"book_reserve{suffix}"]
-        ),
-        reserve_rate=lambda x: x.reserve_rate.fillna(
-            x[f"book_reserve{suffix}"] / x[f"plant_balance{suffix}"]
-        ),
+    df_to_fill = df_to_fill.fillna(
+        value={
+            "net_salvage_rate": (
+                df_to_fill[f"net_salvage{suffix}"]
+                / df_to_fill[f"plant_balance{suffix}"]
+            ),
+            "reserve_rate": (
+                df_to_fill[f"book_reserve{suffix}"]
+                / df_to_fill[f"plant_balance{suffix}"]
+            ),
+            "remaining_life_avg": (
+                df_to_fill[f"unaccrued_balance{suffix}"]
+                / df_to_fill[f"depreciation_annual_epxns{suffix}"]
+            ),
+            "depreciation_annual_rate": (
+                df_to_fill[f"depreciation_annual_epxns{suffix}"]
+                / (df_to_fill[f"plant_balance{suffix}"])
+            ),
+        }
     )
-    filled_df.loc[:, "remaining_life_avg"] = filled_df.loc[
-        :, "remaining_life_avg"
-    ].fillna(
-        filled_df[f"unaccrued_balance{suffix}"]
-        / filled_df[f"depreciation_annual_epxns{suffix}"]
-    )
-    filled_df.loc[:, "depreciation_annual_rate"] = filled_df[
-        "depreciation_annual_rate"
-    ].fillna(
-        filled_df[f"depreciation_annual_epxns{suffix}"]
-        / (filled_df[f"plant_balance{suffix}"])
-    )
-    return filled_df
+    return df_to_fill
 
 
 def agg_to_idx(deprish_df, idx_cols):
