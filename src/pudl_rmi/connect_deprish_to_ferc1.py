@@ -105,7 +105,7 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
     "opex_fuel": SCALE_CAP_GEN_COST,
     "opex_misc_power": SCALE_CAP_GEN_COST,
     "opex_misc_steam": SCALE_CAP_GEN_COST,
-    "opex_nonfuel": SCALE_CAP_GEN_COST,
+    "opex_total_nonfuel": SCALE_CAP_GEN_COST,
     "opex_operations": SCALE_CAP_GEN_COST,
     "opex_plant": SCALE_CAP_GEN_COST,
     "opex_production_total": SCALE_CAP_GEN_COST,
