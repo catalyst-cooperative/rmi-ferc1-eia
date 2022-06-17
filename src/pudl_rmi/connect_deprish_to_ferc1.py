@@ -63,6 +63,7 @@ import pudl
 from pydantic import BaseModel, validator
 
 from pudl_rmi import make_plant_parts_eia
+from pudl_rmi.connect_deprish_to_eia import add_fake_ppe_records
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ def execute(plant_parts_eia, deprish_eia, ferc1_eia):
         ferc1_to_eia (pandas.DataFrame): a table of the connection between
             the FERC1 plants and the EIA plant-parts list.
     """
+    plant_parts_eia = add_fake_ppe_records(plant_parts_eia)
     logger.info("Scaling FERC1-EIA to the generator level.")
     scaled_ferc1_eia = PlantPartScaler(
         treatments=META_FERC1_EIA,
