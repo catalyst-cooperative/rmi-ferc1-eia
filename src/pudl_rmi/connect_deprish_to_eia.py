@@ -84,6 +84,16 @@ IDX_DEPRISH_COLS = [
     "report_year",
 ]
 
+FAKED_PPE_RECORDS = pd.DataFrame(
+    {
+        "record_id_eia": ["faked_bhe_wind_projects_2020"],
+        "plant_id_eia": [-1],
+        "utility_id_pudl": [185],
+        "report_year": [2020],
+    },
+).set_index(["record_id_eia"])
+"""Faked EIA plant-part records."""
+
 ###############################################################################
 # Prep the inputs
 ###############################################################################
@@ -141,6 +151,22 @@ def prep_deprish(deprish, plant_parts_eia, key_deprish):
         .convert_dtypes(convert_floating=False)
     )
     return deprish_ids
+
+
+def add_fake_ppe_records(plant_parts_eia: pd.DataFrame) -> pd.DataFrame:
+    """Add fake records to EIA plant parts.
+
+    There are a handful of depreciation records that are "projects" which
+    contain multiple plants within one record. In these cases, we add one-to-many
+    matches in the mannual overrides and add a faked EIA plant ID. Because we
+    only match depreciation records that have potential matches in the EIA plant
+    parts, we need to also add these fake records to the EIA plant parts.
+
+    Args:
+        plant_parts_eia: the EIA plant-parts.
+    """
+    # add the weird multi-plant projects from MidAm
+    return pd.concat([plant_parts_eia, FAKED_PPE_RECORDS])
 
 
 def prep_master_parts_eia(plant_parts_df, deprish, key_ppe):
@@ -294,6 +320,7 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
     """Prepare the depreciation and EIA plant-parts and match on name cols."""
     key_deprish = "plant_part_name"
     key_ppe = "plant_name_new"
+    plant_parts_eia = add_fake_ppe_records(plant_parts_eia=plant_parts_eia)
     deprish = prep_deprish(
         deprish=deprish, plant_parts_eia=plant_parts_eia, key_deprish=key_deprish
     )
