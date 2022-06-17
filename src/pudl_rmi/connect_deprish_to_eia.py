@@ -114,42 +114,42 @@ def prep_deprish(deprish, plant_parts_eia, key_deprish):
     deprish.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
         deprish.loc[:, key_deprish], str_map=STRINGS_TO_CLEAN
     )
-    # because we are comparing to the EIA-based plant-parts, we want to
-    # only include records which are associated with plant_id_pudl's that are
-    # in the EIA plant-parts.
-    deprish_ids = pd.merge(
-        deprish,
-        plant_parts_eia[RESTRICT_MATCH_COLS]
-        .drop_duplicates()
-        .astype({"report_year": pd.Int64Dtype()}),
-        how="outer",
-        indicator=True,
-        on=RESTRICT_MATCH_COLS,
-        validate="m:1",
+    # we need to restrict the records that are being attempted to be matched to EIA
+    # such that the idx columns show up in both datasets
+    # so grab the IDXs from the ppe that also show up in deprish
+    # and use those to select deprish records
+    deprish_idx_in_ppe = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .index.dropna()
+        .intersection(
+            plant_parts_eia.reset_index().set_index(RESTRICT_MATCH_COLS).index,
+            sort=None,
+        )
+    )
+    deprish_ids = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .loc[deprish_idx_in_ppe]
+        # there are some records in the depreciation df that have no
+        # names.... so they've got to go bc we use the names for matching
+        .dropna(subset=["plant_part_name"])
+        .convert_dtypes(convert_floating=False)
+        .reset_index()
     )
     # check the number of depreciation records that should have EIA plant-part
     # matches.
     # TODO: go through all of these to reassign plant_id_eia!!! and turn down
     # the acceptable number of baddies
-    baddies = (
-        deprish_ids.loc[(deprish_ids._merge != "both")]
-        .dropna(subset=RESTRICT_MATCH_COLS + ["plant_part_name"])
-        .drop_duplicates(subset=["plant_part_name"])
+    poorly_mapped = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .index.dropna()
+        .difference(deprish_idx_in_ppe)
     )
-    if len(baddies) > 270:
+    if len(poorly_mapped) > 105:
         raise AssertionError(
-            f"Found {len(baddies)} depreciation records which don't have "
+            f"Found {len(poorly_mapped)} depreciation records which don't have "
             "cooresponding EIA plant-parts records. Check plant_id_eia's "
             f"in {pudl_rmi.DEPRISH_RAW_XLSX}"
         )
-    deprish_ids = (
-        deprish_ids.loc[deprish_ids._merge == "both"]
-        # there are some records in the depreciation df that have no
-        # names.... so they've got to go
-        .dropna(subset=["plant_part_name", "_merge"])
-        .drop(columns=["_merge"])
-        .convert_dtypes(convert_floating=False)
-    )
     return deprish_ids
 
 
