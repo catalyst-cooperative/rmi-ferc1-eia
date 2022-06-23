@@ -41,7 +41,7 @@ jobs:
       with:
         path: ~/pudl-work/sqlite/pudl.sqlite
         # The last time we deployed Datasette. Update if we redeploy.
-        key: "2021-11-12"
+        key: "2022-05-05"
 
     - name: Download PUDL DB and log pre-test PUDL workspace contents
       run: |

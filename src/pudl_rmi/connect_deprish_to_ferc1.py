@@ -77,6 +77,7 @@ META_DEPRISH_EIA: Dict[str, "FieldTreatment"] = {
     "plant_balance_w_common": SCALE_CAP_GEN_COST,
     "book_reserve_w_common": SCALE_CAP_GEN_COST,
     "unaccrued_balance_w_common": SCALE_CAP_GEN_COST,
+    "net_plant_balance_w_common": SCALE_CAP_GEN_COST,
     "net_salvage_w_common": SCALE_CAP_GEN_COST,
     "depreciation_annual_epxns_w_common": SCALE_CAP_GEN_COST,
     "depreciation_annual_rate": {
@@ -104,7 +105,7 @@ META_FERC1_EIA: Dict[str, "FieldTreatment"] = {
     "opex_fuel": SCALE_CAP_GEN_COST,
     "opex_misc_power": SCALE_CAP_GEN_COST,
     "opex_misc_steam": SCALE_CAP_GEN_COST,
-    "opex_nonfuel": SCALE_CAP_GEN_COST,
+    "opex_total_nonfuel": SCALE_CAP_GEN_COST,
     "opex_operations": SCALE_CAP_GEN_COST,
     "opex_plant": SCALE_CAP_GEN_COST,
     "opex_production_total": SCALE_CAP_GEN_COST,

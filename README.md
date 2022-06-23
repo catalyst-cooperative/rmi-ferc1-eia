@@ -93,6 +93,42 @@ overwrite the pre-processed data.
   [Reproducible Research](https://the-turing-way.netlify.app/reproducible-research/renv.html)
   from [The Turing Way](https://the-turing-way.netlify.app/welcome.html).
 
+## Tests
+
+This repo finally has some tests! wahoo! Unfortunately, there are memory issues
+getting in the way of letting us run all of the tests via github actions
+([PUDL issue #1457](https://github.com/catalyst-cooperative/pudl/issues/1457)).
+
+### Regenerate All Outputs & Validate
+
+The full CI tests can be run via `pytest` or `tox`. This will take a while because it regenerates all of the outputs and then runs relatively quick tests on those outputs.
+
+```sh
+pytest test/integration/rmi_out_test.py
+```
+
+OR
+
+```sh
+tox
+```
+
+### Validate Existing Outputs
+
+If you have recently processed output cached in the output directory
+(`pudl_rmi.OUTPUTS_DIR`) and just want to test the consistency of the outputs,
+there is a quick test to run. This test checks whether the processing of the
+data has or has not introduced errors. There are known errors being stored in
+the input directory (`pudl_rmi.INPUTS_DIR`). We expect most of these error exist
+because of missing connections between datasets.
+
+Only run these tests if you *know* your cached outputs are up to date and consistent with each other.
+
+```sh
+pytest test/integration/rmi_out_test.py::test_consistency_of_data_stages
+```
+
+
 ## Process Overview
 
 Below is a visual overview of the main processes in this repo:
