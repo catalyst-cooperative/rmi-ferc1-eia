@@ -351,7 +351,7 @@ def main():
     rmi_out = Output(pudl_out)
     ppl = rmi_out.plant_parts_eia(clobber=True)
     del ppl
-    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
+    for ppl_df in ["plant_parts_eia", "gens_mega_eia"]:
         if ppl_df in rmi_out.pudl_out._dfs:
             del rmi_out.pudl_out._dfs[ppl_df]
 
