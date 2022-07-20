@@ -79,14 +79,24 @@ class Output:
             )
             # actually make the master plant parts list
             plant_parts_eia = self.pudl_out.plant_parts_eia()
+            # verify that record_id_eia is the index
+            if plant_parts_eia.index.name != "record_id_eia":
+                logger.error("Plant parts list index is not record_id_eia.")
             plant_parts_eia = plant_parts_eia[
                 ~plant_parts_eia.index.duplicated(keep="first")
             ]
+            # temporary: make the object columns strings to reduce memory
+            # will be moved to PUDL repo
+            plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
             # export
             plant_parts_eia.to_pickle(file_path)
         else:
             logger.info(f"Reading the EIA plant-parts from {file_path}")
             plant_parts_eia = pd.read_pickle(file_path)
+            if plant_parts_eia.index.name != "record_id_eia":
+                logger.error("Plant parts list index is not record_id_eia.")
+            plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
+
         return plant_parts_eia
 
     # @profile
@@ -334,6 +344,28 @@ def check_is_file_or_not_exists(file_path: Path):
             f"Path exists but is not a file. Check if {file_path} is a "
             "directory. It should be either a pickled file or nothing."
         )
+
+
+def _set_plant_part_dtypes(plant_parts_eia):
+    """Set column data types to reduce memory usage."""
+    plant_parts_eia.index = plant_parts_eia.index.astype("string")
+    plant_parts_eia = plant_parts_eia.astype(
+        {
+            "plant_part_id_eia": "string",
+            "appro_record_id_eia": "string",
+            "technology_description": "category",
+            "energy_source_code_1": "category",
+            "plant_part": "category",
+            "plant_id_report_year": "string",
+            "operational_status_pudl": "category",
+            "appro_part_label": "category",
+            "ownership": "category",
+            "ferc_acct_name": "category",
+            "fuel_type_code_pudl": "category",
+            "prime_mover_code": "category",
+        }
+    )
+    return plant_parts_eia
 
 
 # @profile
