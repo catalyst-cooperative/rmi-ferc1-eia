@@ -48,13 +48,13 @@ datapkg_bundle_settings:
           # please let the folks at Catalyst Cooperative know:
           # hello@catalyst.coop
           ferc1_tables:
-           - fuel_ferc1 # fuel_ferc1 requires plants_steam_ferc1 to load
-           - plants_steam_ferc1
-           - plants_small_ferc1
-           - plants_hydro_ferc1
-           - plants_pumped_storage_ferc1
-           - plant_in_service_ferc1
-           - purchased_power_ferc1
+            - fuel_ferc1 # fuel_ferc1 requires plants_steam_ferc1 to load
+            - plants_steam_ferc1
+            - plants_small_ferc1
+            - plants_hydro_ferc1
+            - plants_pumped_storage_ferc1
+            - plant_in_service_ferc1
+            - purchased_power_ferc1
           # The ferc1 dataset goes back as far as 1994, but more cleaning and
           # integration needs to be done to bring in that data.
           #ferc1_years: [1994, 1995, 1996, 1997, 1998,
