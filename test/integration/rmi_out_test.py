@@ -63,6 +63,7 @@ def test_deprish_to_eia_out(rmi_out, request):
 
 def test_ferc1_to_eia(rmi_out, request):
     """Test linkage of FERC 1 data to EIA PPL using record linkage."""
+    rmi_out.pudl_out._dfs.clear()
     clobber = not request.config.getoption("--cached-ferc1-eia")
     ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber)
     assert not ferc1_to_eia.empty
