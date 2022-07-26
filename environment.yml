@@ -20,13 +20,12 @@ dependencies:
   - jupyter-resource-usage>=0.5,<1
 
   # Visualization and data validation packages used interactively but not required.
-  - pandera~=0.7.2
+  - pandera>=0.9,<0.12
   - seaborn~=0.11.2
   - plotly==5.4.0
 
   # Not normal Python packages that come from PyPI
   - nodejs # Useful for Jupyter Notebook Server
-  - tqdm
 
   - pip:
       - simpledbf~=0.2.6
