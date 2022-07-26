@@ -1,7 +1,7 @@
 ---
 name: tox-pytest
 
-on: [ push, pull_request ]
+on: [push, pull_request]
 
 jobs:
   ci-test:
