@@ -1,14 +1,12 @@
 ---
 name: tox-pytest
 
-on: [ push, pull_request ]
+on: [push, pull_request]
 
 jobs:
   ci-test:
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        python-version: ["3.10"]
       fail-fast: false
     defaults:
       run:
@@ -28,7 +26,7 @@ jobs:
           mamba-version: "*"
           channels: conda-forge,defaults
           channel-priority: true
-          python-version: ${{ matrix.python-version }}
+          python-version: ["3.10"]
           activate-environment: pudl-rmi
           environment-file: environment.yml
 
@@ -41,7 +39,7 @@ jobs:
           printenv | sort
 
       - name: Cache PUDL DB
-        uses: actions/cache@v3.0.2
+        uses: actions/cache@v3.0.5
         with:
           path: ~/pudl-work/sqlite/pudl.sqlite
           # The last time we deployed Datasette. Update if we redeploy.
