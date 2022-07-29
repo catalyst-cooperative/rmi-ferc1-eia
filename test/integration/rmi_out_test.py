@@ -43,9 +43,6 @@ def test_ppl_out(rmi_out, request):
     ppl = rmi_out.plant_parts_eia(clobber=clobber)
     assert not ppl.empty
     del ppl
-    df_keys = list(rmi_out.pudl_out._dfs.keys())
-    for k in df_keys:
-        del rmi_out.pudl_out._dfs[k]
 
 
 def test_deprish_out(rmi_out, request):
