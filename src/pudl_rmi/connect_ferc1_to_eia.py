@@ -559,8 +559,8 @@ class ModelTuner:
             accuracy.append(
                 rl.accuracy(y_test, links_pred=result_lrc, total=result_lrc)
             )
-            result_lrc_complied = result_lrc_complied.append(
-                pd.DataFrame(index=result_lrc)
+            result_lrc_complied = pd.concat(
+                [result_lrc_complied, pd.DataFrame(index=result_lrc)]
             )
         return result_lrc_complied, fscore, precision, accuracy
 
@@ -597,26 +597,29 @@ class ModelTuner:
 
         # we're going to want to choose the best model so we need to save the
         # results of this model run...
-        results_options = results_options.append(
-            pd.DataFrame(
-                data={
-                    # result scores
-                    "precision": [statistics.mean(precision)],
-                    "f_score": [statistics.mean(fscore)],
-                    "accuracy": [statistics.mean(accuracy)],
-                    # info about results
-                    "coef": [lrc.coefficients],
-                    "interc": [lrc.intercept],
-                    "predictions": [len(results)],
-                    # info about which model hyperparameters we choose
-                    "solver": [solver],
-                    "c": [c],
-                    "cw": [cw],
-                    "penalty": [p],
-                    "l1": [l1],
-                    "multi_class": [multi_class],
-                },
-            )
+        results_options = pd.concat(
+            [
+                results_options,
+                pd.DataFrame(
+                    data={
+                        # result scores
+                        "precision": [statistics.mean(precision)],
+                        "f_score": [statistics.mean(fscore)],
+                        "accuracy": [statistics.mean(accuracy)],
+                        # info about results
+                        "coef": [lrc.coefficients],
+                        "interc": [lrc.intercept],
+                        "predictions": [len(results)],
+                        # info about which model hyperparameters we choose
+                        "solver": [solver],
+                        "c": [c],
+                        "cw": [cw],
+                        "penalty": [p],
+                        "l1": [l1],
+                        "multi_class": [multi_class],
+                    },
+                ),
+            ]
         )
         return results_options
 

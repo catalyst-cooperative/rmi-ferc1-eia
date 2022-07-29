@@ -43,9 +43,9 @@ def test_ppl_out(rmi_out, request):
     ppl = rmi_out.plant_parts_eia(clobber=clobber)
     assert not ppl.empty
     del ppl
-    for ppl_df in ["plant_parts_eia", "gens_mega_eia"]:
-        if ppl_df in rmi_out.pudl_out._dfs:
-            del rmi_out.pudl_out._dfs[ppl_df]
+    df_keys = list(rmi_out.pudl_out._dfs.keys())
+    for k in df_keys:
+        del rmi_out.pudl_out._dfs[k]
 
 
 def test_deprish_out(rmi_out, request):
@@ -53,7 +53,6 @@ def test_deprish_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-deprish")
     deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
-    del deprish
 
 
 def test_deprish_to_eia_out(rmi_out, request):
@@ -61,23 +60,22 @@ def test_deprish_to_eia_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-deprish-eia")
     deprish_to_eia = rmi_out.deprish_to_eia(clobber=clobber)
     assert not deprish_to_eia.empty
-    del deprish_to_eia
 
 
 def test_ferc1_to_eia(rmi_out, request):
     """Test linkage of FERC 1 data to EIA PPL using record linkage."""
-    rmi_out.pudl_out._dfs.clear()
+    df_keys = list(rmi_out.pudl_out._dfs.keys())
+    for k in df_keys:
+        del rmi_out.pudl_out._dfs[k]
     clobber = not request.config.getoption("--cached-ferc1-eia")
     ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber)
     assert not ferc1_to_eia.empty
-    del ferc1_to_eia
 
 
 def test_deprish_to_ferc1(rmi_out):
     """Test linkage of Depriciation data to FERC 1 data."""
     deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True)
     assert not deprish_to_ferc1.empty
-    del deprish_to_ferc1
 
 
 ##################
