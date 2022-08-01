@@ -1,7 +1,7 @@
 """Unit tests for connection between Depreciation and FERC1."""
 import pandas as pd
 
-import pudl_rmi.connect_deprish_to_ferc1
+from pudl_rmi.connect_deprish_to_ferc1 import allocate_cols
 
 
 def test_allocate_col():
@@ -14,13 +14,14 @@ def test_allocate_col():
             "plant_balance": [100] * 3,
         }
     )
-    plant_balance_expected = pd.DataFrame({"plant_balance": [70.0, 20.0, 10.0]})
+    plant_balance_expected = de_stacked_test.copy()
+    plant_balance_expected.loc[:, "plant_balance"] = [70.0, 20.0, 10.0]
+
     pd.testing.assert_frame_equal(
-        pudl_rmi.connect_deprish_to_ferc1._allocate_col(
+        allocate_cols(
             to_allocate=de_stacked_test,
             by=["line_id"],
-            allocate_col="plant_balance",
-            allocator_cols=["capacity_mw"],
+            data_and_allocator_cols={"plant_balance": ["capacity_mw"]},
         ),
         plant_balance_expected,
     )

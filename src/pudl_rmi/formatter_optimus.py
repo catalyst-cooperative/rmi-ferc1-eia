@@ -8,7 +8,7 @@ import pudl
 import sqlalchemy as sa
 
 from pudl_rmi import validate
-from pudl_rmi.connect_deprish_to_ferc1 import _allocate_col
+from pudl_rmi.connect_deprish_to_ferc1 import allocate_cols
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +377,7 @@ def allocate_balancing_account_to_assets(
     with the utility/FERC account level values reported to FERC1 via
     :func:`add_balancing_account`. This function takes those balancing account
     records and allocates them across assets. It utilizes
-    :func:`pudl_rmi.connect_deprish_to_ferc1._allocate_col`
+    :func:`pudl_rmi.connect_deprish_to_ferc1._allocate_cols`
 
     Args:
         ferc_deprish_eia_w_ba
@@ -401,22 +401,19 @@ def allocate_balancing_account_to_assets(
         validate="m:1",
     )
     # allocate each col
-    for (data_col, allocator_cols) in data_and_allocator_cols.items():
-        assets_w_ba.loc[:, f"{data_col}_asset_level"] = _allocate_col(
-            to_allocate=assets_w_ba,
-            by=idk_ba,
-            allocate_col=f"{data_col}_ba",
-            allocator_cols=allocator_cols,
-        )
-        assets_w_ba.loc[:, f"{data_col}_w_ba"] = assets_w_ba.loc[
-            :, f"{data_col}_asset_level"
-        ].fillna(0) + assets_w_ba.loc[:, f"{data_col}"].fillna(0)
-
-    # Remove the og columns and replace w/ the allocated cols
-    assets_w_ba = assets_w_ba.drop(columns=data_cols)
-    assets_w_ba.columns = assets_w_ba.columns.str.replace("_w_ba$", "", regex=True)
-    assert all(
-        ferc_deprish_eia_w_ba[data_cols].sum().round()
-        == assets_w_ba[data_cols].sum().round()
+    assets_w_ba = allocate_cols(
+        to_allocate=assets_w_ba,
+        by=idk_ba,
+        data_and_allocator_cols=data_and_allocator_cols,
     )
+    if not (
+        check_sums := all(
+            ferc_deprish_eia_w_ba[data_cols].sum().round()
+            == assets_w_ba[data_cols].sum().round()
+        )
+    ):
+        raise AssertionError(
+            "Allocating the balancing accounts changed the sum of the data cols"
+            f"{check_sums}"
+        )
     return assets_w_ba

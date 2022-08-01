@@ -280,7 +280,8 @@ def scale_to_fraction_owned(
     # squish the goodies and the cleaned baddies back together
     scaled_fe_cleaned = pd.concat([fe_own_good, fe_own_off]).sort_index()
     # the output should be exactly the same len
-    assert len(scaled_fe_cleaned) == len(scaled_ferc1_eia)
+    if len(scaled_fe_cleaned) != len(scaled_ferc1_eia):
+        raise AssertionError("The scaled output should be the same length as the input")
     return scaled_fe_cleaned
 
 
@@ -477,15 +478,13 @@ class PlantPartScaler(BaseModel):
         # STEP 3
         # grab all of the ppe columns, plus data set's id column(s)
         # this enables us to have a unique index
-        pk_cols = self.plant_part_pk_cols + self.data_set_pk_cols
-        allocated = merged_df.set_index(pk_cols)
-        for allocate_col, allocator_cols in self.allocator_cols_dict.items():
-            allocated.loc[:, allocate_col] = _allocate_col(
-                to_allocate=allocated,
-                by=self.data_set_pk_cols,
-                allocate_col=allocate_col,
-                allocator_cols=allocator_cols,
-            )
+        # pk_cols = self.plant_part_pk_cols + self.data_set_pk_cols
+        allocated = merged_df.copy()  # .set_index(pk_cols)
+        allocated = allocate_cols(
+            to_allocate=allocated,
+            by=self.data_set_pk_cols,
+            data_and_allocator_cols=self.allocator_cols_dict,
+        )
         return allocated
 
     def aggregate_duplicate_eia(self, connected_to_scale, plant_parts_eia):
@@ -642,49 +641,64 @@ def str_concat(x):
     return "; ".join(list(map(str, [x for x in x.unique() if x is not pd.NA])))
 
 
-def _allocate_col(
-    to_allocate: pd.DataFrame, by: list, allocate_col: str, allocator_cols: List[str]
-) -> pd.Series:
+def allocate_cols(
+    to_allocate: pd.DataFrame, by: list, data_and_allocator_cols: dict
+) -> pd.DataFrame:
     """
     Allocate larger dataset records porportionally by EIA plant-part columns.
 
     Args:
         to_allocate: table of data that has been merged with the EIA plant-parts
             records of the scale that you want the output to be in.
-        allocate_col: name of the data column to scale. The data in this column
-            has been broadcast across multiple records in
-            :meth:`broadcast_merge_to_plant_part`.
         by: columns to group by.
-        allocator_cols: ordered list of columns to allocate porportionally
-            based on. Ordered based on priority: if non-null result from
-            frist column, result will include first column result, then
-            second and so on.
+        data_and_allocator_cols: dict of data columns that you want to allocate (keys)
+            and ordered list of columns to allocate porportionally based on. Values
+            ordered based on priority: if non-null result from frist column, result
+            will include first column result, then second and so on.
 
     Returns:
-        a series of the ``allocate_col`` scaled to the plant-part level.
+        an augmented version of ``to_allocate`` with the data columns (keys in
+        ``data_and_allocator_cols``) allocated proportionally.
 
     """
-    # add a total column for all of the allocate cols. This will enable us to
-    # determine each records' proportion of the
-    to_allocate.loc[:, [f"{c}_total" for c in allocator_cols]] = (
-        to_allocate.groupby(by=by, dropna=False)[allocator_cols]
+    # add a total column for all of the allocate cols.
+    all_allocator_cols = list(set(sum(data_and_allocator_cols.values(), [])))
+    to_allocate.loc[:, [f"{c}_total" for c in all_allocator_cols]] = (
+        to_allocate.groupby(by=by, dropna=False)[all_allocator_cols]
         .transform(sum, min_count=1)
         .add_suffix("_total")
     )
     # for each of the columns we want to allocate the frc data by
     # generate the % of the total group, so we can allocate the data_col
-    output_col = f"{allocate_col}_allocated"
-    to_allocate[output_col] = pd.NA
-    for allocator_col in allocator_cols:
-        to_allocate[f"{allocator_col}_proportion"] = (
-            to_allocate[allocator_col] / to_allocate[f"{allocator_col}_total"]
-        )
+    to_allocate = to_allocate.assign(
+        **{
+            f"{col}_proportion": to_allocate[col] / to_allocate[f"{col}_total"]
+            for col in all_allocator_cols
+        }
+    )
+    # do the allocation for each of the data columns
+    for data_col in data_and_allocator_cols:
+        output_col = f"{data_col}_allocated"
+        to_allocate.loc[:, output_col] = pd.NA
         # choose the first non-null option. The order of the allocate_cols will
         # determine which allocate_col will be used
-        to_allocate[output_col] = to_allocate[output_col].fillna(
-            to_allocate[allocate_col] * to_allocate[f"{allocator_col}_proportion"]
+        for allocator_col in data_and_allocator_cols[data_col]:
+            to_allocate[output_col] = to_allocate[output_col].fillna(
+                to_allocate[data_col] * to_allocate[f"{allocator_col}_proportion"]
+            )
+    # drop and rename all the columns in the data_and_allocator_cols dict keys and
+    # return these columns in the dataframe
+    to_allocate = (
+        to_allocate.drop(columns=list(data_and_allocator_cols.keys()))
+        .rename(
+            columns={
+                f"{data_col}_allocated": data_col
+                for data_col in data_and_allocator_cols
+            }
         )
-    to_allocate = to_allocate.drop(columns=allocate_col).rename(
-        columns={output_col: allocate_col}
+        .drop(
+            columns=list(to_allocate.filter(like="_proportion").columns)
+            + [f"{c}_total" for c in all_allocator_cols]
+        )
     )
-    return to_allocate.loc[:, [allocate_col]]
+    return to_allocate
