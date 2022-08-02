@@ -80,7 +80,6 @@ record_id_eia,record_id_ferc1,signature_1,signature_2,notes
 2716_gt_2018_plant_prime_mover_total_3046,f1_steam_2018_12_17_3_5,OIU,,Best guess using name and installation year
 2716_st_2019_plant_prime_mover_owned_3046_retired,f1_steam_2019_12_17_1_3,OIU,,Best guess using name and installation year
 2716_gt_2019_plant_prime_mover_total_3046,f1_steam_2019_12_17_3_5,OIU,,Best guess using name and installation year
-2706_2019_plant_total_3046,f1_steam_2019_12_17_4_3,OIU,,Not much to compare other than plant name
 2712_st_2018_plant_prime_mover_total_3046,f1_steam_2018_12_17_1_1,OIU,,
 2712_st_2019_plant_prime_mover_total_3046,f1_steam_2019_12_17_1_1,OIU,,
 6250_2018_plant_total_3046,f1_steam_2018_12_17_0_4,OIU,,
@@ -98,8 +97,6 @@ record_id_eia,record_id_ferc1,signature_1,signature_2,notes
 1010_2_2019_plant_gen_total_15470_retired,f1_steam_2019_12_144_1_2,OIU,,
 1010_2019_plant_total_15470_retired,f1_steam_2019_12_144_2_1,OIU,,
 2727_2019_plant_total_5416,f1_steam_2019_12_45_0_2,OIU,,
-3264_3_2018_plant_unit_total_5416,f1_steam_2018_12_45_0_4,OIU,,No extra information. Just the name.
-3264_3_2019_plant_unit_total_5416,f1_steam_2019_12_45_0_4,OIU,,No extra information. Just the name.
 3264_7_2019_plant_gen_total_5416,f1_steam_2019_12_45_0_5,OIU,,
 2732_st_2019_plant_prime_mover_total_5416_retired,f1_steam_2019_12_45_1_4,OIU,,Best guess using name and installation year
 2732_gt_2019_plant_prime_mover_total_5416_retired,f1_steam_2019_12_45_1_5,OIU,,Best guess using name and installation year
@@ -2750,3 +2747,15 @@ record_id_eia,record_id_ferc1,signature_1,signature_2,notes
 63915_2020_plant_total_14354,f1_gnrt_plant_2020_12_134_0_31,AS,,
 63641_2020_plant_total_12341,f1_gnrt_plant_2020_12_210_2_18,AS,,
 63639_2020_plant_total_12341,f1_gnrt_plant_2020_12_210_2_28,AS,,
+3264_3_2020_plant_unit_total_5416,f1_steam_2020_12_45_0_4,CG,,
+3264_gt_2020_plant_prime_mover_total_5416,f1_steam_2020_12_45_0_5,CG,,
+3264_4_2020_plant_unit_total_5416,f1_steam_2020_12_45_4_2,CG,,
+2720_2020_plant_total_5416,f1_steam_2020_12_45_3_5,CG,,
+2720_ct_2020_plant_prime_mover_total_5416,f1_steam_2020_12_45_2_1,CG,,
+2723_2020_plant_total_5416,f1_steam_2020_12_45_4_1,CG,,
+2723_gt_2020_plant_prime_mover_total_5416_retired,f1_steam_2020_12_45_1_2,CG,,
+2723_st_2020_plant_prime_mover_total_5416_retired,f1_steam_2020_12_45_1_1,CG,,
+2706_st_2020_plant_prime_mover_total_3046,f1_steam_2020_12_17_0_1,CG,,
+2706_gt_2020_plant_prime_mover_total_3046,f1_steam_2020_12_17_2_2,CG,,
+2706_natural_gas_fired_combined_cycle_2020_plant_technology_total_3046,f1_steam_2020_12_17_4_3,CG,,
+3250_2020_plant_total_3046,f1_steam_2020_12_17_3_3,CG,,

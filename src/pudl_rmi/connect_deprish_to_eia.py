@@ -84,6 +84,16 @@ IDX_DEPRISH_COLS = [
     "report_year",
 ]
 
+FAKED_PPE_RECORDS = pd.DataFrame(
+    {
+        "record_id_eia": ["faked_bhe_wind_projects_2020"],
+        "plant_id_eia": [-1],
+        "utility_id_pudl": [185],
+        "report_year": [2020],
+    },
+).set_index(["record_id_eia"])
+"""Faked EIA plant-part records."""
+
 ###############################################################################
 # Prep the inputs
 ###############################################################################
@@ -104,43 +114,59 @@ def prep_deprish(deprish, plant_parts_eia, key_deprish):
     deprish.loc[:, key_deprish] = pudl.helpers.cleanstrings_series(
         deprish.loc[:, key_deprish], str_map=STRINGS_TO_CLEAN
     )
-    # because we are comparing to the EIA-based plant-parts, we want to
-    # only include records which are associated with plant_id_pudl's that are
-    # in the EIA plant-parts.
-    deprish_ids = pd.merge(
-        deprish,
-        plant_parts_eia[RESTRICT_MATCH_COLS]
-        .drop_duplicates()
-        .astype({"report_year": pd.Int64Dtype()}),
-        how="outer",
-        indicator=True,
-        on=RESTRICT_MATCH_COLS,
-        validate="m:1",
+    # we need to restrict the records that are being attempted to be matched to EIA
+    # such that the idx columns show up in both datasets
+    # so grab the IDXs from the ppe that also show up in deprish
+    # and use those to select deprish records
+    deprish_idx_in_ppe = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .index.dropna()
+        .intersection(
+            plant_parts_eia.reset_index().set_index(RESTRICT_MATCH_COLS).index,
+            sort=None,
+        )
+    )
+    deprish_ids = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .loc[deprish_idx_in_ppe]
+        # there are some records in the depreciation df that have no
+        # names.... so they've got to go bc we use the names for matching
+        .dropna(subset=["plant_part_name"])
+        .convert_dtypes(convert_floating=False)
+        .reset_index()
     )
     # check the number of depreciation records that should have EIA plant-part
     # matches.
     # TODO: go through all of these to reassign plant_id_eia!!! and turn down
     # the acceptable number of baddies
-    baddies = (
-        deprish_ids.loc[(deprish_ids._merge != "both")]
-        .dropna(subset=RESTRICT_MATCH_COLS + ["plant_part_name"])
-        .drop_duplicates(subset=["plant_part_name"])
+    poorly_mapped = (
+        deprish.set_index(RESTRICT_MATCH_COLS)
+        .index.dropna()
+        .difference(deprish_idx_in_ppe)
     )
-    if len(baddies) > 270:
+    if len(poorly_mapped) > 105:
         raise AssertionError(
-            f"Found {len(baddies)} depreciation records which don't have "
+            f"Found {len(poorly_mapped)} depreciation records which don't have "
             "cooresponding EIA plant-parts records. Check plant_id_eia's "
             f"in {pudl_rmi.DEPRISH_RAW_XLSX}"
         )
-    deprish_ids = (
-        deprish_ids.loc[deprish_ids._merge == "both"]
-        # there are some records in the depreciation df that have no
-        # names.... so they've got to go
-        .dropna(subset=["plant_part_name", "_merge"])
-        .drop(columns=["_merge"])
-        .convert_dtypes(convert_floating=False)
-    )
     return deprish_ids
+
+
+def add_fake_ppe_records(plant_parts_eia: pd.DataFrame) -> pd.DataFrame:
+    """Add fake records to EIA plant parts.
+
+    There are a handful of depreciation records that are "projects" which
+    contain multiple plants within one record. In these cases, we add one-to-many
+    matches in the mannual overrides and add a faked EIA plant ID. Because we
+    only match depreciation records that have potential matches in the EIA plant
+    parts, we need to also add these fake records to the EIA plant parts.
+
+    Args:
+        plant_parts_eia: the EIA plant-parts.
+    """
+    # add the weird multi-plant projects from MidAm
+    return pd.concat([plant_parts_eia, FAKED_PPE_RECORDS])
 
 
 def prep_master_parts_eia(plant_parts_df, deprish, key_ppe):
@@ -294,6 +320,7 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
     """Prepare the depreciation and EIA plant-parts and match on name cols."""
     key_deprish = "plant_part_name"
     key_ppe = "plant_name_new"
+    plant_parts_eia = add_fake_ppe_records(plant_parts_eia=plant_parts_eia)
     deprish = prep_deprish(
         deprish=deprish, plant_parts_eia=plant_parts_eia, key_deprish=key_deprish
     )
@@ -396,6 +423,83 @@ def grab_possible_plant_part_eia_matches(plant_parts_eia, deprish):
     return possible_matches_ppe
 
 
+def stack_one_to_many_deprish_to_eia_matches(deprish_eia: pd.DataFrame) -> pd.DataFrame:
+    """Stack the one-to-monay depreciation to eia records."""
+    override_cols = list(deprish_eia.filter(like="record_id_eia_override"))
+    stacked_ids = (
+        pd.DataFrame(
+            deprish_eia.set_index(["line_id"])[override_cols].stack(
+                level=0, dropna=True
+            )
+        )
+        .reset_index()
+        .rename(columns={0: "record_id_eia"})
+        .drop(columns=["level_1"])
+    )
+    return pd.merge(
+        deprish_eia.drop(columns=["record_id_eia"]), stacked_ids, on=["line_id"]
+    ).drop(columns=override_cols)
+
+
+def stack_and_allocate_one_to_many_deprish_to_eia_connections(
+    deprish_eia: pd.DataFrame, plant_parts_eia: pd.DataFrame
+) -> pd.DataFrame:
+    """Stack and allocate the one-to-many depreciation records.
+
+    There are a handful of depreciation records that are map to many EIA
+    plant-part records instead of just one. The one-to-many records are mannual
+    overrides that are generated by adding multiple ``record_id_eia``'s in
+    multiple override columns of the same row.
+
+    This function takes those records, stacks them so each EIA match has one row,
+    and then allocated the depreciation dollar columns across the many EIA
+    matches.
+
+    Args:
+        deprish_eia: depreciation and EIA plant-parts
+        plant_parts_eia: EIA plant-parts.
+    """
+    mask_one_to_ones = (
+        deprish_eia.filter(regex=r"record_id_eia_override\d{1,2}")
+        .isnull()
+        .all(axis="columns")
+    )
+    de_one_to_ones = deprish_eia[mask_one_to_ones]
+    de_one_to_manys = deprish_eia[~mask_one_to_ones]
+    logger.info(
+        f"Stacking and allocating {len(de_one_to_manys)} one to many deprish-eia"
+        f" matches. ({len(de_one_to_manys)/len(deprish_eia):.1%} of total)"
+    )
+    de_stacked = stack_one_to_many_deprish_to_eia_matches(de_one_to_manys)
+    allocator_cols_ppe = ["capacity_mw", "net_generation_mwh", "total_fuel_cost"]
+    allocate_cols_deprish = pudl_rmi.deprish.DOLLAR_COLS + [
+        f"{col}_w_common" for col in pudl_rmi.deprish.DOLLAR_COLS
+    ]
+    # merge in the ppe. ensure the ppe columns from the de output are replaced
+    # w/ the stacked override columns
+    allocated = pd.merge(
+        de_stacked.drop(columns=[c for c in de_stacked if c in plant_parts_eia]),
+        plant_parts_eia[
+            [c for c in PPE_COLS if c != "record_id_eia"] + allocator_cols_ppe
+        ],
+        left_on=["record_id_eia"],
+        right_index=True,
+        how="left",
+    )
+    for allocate_col in allocate_cols_deprish:
+        allocated.loc[
+            :, allocate_col
+        ] = pudl_rmi.connect_deprish_to_ferc1._allocate_col(
+            to_allocate=allocated,
+            by=["line_id"],
+            allocate_col=allocate_col,
+            allocator_cols=allocator_cols_ppe,
+        )
+    allocated = allocated.drop(columns=allocator_cols_ppe)
+
+    return pd.concat([de_one_to_ones, allocated]).reset_index(drop=True)
+
+
 ###############################################################################
 # EXPORT
 ###############################################################################
@@ -447,6 +551,9 @@ def execute(
         save_to_workbook(
             file_path=pudl_rmi.DEPRISH_RAW_XLSX, sheets_df_dict=sheets_df_dict
         )
+    deprish_match = stack_and_allocate_one_to_many_deprish_to_eia_connections(
+        deprish_eia=deprish_match, plant_parts_eia=plant_parts_eia
+    )
     return deprish_match
 
 
