@@ -154,7 +154,7 @@ class InputManager:
                 "plant_part",
                 "ownership_dupe",
             ]
-            self.train_df = (
+            train_df = (
                 # we want to ensure that the records are associated with a
                 # "true granularity" - which is a way we filter out whether or
                 # not each record in the EIA plant-parts is actually a
@@ -192,7 +192,7 @@ class InputManager:
                     ]
                 )
             )
-            not_in_ppf = self.train_df[self.train_df._merge == "left_only"]
+            not_in_ppf = train_df[train_df._merge == "left_only"]
             # if not not_in_ppf.empty:
             if len(not_in_ppf) > 12:
                 self.not_in_ppf = not_in_ppf
@@ -201,7 +201,15 @@ class InputManager:
                     "record_id_ferc1's of bad training data records are: "
                     f"{list(not_in_ppf.reset_index().record_id_ferc1)}"
                 )
-            self.train_df = self.train_df.drop(columns=mul_cols + ["_merge"])
+            dupe_ferc1 = train_df.reset_index()[
+                train_df.reset_index()[["record_id_ferc1"]].duplicated(keep=False)
+            ].sort_index()
+            if not dupe_ferc1.empty:
+                raise AssertionError(
+                    f"You have {len(dupe_ferc1)} duplicate ferc1 training "
+                    f"records: {dupe_ferc1.index}"
+                )
+            self.train_df = train_df.drop(columns=mul_cols + ["_merge"])
         return self.train_df
 
     def get_train_index(self):
