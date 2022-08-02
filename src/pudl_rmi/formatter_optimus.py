@@ -377,7 +377,7 @@ def allocate_balancing_account_to_assets(
     with the utility/FERC account level values reported to FERC1 via
     :func:`add_balancing_account`. This function takes those balancing account
     records and allocates them across assets. It utilizes
-    :func:`pudl_rmi.connect_deprish_to_ferc1._allocate_cols`
+    :func:`pudl_rmi.connect_deprish_to_ferc1.allocate_cols`
 
     Args:
         ferc_deprish_eia_w_ba
