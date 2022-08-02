@@ -407,6 +407,47 @@ def _check_id_consistency(
     ), f"{id_col} {error_message}: {bad_ids}"
 
 
+def _check_if_id_in_training(
+    proposed_overrides_df: pd.DataFrame, 
+    training_data: pd.DataFrame, 
+    id_name: Literal["record_id_eia_override_1", "record_id_ferc1"]
+):
+    """Check whether the FERC or EIA ids in the proposed data are already in the training data.
+    
+    Args:
+        proposed_overrides_df: The df with the proposed overrides.
+        training_data: The df with the training data. Important that it is updated so
+            that the "record_id_eia" column is renamed to "record_id_eia_override_1"
+            to match the proposed_overrides_df so that the index compares work.
+        id_name: The name of the column you want to test.
+    
+    """
+    logger.debug(f"Checking for {id_name} values that are already in the training data")
+    existing_training_ids = training_data[id_name].dropna().unique()
+    proposed_override_ids = proposed_overrides_df[id_name].dropna().unique()
+    duplicate_ids = [x for x in proposed_override_ids if x in existing_training_ids]
+    
+    if len(duplicate_ids) > 0:
+        logger.info(f"Found some {id_name} overrides already in the training data")
+        logger.info("Checking to see if these ids have the same id match")
+        
+        training_dups = (
+            training_data[training_data[id_name].isin(duplicate_ids)]
+            .set_index(["record_id_eia_override_1", "record_id_ferc1"])
+        )
+        proposed_dups = (
+            proposed_overrides_df[proposed_overrides_df[id_name].isin(duplicate_ids)]
+            .set_index(["record_id_eia_override_1", "record_id_ferc1"])
+        )
+
+        compare_indexes = training_dups.index.difference(proposed_dups.index)
+        if len(compare_indexes) > 0:
+            raise AssertionError (f"Found {id_name} values that already exist in the training data and \
+                have miss-matched ids: {compare_indexes}")
+        else:
+            logger.info(f"The {id_name} training duplicates have the same id match so they're just duplicates")
+
+
 def validate_override_fixes(
     validated_connections,
     utils_eia860,
@@ -502,6 +543,7 @@ def validate_override_fixes(
         how="left",
         suffixes=("", "_ppl"),
     )
+   
     # Now merge the utility_id_pudl from EIA in so that you can compare it with the
     # utility_id_pudl from FERC that's already in the overrides
     only_overrides = only_overrides.merge(
@@ -547,22 +589,44 @@ def validate_override_fixes(
         )
 
     # If you don't expect to override values that have already been overridden, make
-    # sure the ids you fixed aren't already in the training data.
+    # sure the ids you fixed aren't already in the training data
     if not expect_override_overrides:
-        existing_training_eia_ids = training_data.record_id_eia.dropna().unique()
-        _check_id_consistency(
-            "record_id_eia_override_1",
-            only_overrides,
-            existing_training_eia_ids,
-            "already in training",
-        )
-        existing_training_ferc_ids = training_data.record_id_ferc1.dropna().unique()
-        _check_id_consistency(
-            "record_id_ferc1",
-            only_overrides,
-            existing_training_ferc_ids,
-            "already in training",
-        )
+        training_data_rename = training_data.rename(columns={"record_id_eia": "record_id_eia_override_1"})
+        _check_if_id_in_training(only_overrides, training_data_rename, "record_id_eia_override_1")
+        _check_if_id_in_training(only_overrides, training_data_rename, "record_id_ferc1")
+
+        # logger.debug("Checking for EIA ids that are already in the training data")
+        # existing_training_eia_ids = training_data.record_id_eia.dropna().unique()
+        # proposed_override_eia_ids = only_overrides.record_id_eia_override_1.dropna().unique()
+        # duplicate_eia_ids = [x for x in proposed_override_eia_ids if x in existing_training_eia_ids]
+        
+        # if len(duplicate_eia_ids) > 0:
+        #     logger.info("Found some EIA id overrides already in the training data")
+        #     logger.info("Checking to see if these EIA ids have the same FERC id")
+        #     training_dups = (
+        #         training_data[training_data["record_id_eia"].isin(duplicate_eia_ids)]
+        #         .set_index(["plant_id_eia", "plant_id_ferc1"])
+        #     )
+        #     proposed_dups = (
+        #         only_overrides[only_overrides["record_id_eia"].isin(duplicate_eia_ids)]
+        #         .rename(columns={"plant_id_eia_override_1": "plant_id_eia"})
+        #         .set_index(["plant_id_eia", "plant_id_ferc1"])
+        #     )
+
+        #     compare_indexes = training_dups.index.difference(proposed_dups.index)
+        #     if len(compare_indexes) > 0:
+        #         raise AssertionError (f"Found record_id_eia_override_1 values that already exist in the training data and \
+        #             have miss-matched ferc ids: {compare_indexes}")
+        #     else:
+        #         logger.info("The EIA id training duplicates have the same ferc id so they're just duplicates")
+
+        # logger.debug("Checking for FERC1 ids that are already in the training data")
+        # existing_training_ferc1_ids = training_data.record_id_ferc1.dropna().unique()
+        # proposed_override_ferc1_ids = only_overrides.record_id_ferc1.dropna().unique()
+        # duplicate_ferc1_ids = [x for x in proposed_override_ferc1_ids if x in existing_training_ferc1_ids]
+        # if len(duplicate_ferc1_ids) > 0:
+        #     raise AssertionError (f"Found record_id_ferc1 values that already exist in the training data: {duplicate_ferc1_ids}")
+
 
     # Only return the results that have been verified
     verified_connections = validated_connections[
