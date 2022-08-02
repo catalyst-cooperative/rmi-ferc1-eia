@@ -42,7 +42,7 @@ setup(
             "tox>=3.20,<4",
         ]
     },
-    python_requires=">=3.8,<3.11",
+    python_requires=">=3.10,<3.11",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
