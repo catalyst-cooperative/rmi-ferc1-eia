@@ -150,7 +150,8 @@ def _is_best_match(
 def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
-    ferc1_eia_prep = ferc1_eia.copy()
+    # Only want to keep the plant_name_new field which replaces plant_name_eia
+    ferc1_eia_prep = ferc1_eia.copy().drop(columns="plant_name_eia")
 
     # Add utility_name_eia - this must happen before renaming the cols or else there
     # will be duplicate utility_name_eia columns.
@@ -235,7 +236,7 @@ def _prep_deprish(deprish, pudl_out) -> pd.DataFrame:
         ["utility_id_pudl", "utility_id_eia"]
     ].drop_duplicates()
     deprish.loc[:, "report_year"] = deprish.report_date.dt.year.astype("Int64")
-    deprish = deprish.merge(util_df, on=["utility_id_pudl"], how="left", validate="1:m")
+    deprish = deprish.merge(util_df, on=["utility_id_pudl"], how="left")
 
     return deprish
 

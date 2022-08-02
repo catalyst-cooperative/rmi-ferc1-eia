@@ -30,7 +30,7 @@ RENAME_COLS: Dict = {
     "total_fuel_cost": "Fuel Cost ($)",
     "faked_4": "Non-Fuel Variable O&M Costs ($)",
     "faked_5": "Fixed O&M Costs ($)",
-    "opex_nonfuel": "Total O&M Cost",
+    "opex_total_nonfuel": "Total O&M Cost",
     "faked_6": "Total Production Costs ($)",
     "installation_year": "Commission Year",
     "remaining_life_avg": "Current Remaining Accounting Life (Yrs)",
