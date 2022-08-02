@@ -8,6 +8,7 @@ import pudl
 import sqlalchemy as sa
 
 from pudl_rmi import validate
+from pudl_rmi.connect_deprish_to_ferc1 import allocate_cols
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ RENAME_COLS: Dict = {
     "depreciation_annual_epxns_w_common": "Annual Depreciation Expense ($)",
     "depreciation_annual_rate": "Depreciation Rate (%)",
     "net_salvage_w_common": "Decommissioning Cost ($)",
+    "net_salvage_rate": "Decommissioning Rate (%)",
     "capex_annual_addition": "Annual Capital Additions ($)",
     "faked_7": "Accumulated Deferred Income Tax (ADIT) ($)",
     "faked_8": "Accumulated Deferred Income Tax (ASC740) ($)",
@@ -113,7 +115,9 @@ RENAME_COLS: Dict = {
     "plant_id_eia": "Plant ID EIA",
     "report_year": "Report Year",
     "data_source": "Data Source of Depreciation Study",
-    "ferc_acct_name": "FERC Acct",
+    "ferc_acct_name": "FERC account",
+    "ferc_account_name_rmi": "technology",
+    "unaccrued_balance_w_common": "Unaccrued Balance",
 }
 
 TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE: Dict = {
@@ -174,7 +178,9 @@ def execute(
     if balancing_account:
         pudl_engine = sa.create_engine(pudl.workspace.setup.get_defaults()["pudl_db"])
         net_plant_balance = validate.download_and_clean_net_plant_balance(pudl_engine)
-        deprish_ferc1_eia = add_balancing_account(deprish_ferc1_eia, net_plant_balance)
+        deprish_ferc1_eia = add_balancing_account(
+            deprish_ferc1_eia, net_plant_balance
+        ).pipe(allocate_balancing_account_to_assets)
     model_input = (
         deprish_ferc1_eia.reset_index()  # reset index b4 merge bc it's prob 'record_id_eia'
         .merge(
@@ -348,3 +354,66 @@ def add_balancing_account(
     logger.info(f"adding {len(balancing_records)} balancing account records.")
     ferc_deprish_eia = pd.concat([ferc_deprish_eia, balancing_records], join="outer")
     return ferc_deprish_eia
+
+
+def allocate_balancing_account_to_assets(
+    ferc_deprish_eia_w_ba: pd.DataFrame,
+    idk_ba: List[str] = [
+        "utility_name_eia",
+        "operational_status",
+        "ferc_acct_name",
+        "data_source",
+        "report_year",
+    ],
+    data_and_allocator_cols: dict = {
+        "plant_balance_w_common": ["plant_balance_w_common"],
+        "book_reserve_w_common": ["book_reserve_w_common"],
+        "depreciation_annual_epxns_w_common": ["depreciation_annual_epxns_w_common"],
+    },
+):
+    """Allocate the balancing account records across related assets.
+
+    We generate balancing account records to true up the depreciation studies
+    with the utility/FERC account level values reported to FERC1 via
+    :func:`add_balancing_account`. This function takes those balancing account
+    records and allocates them across assets. It utilizes
+    :func:`pudl_rmi.connect_deprish_to_ferc1.allocate_cols`
+
+    Args:
+        ferc_deprish_eia_w_ba
+        idk_ba: list of ID columns to allocate across.
+        data_and_allocator_cols: dictionary of data columns to allocate (keys)
+            and lists of column(s) to allocate based on.
+
+    """
+    # split records
+    mask_ba = ferc_deprish_eia_w_ba.plant_name_eia == "Balancing_Account"
+    balancing_accounts = ferc_deprish_eia_w_ba.loc[mask_ba]
+    assets = ferc_deprish_eia_w_ba.loc[~mask_ba]
+    data_cols = list(data_and_allocator_cols.keys())
+    # merge the ba's onto the assets
+    assets_w_ba = pd.merge(
+        assets,
+        balancing_accounts[idk_ba + data_cols],
+        on=idk_ba,
+        suffixes=("", "_ba"),
+        how="left",
+        validate="m:1",
+    )
+    # allocate each col
+    assets_w_ba = allocate_cols(
+        to_allocate=assets_w_ba,
+        by=idk_ba,
+        data_and_allocator_cols=data_and_allocator_cols,
+    )
+    if not (
+        check_sums := all(
+            ferc_deprish_eia_w_ba[data_cols].sum().round()
+            == assets_w_ba[data_cols].sum().round()
+        )
+    ):
+        raise AssertionError(
+            "Allocating the balancing accounts changed the sum of the data cols"
+            f"{check_sums}"
+        )
+    return assets_w_ba
