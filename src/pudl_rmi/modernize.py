@@ -26,33 +26,33 @@ def fake_duke_deprish_eia_for_mod(df_to_fake, ppe):
     # og_index = df_to_fake.index.names
     # df_to_fake = df_to_fake.reset_index()
     fake_year_dfs = []
-    to_fake_2018 = df_to_fake[
-        df_to_fake.utility_id_pudl.isin([90, 97])
-        & (df_to_fake.report_date.dt.year == 2018)
-    ].reset_index()[
-        [
-            c
-            for c in df_to_fake.reset_index()
-            if c
-            in ["record_id_eia", "line_id"]  # core IDs
-            + pudl_rmi.deprish.IDX_COLS_DEPRISH  # deprish IDS
+    to_fake_2018 = (
+        df_to_fake[
+            df_to_fake.utility_id_pudl.isin([90, 97])
+            & (df_to_fake.report_date.dt.year == 2018)
         ]
-    ]
+        .reset_index()[
+            [
+                c
+                for c in df_to_fake.reset_index()
+                if c
+                in ["record_id_eia", "line_id"]  # core IDs
+                + pudl_rmi.deprish.IDX_COLS_DEPRISH  # deprish IDS
+            ]
+        ]
+        .copy()
+    )
     for fake_year in [2019, 2020]:
-        fake_new_year = (
-            to_fake_2018.copy()
-            .assign(
-                report_year=fake_year,
-                report_date=pd.to_datetime(fake_year, format="%Y"),
-            )
-            .replace(
-                to_replace={
-                    "record_id_eia": "_2018_",
-                    "line_id": "2018_",
-                },
-                value={"record_id_eia": f"_{fake_year}_", "line_id": f"{fake_year}_"},
-                regex=True,
-            )
+        fake_new_year = to_fake_2018.assign(
+            report_year=fake_year,
+            report_date=pd.to_datetime(fake_year, format="%Y"),
+        ).replace(
+            to_replace={
+                "record_id_eia": "_2018_",
+                "line_id": "2018_",
+            },
+            value={"record_id_eia": f"_{fake_year}_", "line_id": f"{fake_year}_"},
+            regex=True,
         )
         fake_new_year = fake_new_year[
             ~(
@@ -83,7 +83,8 @@ def fake_duke_deprish_eia_for_mod(df_to_fake, ppe):
     de_faked = pd.concat(
         [df_to_fake, fake_new_years], join="outer"  # .set_index(og_index),
     )
-    assert ~de_faked[de_faked.report_date.dt.year == 2020].empty
+    if de_faked[de_faked.report_date.dt.year == 2020].empty:
+        raise AssertionError("this faked table should now have 2020 data, but doesn't.")
     return de_faked
 
 
