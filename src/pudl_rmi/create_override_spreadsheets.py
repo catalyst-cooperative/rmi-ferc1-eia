@@ -16,6 +16,7 @@ validate them, and incorporate them into the existing training data.
 import logging
 import os
 from typing import Dict, List, Literal
+from xmlrpc.client import boolean
 
 import numpy as np
 import pandas as pd
@@ -110,6 +111,7 @@ RELEVANT_COLS_PPL: List = [
 
 def _pct_diff(df, col) -> pd.DataFrame:
     """Calculate percent difference between EIA and FERC versions of a column."""
+    logger.debug(f"Adding pct diff col: {col}")
     # Fed in the _pct_diff column so make sure it is neutral for this analysis
     col = col.replace("_pct_diff", "")
     # Fill in the _pct_diff column with the actual percent difference value
@@ -378,7 +380,7 @@ def generate_all_override_spreadsheets(pudl_out, rmi_out, util_dict, years) -> N
 
 
 # --------------------------------------------------------------------------------------
-# Upload Changes to Training Data
+# Validate Changes to Training Data
 # --------------------------------------------------------------------------------------
 
 
@@ -408,6 +410,7 @@ def _check_id_consistency(
 
 
 def _check_if_id_in_training(
+    override_overrides:boolean,
     proposed_overrides_df: pd.DataFrame, 
     training_data: pd.DataFrame, 
     id_name: Literal["record_id_eia_override_1", "record_id_ferc1"]
@@ -422,30 +425,54 @@ def _check_if_id_in_training(
         id_name: The name of the column you want to test.
     
     """
-    logger.debug(f"Checking for {id_name} values that are already in the training data")
+    logger.info(f"Checking for {id_name} values that are already in the training data")
     existing_training_ids = training_data[id_name].dropna().unique()
     proposed_override_ids = proposed_overrides_df[id_name].dropna().unique()
     duplicate_ids = [x for x in proposed_override_ids if x in existing_training_ids]
     
-    if len(duplicate_ids) > 0:
-        logger.info(f"Found some {id_name} overrides already in the training data")
-        logger.info("Checking to see if these ids have the same id match")
-        
+    idx_values = ["record_id_eia_override_1", "record_id_ferc1"]
+
+    # See if there are any records already in the training data.
+    if (num_dups := len(duplicate_ids)) > 0:
+
         training_dups = (
             training_data[training_data[id_name].isin(duplicate_ids)]
-            .set_index(["record_id_eia_override_1", "record_id_ferc1"])
+            .set_index(idx_values)
         )
         proposed_dups = (
             proposed_overrides_df[proposed_overrides_df[id_name].isin(duplicate_ids)]
-            .set_index(["record_id_eia_override_1", "record_id_ferc1"])
+            .set_index(idx_values)
         )
 
+        # See if the records already in the training data have the same id match (meaning they
+        # are just duplicates) or not (meaning they might be overrides).
         compare_indexes = training_dups.index.difference(proposed_dups.index)
-        if len(compare_indexes) > 0:
-            raise AssertionError (f"Found {id_name} values that already exist in the training data and \
-                have miss-matched ids: {compare_indexes}")
-        else:
-            logger.info(f"The {id_name} training duplicates have the same id match so they're just duplicates")
+        if (num_bad := len(compare_indexes)) > 0:
+            if not override_overrides:
+                raise AssertionError (
+                    f">> Found {num_bad} {id_name} values that already exist in "
+                    f"the training data and have miss-matched ids: {compare_indexes}"
+                )
+            else: 
+                # Create a df that compares the proposed overrides to those already in the training
+                # if there are miss-matches
+                compare_ids = pd.merge(
+                    training_dups.reset_index()[idx_values],
+                    proposed_dups.reset_index()[idx_values],
+                    on=id_name,
+                    suffixes=["_training", "_override"]
+                )
+                other_id = [x for x in idx_values if x != id_name]
+                compare_ids = compare_ids[compare_ids[f"{other_id[0]}_training"] != compare_ids[f"{other_id[0]}_override"]].set_index(id_name)
+
+                logger.info(
+                    f">> Found {num_bad} {id_name} values that already exist in "
+                    "the training data and have miss-matched ids. You indicated "
+                    "that you want to override values already in the training data "
+                    "so we're going to replace these training data matches. "
+                    "If that's not the case, set expect_override_overrides to FALSE \n"
+                )
+                logger.debug(compare_ids)
 
 
 def validate_override_fixes(
@@ -455,6 +482,7 @@ def validate_override_fixes(
     ferc1_eia,
     training_data,
     expect_override_overrides=False,
+    expect_utility_missmatch=False,
 ) -> pd.DataFrame:
     """Process the verified and/or fixed matches and look for human error.
 
@@ -485,7 +513,6 @@ def validate_override_fixes(
             training data.
 
     """
-    logger.info("Validating overrides")
     # When there are NA values in the verified column in the excel doc, it seems that
     # the TRUE values become 1.0 and the column becomes a type float. Let's replace
     # those here and make it a boolean.
@@ -556,13 +583,19 @@ def validate_override_fixes(
     # Now we can actually compare the two columns
     if (
         len(
-            bad_utils := only_overrides["utility_id_pudl"].compare(
-                only_overrides["utility_id_pudl_utils"]
+            bad_utils := only_overrides.set_index(["record_id_ferc1", "plant_name_ferc1"])["utility_id_pudl"].compare(
+                only_overrides.set_index(["record_id_ferc1", "plant_name_ferc1"])["utility_id_pudl_utils"]
             )
         )
         > 0
     ):
-        raise AssertionError(f"Found mismatched utilities: {bad_utils}")
+        if not expect_utility_missmatch:
+            raise AssertionError(f"Found mismatched utilities: {bad_utils}")
+        else:
+            logger.debug(
+                "Found the following utility missmatches. Make sure you approve them all! \n"
+                f"{bad_utils}"
+            )
 
     # Make sure the year in the EIA id overrides match the year in the report_year
     # column.
@@ -588,45 +621,10 @@ def validate_override_fixes(
             {[only_overrides.iloc[x].record_id_eia_override_1 for x in bad_eia_year.index]}"
         )
 
-    # If you don't expect to override values that have already been overridden, make
-    # sure the ids you fixed aren't already in the training data
-    if not expect_override_overrides:
-        training_data_rename = training_data.rename(columns={"record_id_eia": "record_id_eia_override_1"})
-        _check_if_id_in_training(only_overrides, training_data_rename, "record_id_eia_override_1")
-        _check_if_id_in_training(only_overrides, training_data_rename, "record_id_ferc1")
-
-        # logger.debug("Checking for EIA ids that are already in the training data")
-        # existing_training_eia_ids = training_data.record_id_eia.dropna().unique()
-        # proposed_override_eia_ids = only_overrides.record_id_eia_override_1.dropna().unique()
-        # duplicate_eia_ids = [x for x in proposed_override_eia_ids if x in existing_training_eia_ids]
-        
-        # if len(duplicate_eia_ids) > 0:
-        #     logger.info("Found some EIA id overrides already in the training data")
-        #     logger.info("Checking to see if these EIA ids have the same FERC id")
-        #     training_dups = (
-        #         training_data[training_data["record_id_eia"].isin(duplicate_eia_ids)]
-        #         .set_index(["plant_id_eia", "plant_id_ferc1"])
-        #     )
-        #     proposed_dups = (
-        #         only_overrides[only_overrides["record_id_eia"].isin(duplicate_eia_ids)]
-        #         .rename(columns={"plant_id_eia_override_1": "plant_id_eia"})
-        #         .set_index(["plant_id_eia", "plant_id_ferc1"])
-        #     )
-
-        #     compare_indexes = training_dups.index.difference(proposed_dups.index)
-        #     if len(compare_indexes) > 0:
-        #         raise AssertionError (f"Found record_id_eia_override_1 values that already exist in the training data and \
-        #             have miss-matched ferc ids: {compare_indexes}")
-        #     else:
-        #         logger.info("The EIA id training duplicates have the same ferc id so they're just duplicates")
-
-        # logger.debug("Checking for FERC1 ids that are already in the training data")
-        # existing_training_ferc1_ids = training_data.record_id_ferc1.dropna().unique()
-        # proposed_override_ferc1_ids = only_overrides.record_id_ferc1.dropna().unique()
-        # duplicate_ferc1_ids = [x for x in proposed_override_ferc1_ids if x in existing_training_ferc1_ids]
-        # if len(duplicate_ferc1_ids) > 0:
-        #     raise AssertionError (f"Found record_id_ferc1 values that already exist in the training data: {duplicate_ferc1_ids}")
-
+    # Make sure the ids you fixed aren't already in the training data
+    training_data_rename = training_data.rename(columns={"record_id_eia": "record_id_eia_override_1"})
+    _check_if_id_in_training(expect_override_overrides, only_overrides, training_data_rename, "record_id_eia_override_1")
+    _check_if_id_in_training(expect_override_overrides, only_overrides, training_data_rename, "record_id_ferc1")
 
     # Only return the results that have been verified
     verified_connections = validated_connections[
@@ -634,6 +632,131 @@ def validate_override_fixes(
     ].copy()
 
     return verified_connections
+
+
+def compare_override_matches(
+    validated_connections: pd.DataFrame, 
+    ppl_df: pd.DataFrame
+):
+    """Output a spreadsheet that compares the capacity, net gen, and inst year for overrides."""
+    val_con_subset = validated_connections[validated_connections["verified"]==True][[
+        "used_match_record",
+        "signature_1",
+        "signature_2",
+        "notes",
+        "record_id_eia_override_1",
+        "record_id_eia_override_2",
+        "record_id_eia_override_3",
+        "record_id_ferc1",
+        "plant_name_ferc1",
+        "capacity_mw_ferc1",
+        "net_generation_mwh_ferc1",
+        "installation_year_ferc1"
+    ]].reset_index().copy()
+
+    ppl_subset = ppl_df[[
+        "record_id_eia",
+        "capacity_mw",
+        "net_generation_mwh",
+        "installation_year"
+    ]].rename(columns={
+        "capacity_mw": "capacity_mw_eia",
+        "net_generation_mwh": "net_generation_mwh_eia",
+        "installation_year": "installation_year_eia"
+    }).copy()
+
+    # Break the df into 1:1 and 1:many matches
+    logger.debug("Breaking validated overrides into 1:1 and 1:many")
+    val_con_single_match = val_con_subset[val_con_subset["record_id_eia_override_2"].isna()]
+    val_con_multi_match = val_con_subset[val_con_subset["record_id_eia_override_2"].notna()]
+    if (len(val_con_single_match) + len(val_con_multi_match) != len(val_con_subset)):
+        raise AssertionError (
+            "Missing records when breaking table into 1:1: and 1:m matches -- "
+            f"single: {len(val_con_single_match)}, multi: {len(val_con_multi_match)}, total: {len(val_con_subset)}"    
+        )
+    
+    # Merge PPL data into validated connections subset df for all values with just a single
+    # override record
+    logger.debug("Merging 1:1 matches with PPL data")
+    val_con_single_match = val_con_single_match.merge(
+        ppl_subset,
+        left_on="record_id_eia_override_1",
+        right_on="record_id_eia",
+        how="left",
+    )
+
+    def _compare_override_matches_for_one_to_many(multi_match_df: pd.DataFrame, ppl_df: pd.DataFrame):
+        """Aggregate PPL matches where match is 1:many.
+        
+        Args: 
+            multi_match_df: DataFrame with all the validated overrides for records with more than
+                one EIA record matched to a ferc record.
+            ppl_df: The plant part list dataframe with all the EIA records.
+        
+        """
+        overrides = [
+            multi_match_df.record_id_eia_override_1, 
+            multi_match_df.record_id_eia_override_2, 
+            multi_match_df.record_id_eia_override_3
+        ]
+        overrides = [x for x in overrides if x != np.nan]
+        override_rows_eia = ppl_subset[ppl_subset["record_id_eia"].isin(overrides)]
+        eia_cap_sum = override_rows_eia.capacity_mw_eia.sum()
+        eia_net_gen_sum = override_rows_eia.net_generation_mwh_eia.sum()
+        inst_years = override_rows_eia.installation_year_eia.tolist()
+        multi_match_df["capacity_mw_eia"] = eia_cap_sum
+        multi_match_df["net_generation_mwh_eia"] = eia_net_gen_sum
+        multi_match_df["installation_year_eia_multi"] = inst_years
+        return multi_match_df
+
+    logger.debug("Merging 1:m matches with PPL data")
+    val_con_multi_match = val_con_multi_match.apply(
+        lambda x: _compare_override_matches_for_one_to_many(x, ppl_df), axis=1
+    )
+
+    # Recombine the dfs, add comparison columns, and order the columns
+    logger.debug("Recombining 1:1 and 1:m matches")
+    val_con_full = pd.concat([
+        val_con_single_match,
+        val_con_multi_match]
+    ).reset_index(drop=True
+    ).pipe(_pct_diff, "capacity_mw"
+    ).pipe(_pct_diff, "net_generation_mwh"
+    ).assign(
+        installation_year_diff=lambda x: (
+            x.installation_year_ferc1 - x.installation_year_eia),
+        best_match=np.nan
+    ).pipe(_is_best_match
+    ).drop(columns=["record_id_eia"]
+    ).set_index([        
+        "record_id_ferc1"
+    ])[[
+        "plant_name_ferc1",
+        "record_id_eia_override_1",
+        "record_id_eia_override_2",
+        "record_id_eia_override_3",
+        "best_match",
+        "notes",
+        "capacity_mw_ferc1",
+        "capacity_mw_eia",
+        "net_generation_mwh_ferc1",
+        "net_generation_mwh_eia",
+        "installation_year_ferc1",
+        "installation_year_eia",
+        "installation_year_eia_multi",
+        "capacity_mw_pct_diff",
+        "net_generation_mwh_pct_diff",
+        "installation_year_diff",
+        "used_match_record",
+        "signature_1",
+        "signature_2",
+    ]] # to rearrange the columns
+
+    return val_con_full
+
+# --------------------------------------------------------------------------------------
+# Upload Changes to Training Data
+# --------------------------------------------------------------------------------------
 
 
 def _add_to_training(new_overrides) -> None:
@@ -672,7 +795,7 @@ def _add_to_null_overrides(null_matches) -> None:
 
 
 def validate_and_add_to_training(
-    pudl_out, rmi_out, expect_override_overrides=False
+    pudl_out, rmi_out, expect_override_overrides=False, expect_utility_missmatch=False
 ) -> None:
     """Validate, combine, and add overrides to the training data.
 
@@ -720,6 +843,7 @@ def validate_and_add_to_training(
                 ferc1_eia_df,
                 training_df,
                 expect_override_overrides=expect_override_overrides,
+                expect_utility_missmatch=expect_utility_missmatch
             )
             .rename(
                 columns={
