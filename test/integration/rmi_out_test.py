@@ -41,7 +41,7 @@ def test_pudl_engine(pudl_engine, table_name):
 def test_ppl_out(rmi_out, request):
     """Test generation of the EIA Plant Parts List."""
     clobber = not request.config.getoption("--cached-plant-parts-eia")
-    ppl = rmi_out.plant_parts_eia(clobber=clobber)
+    ppl = rmi_out.plant_parts_eia(clobber=clobber, pickle_distinct=True)
     assert not ppl.empty
     del ppl
     df_keys = list(rmi_out.pudl_out._dfs.keys())

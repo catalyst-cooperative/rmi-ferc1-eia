@@ -55,22 +55,26 @@ logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ["utility_id_ferc1", "plant_id_ferc1", "report_date"]
 
 
-def execute(pudl_out, plant_parts_eia):
+def execute(pudl_out, plant_parts_eia_distinct):
     """
     Coordinate the connection between FERC1 plants and EIA plant-parts.
 
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
-    inputs = InputManager(pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_eia)
+    inputs = InputManager(
+        pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_eia_distinct
+    )
     features_all = Features(feature_type="all", inputs=inputs).get_features(
         clobber=False
     )
+    logger.info("Created all features.")
     features_train = Features(feature_type="training", inputs=inputs).get_features(
         clobber=False
     )
+    logger.info("Created train features.")
     tuner = ModelTuner(features_train, inputs.get_train_index(), n_splits=10)
-
+    logger.info("Tune hyperparameters.")
     matcher = MatchManager(best=tuner.get_best_fit_model(), inputs=inputs)
     matches_best = matcher.get_best_matches(features_train, features_all)
     connects_ferc1_eia = prettyify_best_matches(
@@ -90,7 +94,7 @@ def execute(pudl_out, plant_parts_eia):
 class InputManager:
     """Class prepare inputs for linking FERC1 and EIA."""
 
-    def __init__(self, file_path_training, pudl_out, plant_parts_eia):
+    def __init__(self, file_path_training, pudl_out, plant_parts_eia_distinct):
         """
         Initialize inputs manager that gets inputs for linking FERC and EIA.
 
@@ -103,7 +107,7 @@ class InputManager:
         """
         self.file_path_training = file_path_training
         self.pudl_out = pudl_out
-        self.plant_parts_eia = plant_parts_eia
+        self.plant_parts_eia = plant_parts_eia_distinct
 
         # generate empty versions of the inputs.. this let's this class check
         # whether or not the compiled inputs exist before compilnig
@@ -116,20 +120,8 @@ class InputManager:
 
     def get_plant_parts_true(self, clobber=False):
         """Get the EIA plant-parts with only the unique granularities."""
-        # We want only the records of the EIA plant-parts that are "true
-        # granularies" and those which are not duplicates based on their
-        # ownership  so the model doesn't get confused as to which option to
-        # pick if there are many records with duplicate data
-        if clobber or self.plant_parts_true_df is None:
-            plant_parts_eia = self.plant_parts_eia.assign(
-                plant_id_report_year_util_id=lambda x: x.plant_id_report_year
-                + "_"
-                + x.utility_id_pudl.map(str)
-            ).astype({"installation_year": "float"})
-            self.plant_parts_true_df = plant_parts_eia[
-                (plant_parts_eia["true_gran"]) & (~plant_parts_eia["ownership_dupe"])
-            ].copy()
-        return self.plant_parts_true_df
+        # temporarily making this a silly stand in function
+        return self.plant_parts_eia
 
     def prep_train_connections(self, clobber=False):
         """
