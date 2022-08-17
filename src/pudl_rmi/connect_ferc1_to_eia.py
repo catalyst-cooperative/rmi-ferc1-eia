@@ -62,6 +62,7 @@ def execute(pudl_out, plant_parts_eia_distinct):
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
+    # here you load the train df
     inputs = InputManager(
         pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_eia_distinct
     )
