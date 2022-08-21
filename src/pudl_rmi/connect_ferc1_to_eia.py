@@ -47,7 +47,7 @@ from recordlinkage.compare import Exact, Numeric, String  # , Date
 from sklearn.model_selection import KFold  # , cross_val_score
 
 import pudl_rmi
-from pudl_rmi import connect_deprish_to_eia, make_plant_parts_eia
+from pudl_rmi import connect_deprish_to_eia
 
 logger = logging.getLogger(__name__)
 # Silence the recordlinkage logger, which is out of control
@@ -55,27 +55,26 @@ logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ["utility_id_ferc1", "plant_id_ferc1", "report_date"]
 
 
-def execute(pudl_out, plant_parts_eia_distinct):
+def execute(train_df, pudl_out, plant_parts_eia_distinct):
     """
     Coordinate the connection between FERC1 plants and EIA plant-parts.
 
+    Args:
+        train_df (pandas.DataFrame): Training data connected to EIA
+        plant-parts data such that a FERC1 plant record is reported at the same
+        granularity as the connected EIA plant-parts record. MultiIndex
+        with record_id_eia and record_id_ferc1.
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
-    # here you load the train df
-    inputs = InputManager(
-        pudl_rmi.TRAIN_FERC1_EIA_CSV, pudl_out, plant_parts_eia_distinct
-    )
+    inputs = InputManager(train_df, pudl_out, plant_parts_eia_distinct)
     features_all = Features(feature_type="all", inputs=inputs).get_features(
         clobber=False
     )
-    logger.info("Created all features.")
     features_train = Features(feature_type="training", inputs=inputs).get_features(
         clobber=False
     )
-    logger.info("Created train features.")
     tuner = ModelTuner(features_train, inputs.get_train_index(), n_splits=10)
-    logger.info("Tune hyperparameters.")
     matcher = MatchManager(best=tuner.get_best_fit_model(), inputs=inputs)
     matches_best = matcher.get_best_matches(features_train, features_all)
     connects_ferc1_eia = prettyify_best_matches(
@@ -95,111 +94,37 @@ def execute(pudl_out, plant_parts_eia_distinct):
 class InputManager:
     """Class prepare inputs for linking FERC1 and EIA."""
 
-    def __init__(self, file_path_training, pudl_out, plant_parts_eia_distinct):
+    def __init__(self, train_df, pudl_out, plant_parts_eia_distinct):
         """
         Initialize inputs manager that gets inputs for linking FERC and EIA.
 
         Args:
-            file_path_training (path-like): path to the CSV of training data.
-                The training data needs to have at least two columns:
-                record_id_eia record_id_ferc1.
             pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
             plant_parts_eia (pandas.DataFrame)
         """
-        self.file_path_training = file_path_training
+        self.train_df = train_df
         self.pudl_out = pudl_out
-        self.plant_parts_eia = plant_parts_eia_distinct
+        self.plant_parts_true_df = plant_parts_eia_distinct
 
         # generate empty versions of the inputs.. this let's this class check
         # whether or not the compiled inputs exist before compilnig
-        self.plant_parts_true_df = None
+        # self.plant_parts_true_df = None
         self.plants_ferc1_df = None
-        self.train_df = None
         self.train_index = None
         self.plant_parts_train_df = None
         self.plants_ferc1_train_df = None
 
-    def get_plant_parts_true(self, clobber=False):
+    def get_plant_parts_true(self):
         """Get the EIA plant-parts with only the unique granularities."""
-        # temporarily making this a silly stand in function
-        return self.plant_parts_eia
+        return self.plant_parts_true_df
 
-    def prep_train_connections(self, clobber=False):
-        """
-        Get and prepare the training connections.
-
-        We have stored training data, which consists of records with ids
-        columns for both FERC and EIA. Those id columns serve as a connection
-        between ferc1 plants and the EIA plant-parts. These connections
-        indicate that a ferc1 plant records is reported at the same granularity
-        as the connected EIA plant-parts record. These records to train a
-        machine learning model.
-
-        Returns:
-            pandas.DataFrame: training connections. A dataframe with has a
-            MultiIndex with record_id_eia and record_id_ferc1.
-        """
-        if clobber or self.train_df is None:
-            mul_cols = [
-                "true_gran",
-                "appro_part_label",
-                "appro_record_id_eia",
-                "plant_part",
-                "ownership_dupe",
-            ]
-            self.train_df = (
-                # we want to ensure that the records are associated with a
-                # "true granularity" - which is a way we filter out whether or
-                # not each record in the EIA plant-parts is actually a
-                # new/unique collection of plant parts
-                # once the true_gran is dealt with, we also need to convert the
-                # records which are ownership dupes to reflect their "total"
-                # ownership counterparts
-                pd.read_csv(
-                    self.file_path_training,
-                )
-                .pipe(pudl.helpers.cleanstrings_snake, ["record_id_eia"])
-                .drop_duplicates(subset=["record_id_ferc1", "record_id_eia"])
-                .merge(
-                    self.plant_parts_eia.reset_index()[["record_id_eia"] + mul_cols],
-                    how="left",
-                    on=["record_id_eia"],
-                    indicator=True,
-                )
-                .assign(
-                    plant_part=lambda x: x["appro_part_label"],
-                    record_id_eia=lambda x: x["appro_record_id_eia"],
-                )
-                # .pipe(pudl.helpers.cleanstrings_snake, ['record_id_eia'])
-                .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-                .fillna(
-                    value={
-                        "record_id_eia": pd.NA,
-                    }
-                )
-                # recordlinkage and sklearn wants MultiIndexs to do the stuff
-                .set_index(
-                    [
-                        "record_id_ferc1",
-                        "record_id_eia",
-                    ]
-                )
-            )
-            not_in_ppf = self.train_df[self.train_df._merge == "left_only"]
-            # if not not_in_ppf.empty:
-            if len(not_in_ppf) > 12:
-                self.not_in_ppf = not_in_ppf
-                raise AssertionError(
-                    "Not all training data is associated with EIA records.\n"
-                    "record_id_ferc1's of bad training data records are: "
-                    f"{list(not_in_ppf.reset_index().record_id_ferc1)}"
-                )
-            self.train_df = self.train_df.drop(columns=mul_cols + ["_merge"])
+    def get_train_df(self):
+        """Get the training dataframe connected to true EIA record."""
         return self.train_df
 
     def get_train_index(self):
         """Get the index for the training data."""
-        self.train_index = self.prep_train_connections().index
+        self.train_index = self.train_df.index
         return self.train_index
 
     def get_all_ferc1(self, clobber=False):
@@ -286,7 +211,7 @@ class InputManager:
         known_df = (
             pd.merge(
                 dataset_df,
-                self.prep_train_connections().reset_index()[[dataset_id_col]],
+                self.train_df.reset_index()[[dataset_id_col]],
                 left_index=True,
                 right_on=[dataset_id_col],
             )
@@ -317,12 +242,12 @@ class InputManager:
     def execute(self, clobber=False):
         """Compile all the inputs."""
         # grab the main two data tables we are trying to connect
-        self.plant_parts_true_df = self.get_plant_parts_true(clobber=clobber)
+        self.plant_parts_true_df = self.get_plant_parts_true()
         self.plants_ferc1_df = self.get_all_ferc1(clobber=clobber)
 
         # we want both the df version and just the index; skl uses just the
         # index and we use the df in merges and such
-        self.train_df = self.prep_train_connections(clobber=clobber)
+        self.train_df = self.get_train_df()
         self.train_index = self.get_train_index()
 
         # generate the list of the records in the EIA and FERC records that
@@ -746,7 +671,7 @@ class MatchManager:
             inputs (instance of ``InputManager``): instance of ``InputManager``
         """
         self.best = best
-        self.train_df = inputs.prep_train_connections()
+        self.train_df = inputs.get_train_df()
         self.all_ferc1 = inputs.get_all_ferc1()
         # get the # of ferc options within the available eia years.
         self.ferc1_options_len = len(

@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from pudl.output.pudltabl import PudlTabl
 
 import pudl_rmi
+from pudl_rmi import make_plant_parts_eia
 
 # from memory_profiler import profile
 
@@ -55,7 +56,9 @@ class Output:
             )
 
     # @profile
-    def plant_parts_eia(self, clobber=False, pickle_distinct=False):
+    def plant_parts_eia(
+        self, clobber=False, pickle_distinct=False, pickle_train_connections=False
+    ):
         """
         Get the EIA plant-parts; generate it or get if from a file.
 
@@ -72,6 +75,10 @@ class Output:
             pickle_distinct (boolean): True if you also want to pickle the
                 EIA plant-parts with only the unique granularities. Default
                 is False.
+            pickle_train_connections (boolean): True if you also want to connect
+                and pickle the connection between the training data and EIA
+                plant-parts for use in EIA to FERC1 matching. Default is False.
+                Primarily used for memory efficiency when running CI.
         """
         file_path = pudl_rmi.PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
@@ -101,9 +108,14 @@ class Output:
             plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
 
         if pickle_distinct:
-            distinct_file_path = file_path.parent / "plant_parts_eia_distinct.pkl.gz"
+            distinct_file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
             pickle_plant_parts_distinct(
                 plant_parts_eia=plant_parts_eia, file_path=distinct_file_path
+            )
+        # more efficient memory use for CI
+        if pickle_train_connections:
+            prep_train_connections(plant_parts_eia).to_pickle(
+                pudl_rmi.CONNECTED_TRAIN_PKL
             )
 
         return plant_parts_eia
@@ -111,9 +123,7 @@ class Output:
     def plant_parts_eia_distinct(self, clobber=False, clobber_ppe=False):
         """Get the EIA plant_parts with only the unique granularities."""
         # make this a package variable
-        file_path = (
-            pudl_rmi.PLANT_PARTS_EIA_PKL.parent / "plant_parts_eia_distinct.pkl.gz"
-        )
+        file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
         clobber_any = any([clobber, clobber_ppe])
         if not file_path.exists() or clobber_any:
@@ -229,11 +239,20 @@ class Output:
                 f"FERC to EIA granular connection not found at {file_path}... "
                 "Generating a new output."
             )
+            # get or generate connected training data
+            train_file_path = pudl_rmi.CONNECTED_TRAIN_PKL
+            check_is_file_or_not_exists(train_file_path)
+            if not train_file_path.exists() or clobber_plant_parts_eia:
+                ppe = self.plant_parts_eia(clobber=clobber_plant_parts_eia)
+                train_df = prep_train_connections(ppe)
+                del ppe
+            else:
+                train_df = pd.read_pickle(train_file_path)
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
+                train_df,
                 self.pudl_out,
                 self.plant_parts_eia_distinct(
                     clobber=clobber_plant_parts_eia_distinct,
-                    clobber_ppe=clobber_plant_parts_eia,
                 ),
             )
             # export
@@ -433,6 +452,77 @@ def _set_plant_part_dtypes(plant_parts_eia):
         }
     )
     return plant_parts_eia
+
+
+def prep_train_connections(ppe):
+    """
+    Get and prepare the training connections.
+
+    We have stored training data, which consists of records with ids
+    columns for both FERC and EIA. Those id columns serve as a connection
+    between ferc1 plants and the EIA plant-parts. These connections
+    indicate that a ferc1 plant records is reported at the same granularity
+    as the connected EIA plant-parts record. These records to train a
+    machine learning model.
+
+    Returns:
+        pandas.DataFrame: training connections. A dataframe with has a
+        MultiIndex with record_id_eia and record_id_ferc1.
+    """
+    ppe_cols = [
+        "true_gran",
+        "appro_part_label",
+        "appro_record_id_eia",
+        "plant_part",
+        "ownership_dupe",
+    ]
+    train_df = (
+        # we want to ensure that the records are associated with a
+        # "true granularity" - which is a way we filter out whether or
+        # not each record in the EIA plant-parts is actually a
+        # new/unique collection of plant parts
+        # once the true_gran is dealt with, we also need to convert the
+        # records which are ownership dupes to reflect their "total"
+        # ownership counterparts
+        pd.read_csv(
+            pudl_rmi.TRAIN_FERC1_EIA_CSV,
+        )
+        .pipe(pudl.helpers.cleanstrings_snake, ["record_id_eia"])
+        .drop_duplicates(subset=["record_id_ferc1", "record_id_eia"])
+        .merge(
+            ppe[ppe_cols].reset_index(),
+            how="left",
+            on=["record_id_eia"],
+            indicator=True,
+        )
+        .assign(
+            plant_part=lambda x: x["appro_part_label"],
+            record_id_eia=lambda x: x["appro_record_id_eia"],
+        )
+        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
+        .fillna(
+            value={
+                "record_id_eia": pd.NA,
+            }
+        )
+        # recordlinkage and sklearn wants MultiIndexs to do the stuff
+        .set_index(
+            [
+                "record_id_ferc1",
+                "record_id_eia",
+            ]
+        )
+    )
+    not_in_ppe = train_df[train_df._merge == "left_only"]
+    # if not not_in_ppe.empty:
+    if len(not_in_ppe) > 12:
+        raise AssertionError(
+            "Not all training data is associated with EIA records.\n"
+            "record_id_ferc1's of bad training data records are: "
+            f"{list(not_in_ppe.reset_index().record_id_ferc1)}"
+        )
+    train_df = train_df.drop(columns=ppe_cols + ["_merge"])
+    return train_df
 
 
 # @profile
