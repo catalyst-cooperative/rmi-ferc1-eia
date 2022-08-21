@@ -762,19 +762,21 @@ def compare_override_matches(
 def _add_to_training(new_overrides) -> None:
     """Add the new overrides to the old override sheet."""
     logger.info("Combining all new overrides with existing training data")
-    current_training = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
-    new_training = (
-        new_overrides[
+    current_training = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV).set_index("record_id_ferc1")
+    new_training = new_overrides[
             ["record_id_eia", "record_id_ferc1", "signature_1", "signature_2", "notes"]
-        ]
-        .copy()
-        .drop_duplicates(subset=["record_id_eia", "record_id_ferc1"])
-        # .set_index(["record_id_eia", "record_id_ferc1"])
-    )
+        ].set_index("record_id_ferc1")
     logger.debug(f"Found {len(new_training)} new overrides")
-    # Combine new and old training data
-    training_data_out = current_training.append(new_training).drop_duplicates(
-        subset=["record_id_eia", "record_id_ferc1"]
+    
+    # Combine new and old training data by first overriding (updating) the old training data with
+    # any different matches then combining it with all the new matches and removing and duplicates.
+    # Duplicates inevitably pop up due to the update and then append.
+    current_training.update(new_training)
+    training_data_out = (
+        current_training
+        .reset_index(drop=True)
+        .append(new_training.reset_index(drop=True))
+        .drop_duplicates(subset=["record_id_eia", "record_id_ferc1"])
     )
     # Output combined training data
     training_data_out.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV, index=False)
@@ -790,6 +792,15 @@ def _add_to_null_overrides(null_matches) -> None:
     current_null_matches = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
     # Combine new and current record_id_ferc1 values that have no EIA match
     out_null_matches = current_null_matches.append(new_null_matches).drop_duplicates()
+    # Get rid of null overrides that are now in the training data
+    # (you don't want to override something with a match with NA)
+    training_data = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
+    training_ferc1_ids = training_data.record_id_ferc1.unique()
+    null_match_ferc1_ids = out_null_matches.record_id_ferc1.unique()
+    null_also_in_training = [x for x in training_ferc1_ids if x in null_match_ferc1_ids]
+    if null_also_in_training: 
+        logger.debug(f"Found {len(null_also_in_training)} null overrides in the training. Removing them from null overrides list")
+        out_null_matches = out_null_matches[~out_null_matches["record_id_ferc1"].isin(null_also_in_training)]
     # Write the combined values out to the same location as before
     out_null_matches.to_csv(pudl_rmi.NULL_FERC1_EIA_CSV, index=False)
 
@@ -833,33 +844,34 @@ def validate_and_add_to_training(
     excel_files = [file for file in all_files if file.endswith(".xlsx")]
 
     for file in excel_files:
-        logger.info(f"Processing fixes in {file}")
-        file_df = (
-            pd.read_excel(path_to_new_training / file)
-            .pipe(
-                validate_override_fixes,
-                utils_df,
-                ppl_df,
-                ferc1_eia_df,
-                training_df,
-                expect_override_overrides=expect_override_overrides,
-                expect_utility_missmatch=expect_utility_missmatch
+        if not file.startswith("~$"):
+            logger.info(f"Processing fixes in {file}")
+            file_df = (
+                pd.read_excel(path_to_new_training / file)
+                .pipe(
+                    validate_override_fixes,
+                    utils_df,
+                    ppl_df,
+                    ferc1_eia_df,
+                    training_df,
+                    expect_override_overrides=expect_override_overrides,
+                    expect_utility_missmatch=expect_utility_missmatch
+                )
+                .rename(
+                    columns={
+                        "record_id_eia": "record_id_eia_old",
+                        "record_id_eia_override_1": "record_id_eia",
+                    }
+                )
             )
-            .rename(
-                columns={
-                    "record_id_eia": "record_id_eia_old",
-                    "record_id_eia_override_1": "record_id_eia",
-                }
-            )
-        )
-        # Get just the overrides and combine them to full list of overrides
-        only_overrides = file_df[file_df["record_id_eia"].notna()][override_cols].copy()
-        all_overrides_list.append(only_overrides)
-        # Get just the null matches and combine them to full list of overrides
-        only_null_matches = file_df[file_df["record_id_eia"].isna()][
-            null_match_cols
-        ].copy()
-        all_null_matches_list.append(only_null_matches)
+            # Get just the overrides and combine them to full list of overrides
+            only_overrides = file_df[file_df["record_id_eia"].notna()][override_cols].copy()
+            all_overrides_list.append(only_overrides)
+            # Get just the null matches and combine them to full list of overrides
+            only_null_matches = file_df[file_df["record_id_eia"].isna()][
+                null_match_cols
+            ].copy()
+            all_null_matches_list.append(only_null_matches)
 
     # Combine all training data and null matches
     all_overrides_df = pd.concat(all_overrides_list)
