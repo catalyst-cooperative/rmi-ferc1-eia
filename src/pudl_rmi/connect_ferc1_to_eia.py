@@ -108,7 +108,6 @@ class InputManager:
 
         # generate empty versions of the inputs.. this let's this class check
         # whether or not the compiled inputs exist before compilnig
-        # self.plant_parts_true_df = None
         self.plants_ferc1_df = None
         self.train_index = None
         self.plant_parts_train_df = None

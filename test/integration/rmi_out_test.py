@@ -4,7 +4,6 @@ Test whether all of the FERC1/EIA/Depreciation outputs can be generated.
 This can take up to an hour to run.
 """
 
-import gc
 import logging
 from typing import List, Literal
 
@@ -49,7 +48,6 @@ def test_ppl_out(rmi_out, request):
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
         del rmi_out.pudl_out._dfs[k]
-    gc.collect()
 
 
 def test_deprish_out(rmi_out, request):
@@ -61,7 +59,6 @@ def test_deprish_out(rmi_out, request):
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
         del rmi_out.pudl_out._dfs[k]
-    gc.collect()
 
 
 def test_deprish_to_eia_out(rmi_out, request):
@@ -72,7 +69,6 @@ def test_deprish_to_eia_out(rmi_out, request):
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
         del rmi_out.pudl_out._dfs[k]
-    gc.collect()
 
 
 def test_ferc1_to_eia(rmi_out, request):
@@ -83,7 +79,6 @@ def test_ferc1_to_eia(rmi_out, request):
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
         del rmi_out.pudl_out._dfs[k]
-    gc.collect()
 
 
 def test_deprish_to_ferc1(rmi_out):
