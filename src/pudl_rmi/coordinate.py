@@ -133,11 +133,7 @@ class Output:
                 f"Distinct EIA plant-parts not found at {file_path}. Generating a new "
                 "distinct dataframe."
             )
-            # this is weird but the ppe needs to be deleted to free memory
-            ppe = self.plant_parts_eia(  # noqa: F841
-                clobber=clobber_ppe, pickle_distinct=True
-            )
-            del ppe
+            self.plant_parts_eia(clobber=clobber_ppe, pickle_distinct=True)
         logger.info(f"Reading the distinct EIA plant-parts from {file_path}")
         distinct_ppe = pd.read_pickle(file_path)
         if distinct_ppe.index.name != "record_id_eia":
