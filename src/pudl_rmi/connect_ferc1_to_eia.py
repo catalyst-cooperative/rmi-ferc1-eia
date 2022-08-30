@@ -113,14 +113,6 @@ class InputManager:
         self.plant_parts_train_df = None
         self.plants_ferc1_train_df = None
 
-    def get_plant_parts_true(self):
-        """Get the EIA plant-parts with only the unique granularities."""
-        return self.plant_parts_true_df
-
-    def get_train_df(self):
-        """Get the training dataframe connected to true EIA record."""
-        return self.train_df
-
     def get_train_index(self):
         """Get the index for the training data."""
         self.train_index = self.train_df.index
@@ -201,8 +193,7 @@ class InputManager:
 
         Args:
             dataset_df (pandas.DataFrame): either FERC1 plants table (result of
-                `get_all_ferc1()`) or EIA plant-parts (result of
-                `get_plant_parts_true()`).
+                `get_all_ferc1()`) or EIA plant-parts (`self.plant_parts_true_df`).
             dataset_id_col (string): either `record_id_eia` for
                 plant_parts_true_df or `record_id_ferc1` for plants_ferc1_df.
 
@@ -226,7 +217,7 @@ class InputManager:
         """Get the known training data from EIA."""
         if clobber or self.plant_parts_train_df is None:
             self.plant_parts_train_df = self.get_train_records(
-                self.get_plant_parts_true(), dataset_id_col="record_id_eia"
+                self.plant_parts_true_df, dataset_id_col="record_id_eia"
             )
         return self.plant_parts_train_df
 
@@ -240,13 +231,13 @@ class InputManager:
 
     def execute(self, clobber=False):
         """Compile all the inputs."""
-        # grab the main two data tables we are trying to connect
-        self.plant_parts_true_df = self.get_plant_parts_true()
+        # grab the FERC table we are trying
+        # to connect to self.plant_parts_true_df
         self.plants_ferc1_df = self.get_all_ferc1(clobber=clobber)
 
         # we want both the df version and just the index; skl uses just the
         # index and we use the df in merges and such
-        self.train_df = self.get_train_df()
+        self.train_df = self.train_df
         self.train_index = self.get_train_index()
 
         # generate the list of the records in the EIA and FERC records that
@@ -670,13 +661,13 @@ class MatchManager:
             inputs (instance of ``InputManager``): instance of ``InputManager``
         """
         self.best = best
-        self.train_df = inputs.get_train_df()
+        self.train_df = inputs.train_df
         self.all_ferc1 = inputs.get_all_ferc1()
         # get the # of ferc options within the available eia years.
         self.ferc1_options_len = len(
             self.all_ferc1[
                 self.all_ferc1.report_year.isin(
-                    inputs.get_plant_parts_true().report_date.dt.year.unique()
+                    inputs.plant_parts_true_df.report_date.dt.year.unique()
                 )
             ]
         )

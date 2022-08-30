@@ -73,12 +73,14 @@ class Output:
                 plant-parts whether or not the output is already pickled.
                 Default is False.
             pickle_distinct (boolean): True if you also want to pickle the
-                EIA plant-parts with only the unique granularities. Default
-                is False.
+                EIA plant-parts with only the unique granularities. This is
+                primarily used for memory efficiency when running the CI.
+                Default is False.
             pickle_train_connections (boolean): True if you also want to connect
                 and pickle the connection between the training data and EIA
-                plant-parts for use in EIA to FERC1 matching. Default is False.
-                Primarily used for memory efficiency when running CI.
+                plant-parts for use in EIA to FERC1 matching. This is
+                primarily used for memory efficiency when running the CI.
+                Default is False.
         """
         file_path = pudl_rmi.PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
