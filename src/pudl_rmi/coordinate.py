@@ -124,7 +124,6 @@ class Output:
 
     def plant_parts_eia_distinct(self, clobber=False, clobber_ppe=False):
         """Get the EIA plant_parts with only the unique granularities."""
-        # make this a package variable
         file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
         clobber_any = any([clobber, clobber_ppe])

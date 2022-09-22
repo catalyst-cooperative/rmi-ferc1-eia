@@ -50,7 +50,7 @@ RENAME_COLS_FERC_EIA: Dict = {
     "unit_id_pudl": "unit_id_pudl",
     "generator_id": "generator_id",
     "plant_name_ferc1": "plant_name_ferc1",
-    "plant_name_new": "plant_name_eia",
+    "plant_name_ppe": "plant_name_eia",
     "fuel_type_code_pudl_ferc1": "fuel_type_code_pudl_ferc1",
     "fuel_type_code_pudl_eia": "fuel_type_code_pudl_eia",
     "new_10": "fuel_type_code_pudl_diff",
@@ -90,7 +90,7 @@ RELEVANT_COLS_PPL: List = [
     "fraction_owned",
     "plant_id_eia",
     "plant_id_pudl",
-    "plant_name_new",
+    "plant_name_ppe",
     "generator_id",
     "capacity_mw",
     "capacity_factor",
@@ -150,7 +150,7 @@ def _is_best_match(
 def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     """Prep FERC-EIA for use in override output sheet pre-utility subgroups."""
     logger.debug("Prepping FERC-EIA table")
-    # Only want to keep the plant_name_new field which replaces plant_name_eia
+    # Only want to keep the plant_name_ppe field which replaces plant_name_eia
     ferc1_eia_prep = ferc1_eia.copy().drop(columns="plant_name_eia")
 
     # Add utility_name_eia - this must happen before renaming the cols or else there

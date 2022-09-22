@@ -319,7 +319,7 @@ class Features:
             features=[
                 String(
                     "plant_name_ferc1",
-                    "plant_name_new",
+                    "plant_name_ppe",
                     label="plant_name",
                     method="jarowinkler",
                 ),
@@ -1354,7 +1354,7 @@ def add_null_overrides(connects_ferc1_eia):
     # List of EIA columns to null. Ideally would like to get this from elsewhere, but
     # compiling this here for now...
     eia_cols_to_null = [
-        "plant_name_new",
+        "plant_name_ppe",
         "plant_part",
         "ownership",
         "generator_id",
