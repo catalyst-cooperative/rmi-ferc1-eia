@@ -1356,7 +1356,7 @@ def add_null_overrides(connects_ferc1_eia):
     eia_cols_to_null = [
         "plant_name_ppe",
         "plant_part",
-        "ownership",
+        "ownership_record_type",
         "generator_id",
         "unit_code_pudl",
         "prime_mover_code",

@@ -41,7 +41,7 @@ RENAME_COLS_FERC_EIA: Dict = {
     "report_year": "report_year",
     "match_type": "match_type",
     "plant_part": "plant_part",
-    "ownership": "ownership",
+    "ownership_record_type": "ownership_record_type",
     "utility_id_eia": "utility_id_eia",
     "utility_id_pudl_ferc1": "utility_id_pudl",
     "utility_name_ferc1": "utility_name_ferc1",

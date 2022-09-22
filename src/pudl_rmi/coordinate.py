@@ -442,7 +442,7 @@ def _set_plant_part_dtypes(plant_parts_eia):
             "plant_id_report_year": "string",
             "operational_status_pudl": "category",
             "appro_part_label": "category",
-            "ownership": "category",
+            "ownership_record_type": "category",
             "ferc_acct_name": "category",
             "fuel_type_code_pudl": "category",
             "prime_mover_code": "category",

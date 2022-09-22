@@ -39,7 +39,7 @@ PPE_COLS = [
     "plant_part",
     "report_year",
     "report_date",
-    "ownership",
+    "ownership_record_type",
     "plant_name_eia",
     "plant_id_eia",
     "generator_id",
