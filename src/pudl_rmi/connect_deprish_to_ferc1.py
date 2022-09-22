@@ -607,7 +607,7 @@ class PlantPartScaler(BaseModel):
             data_to_scale.report_date.dt.year, format="%Y"
         )
         out_dfs = []
-        for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
+        for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS:
             pk_cols = (
                 pudl.analysis.plant_parts_eia.PLANT_PARTS[merge_part]["id_cols"]
                 + pudl.analysis.plant_parts_eia.IDX_TO_ADD
