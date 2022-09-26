@@ -97,9 +97,6 @@ class Output:
             plant_parts_eia = plant_parts_eia[
                 ~plant_parts_eia.index.duplicated(keep="first")
             ]
-            # temporary: make the object columns strings to reduce memory
-            # will be moved to PUDL repo
-            plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
             # export
             plant_parts_eia.to_pickle(file_path)
         else:
@@ -107,6 +104,8 @@ class Output:
             plant_parts_eia = pd.read_pickle(file_path)
             if plant_parts_eia.index.name != "record_id_eia":
                 logger.error("Plant parts list index is not record_id_eia.")
+            # temporary: make the object columns strings to reduce memory
+            # will be moved to PUDL repo
             plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
 
         if pickle_distinct:
