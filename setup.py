@@ -20,7 +20,7 @@ setup(
     install_requires=[
         "catalystcoop.pudl",
         "fuzzywuzzy>=0.18,<0.19",
-        "python-levenshtein>=0.12,<0.13",
+        "python-levenshtein>=0.12,<0.21",
         "recordlinkage>=0.14,<0.16",
     ],
     extras_require={
