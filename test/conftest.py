@@ -39,6 +39,13 @@ def pytest_addoption(parser):
         default=False,
         help="Use the pickled FERC 1 to EIA connection",
     )
+    parser.addoption(
+        "--five-year-coverage",
+        action="store_true",
+        default=False,
+        help="Use data only from 2015-2020 for all datasets to \
+            save time and memory while testing.",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -99,14 +106,22 @@ def pudl_engine(pudl_settings_fixture):
 
 
 @pytest.fixture(scope="session")
-def pudl_out(pudl_engine):
+def pudl_out(pudl_engine, request):
     """Make an annual PUDL output object with all filling enabled."""
+    if request.config.getoption("--five-year-coverage"):
+        start_date = "2015-01-01"
+        end_date = "2020-12-31"
+    else:
+        start_date = None
+        end_date = None
     return PudlTabl(
         pudl_engine=pudl_engine,
         freq="AS",
         fill_fuel_cost=False,
         roll_fuel_cost=True,
         fill_net_gen=True,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 

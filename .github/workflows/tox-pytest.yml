@@ -62,7 +62,7 @@ jobs:
         env:
           API_KEY_EIA: ${{ secrets.API_KEY_EIA }}
         run: |
-          conda run -n pudl-rmi tox
+          conda run -n pudl-rmi tox -- --five-year-coverage
 
       - name: Log post-test PUDL workspace contents
         run: find ~/pudl-work/

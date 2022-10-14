@@ -18,7 +18,7 @@ setup(
     license="MIT",
     version="0.1.0",
     install_requires=[
-        "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@rmi-ppl-mem-fix",
+        "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@dev",
         "fuzzywuzzy>=0.18,<0.19",
         "python-levenshtein>=0.12,<0.13",
         "recordlinkage>=0.14,<0.16",
