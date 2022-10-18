@@ -88,7 +88,7 @@ def test_ferc1_to_eia(rmi_out, request):
     assert not ferc1_to_eia.empty
 
 
-def test_deprish_to_ferc1(rmi_out, request):
+def test_deprish_to_ferc1(rmi_out):
     """Test linkage of Depriciation data to FERC 1 data."""
     deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True)
     assert not deprish_to_ferc1.empty
@@ -158,6 +158,7 @@ def test_consistency_of_data_stages(
     df2_name: str,
     data_cols: List[str],
     by_name: Literal["plants", "utilities"],
+    request,
 ):
     """
     Test the consistency of a data column at two stages.
@@ -227,6 +228,10 @@ def test_consistency_of_data_stages(
             EXPECTED_ERRORS_DIR
             / f"expected_errors_{data_col}_{by_name}_{df1_name}_vs_{df2_name}.csv"
         )
+        if request.config.getoption("--five-year-coverage"):
+            expected_errors_path = (
+                EXPECTED_ERRORS_DIR / f"{expected_errors_path.stem}_five_year.csv"
+            )
         expected_aggregation_errors = pd.read_csv(expected_errors_path).set_index(by)
         # the commented out lines here are here to help
         # try:
