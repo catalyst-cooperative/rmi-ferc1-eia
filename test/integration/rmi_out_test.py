@@ -55,8 +55,14 @@ def test_ppl_out(rmi_out, request):
 def test_deprish_out(rmi_out, request):
     """Test compilation of depreciation data."""
     clobber = not request.config.getoption("--cached-deprish")
-    small_test = request.config.getoption("--five-year-coverage")
-    deprish = rmi_out.deprish(clobber=clobber, small_test=small_test)
+    if request.config.getoption("--five-year-coverage"):
+        deprish = rmi_out.deprish(
+            clobber=clobber,
+            start_year=rmi_out.pudl_out.start_date.year,
+            end_year=rmi_out.pudl_out.end_date.year,
+        )
+    else:
+        deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
     del deprish
     df_keys = list(rmi_out.pudl_out._dfs.keys())
@@ -67,8 +73,7 @@ def test_deprish_out(rmi_out, request):
 def test_deprish_to_eia_out(rmi_out, request):
     """Test fuzzy matching of depreciation data to EIA Plant Parts List."""
     clobber = not request.config.getoption("--cached-deprish-eia")
-    small_test = request.config.getoption("--five-year-coverage")
-    deprish_to_eia = rmi_out.deprish_to_eia(clobber=clobber, small_test=small_test)
+    deprish_to_eia = rmi_out.deprish_to_eia(clobber=clobber)
     assert not deprish_to_eia.empty
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
@@ -78,8 +83,7 @@ def test_deprish_to_eia_out(rmi_out, request):
 def test_ferc1_to_eia(rmi_out, request):
     """Test linkage of FERC 1 data to EIA PPL using record linkage."""
     clobber = not request.config.getoption("--cached-ferc1-eia")
-    small_test = request.config.getoption("--five-year-coverage")
-    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber, small_test=small_test)
+    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber)
     assert not ferc1_to_eia.empty
     df_keys = list(rmi_out.pudl_out._dfs.keys())
     for k in df_keys:
@@ -88,8 +92,7 @@ def test_ferc1_to_eia(rmi_out, request):
 
 def test_deprish_to_ferc1(rmi_out, request):
     """Test linkage of Depriciation data to FERC 1 data."""
-    small_test = request.config.getoption("--five-year-coverage")
-    deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True, small_test=small_test)
+    deprish_to_ferc1 = rmi_out.deprish_to_ferc1(clobber=True)
     assert not deprish_to_ferc1.empty
 
 

@@ -38,7 +38,7 @@ def reassign_id_ownership_dupes(plant_parts_df):
         plant_parts_df = plant_parts_df.reset_index()
         og_index = True
     # reassign the record id and ownership_record_type col when the record is a dupe
-    plant_parts_df = plant_parts_df.assign(
+    plant_parts_df = plant_parts_df.fillna(value={"ownership_dupe": False}).assign(
         record_id_eia=lambda x: np.where(
             x.ownership_dupe,
             x.record_id_eia.str.replace("owned", "total"),

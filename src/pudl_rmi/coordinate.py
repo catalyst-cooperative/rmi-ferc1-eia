@@ -8,6 +8,7 @@ diagram of the relations.
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pudl
 import sqlalchemy as sa
@@ -104,10 +105,6 @@ class Output:
             plant_parts_eia = pd.read_pickle(file_path)
             if plant_parts_eia.index.name != "record_id_eia":
                 logger.error("Plant parts list index is not record_id_eia.")
-            # temporary: make the object columns strings to reduce memory
-            # will be moved to PUDL repo
-            plant_parts_eia = _set_plant_part_dtypes(plant_parts_eia)
-
         if pickle_distinct:
             distinct_file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
             pickle_plant_parts_distinct(
@@ -115,8 +112,12 @@ class Output:
             )
         # more efficient memory use for CI
         if pickle_train_connections:
-            prep_train_connections(plant_parts_eia).to_pickle(
-                pudl_rmi.CONNECTED_TRAIN_PKL
+            prep_train_connections(
+                ppe=plant_parts_eia,
+                start_date=self.pudl_out.start_date,
+                end_date=self.pudl_out.end_date,
+            ).to_pickle(
+                pudl_rmi.CONNECTED_TRAIN_PKL,
             )
 
         return plant_parts_eia
@@ -140,11 +141,10 @@ class Output:
         distinct_ppe = pd.read_pickle(file_path)
         if distinct_ppe.index.name != "record_id_eia":
             logger.error("Plant parts list index is not record_id_eia.")
-        distinct_ppe = _set_plant_part_dtypes(distinct_ppe)
         return distinct_ppe
 
     # @profile
-    def deprish(self, clobber=False):
+    def deprish(self, clobber=False, start_year=None, end_year=None):
         """
         Generate or grab the cleaned depreciation studies.
 
@@ -152,12 +152,16 @@ class Output:
             clobber (boolean): True if you want to regenerate the depreciation
                 data whether or not the output is already pickled. Default is
                 False.
+            start_year (int): The start year of the date range to extract.
+                Default is None and all years before end_year will be extracted.
+            end_year (int): The end year of the date range to extract.
+                Default is None and all years after start_year will be extracted.
         """
         file_path = pudl_rmi.DEPRISH_PKL
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber:
             logger.info("Generating new depreciation study output.")
-            deprish = pudl_rmi.deprish.execute()
+            deprish = pudl_rmi.deprish.execute(start_year=start_year, end_year=end_year)
             deprish.to_pickle(file_path)
         else:
             logger.info(f"Grabbing depreciation study output from {file_path}")
@@ -244,7 +248,11 @@ class Output:
             check_is_file_or_not_exists(train_file_path)
             if not train_file_path.exists() or clobber_plant_parts_eia:
                 ppe = self.plant_parts_eia(clobber=clobber_plant_parts_eia)
-                train_df = prep_train_connections(ppe)
+                train_df = prep_train_connections(
+                    ppe,
+                    start_date=self.pudl_out.start_date,
+                    end_date=self.pudl_out.end_date,
+                )
                 del ppe
             else:
                 train_df = pd.read_pickle(train_file_path)
@@ -432,29 +440,7 @@ def pickle_plant_parts_distinct(plant_parts_eia, file_path):
     plant_parts_distinct.to_pickle(file_path)
 
 
-def _set_plant_part_dtypes(plant_parts_eia):
-    """Set column data types to reduce memory usage."""
-    plant_parts_eia.index = plant_parts_eia.index.astype("string")
-    plant_parts_eia = plant_parts_eia.astype(
-        {
-            "plant_part_id_eia": "string",
-            "appro_record_id_eia": "string",
-            "technology_description": "category",
-            "energy_source_code_1": "category",
-            "plant_part": "category",
-            "plant_id_report_year": "string",
-            "operational_status_pudl": "category",
-            "appro_part_label": "category",
-            "ownership_record_type": "category",
-            "ferc_acct_name": "category",
-            "fuel_type_code_pudl": "category",
-            "prime_mover_code": "category",
-        }
-    )
-    return plant_parts_eia
-
-
-def prep_train_connections(ppe):
+def prep_train_connections(ppe, start_date=None, end_date=None):
     """
     Get and prepare the training connections.
 
@@ -464,6 +450,16 @@ def prep_train_connections(ppe):
     indicate that a ferc1 plant records is reported at the same granularity
     as the connected EIA plant-parts record. These records to train a
     machine learning model.
+
+    Arguments:
+        ppe (pandas.DataFrame): The EIA plant parts list. Records from
+            this dataframe will be connected to the training data records.
+        start_date (pd.Timestamp): Beginning date for records from the
+            training data. Should match the start date of `ppe`. Default
+            is None and all the training data will be used.
+        end_date (pd.Timestamp): Ending date for records from the
+            training data. Should match the end date of `ppe`. Default is
+            None and all the training data will be used.
 
     Returns:
         pandas.DataFrame: training connections. A dataframe with has a
@@ -489,7 +485,31 @@ def prep_train_connections(ppe):
         )
         .pipe(pudl.helpers.cleanstrings_snake, ["record_id_eia"])
         .drop_duplicates(subset=["record_id_ferc1", "record_id_eia"])
-        .merge(
+    )
+    # filter training data by year range
+    # first get list of all years to grab from training data
+    if start_date is None and end_date is None:
+        years = None
+    elif start_date is None:
+        years = [
+            str(year) for year in np.arange(ppe.report_year.min(), end_date.year + 1)
+        ]
+    elif end_date is None:
+        years = [
+            str(year) for year in np.arange(start_date.year, ppe.report_year.max() + 1)
+        ]
+    else:
+        years = [str(year) for year in np.arange(start_date.year, end_date.year + 1)]
+    if years is not None:
+        train_df = train_df[
+            pd.DataFrame(train_df.record_id_eia.str.split("_").tolist())
+            .isin(years)
+            .any(1)
+            .values
+        ]
+
+    train_df = (
+        train_df.merge(
             ppe[ppe_cols].reset_index(),
             how="left",
             on=["record_id_eia"],
@@ -505,8 +525,7 @@ def prep_train_connections(ppe):
                 "record_id_eia": pd.NA,
             }
         )
-        # recordlinkage and sklearn wants MultiIndexs to do the stuff
-        .set_index(
+        .set_index(  # recordlinkage and sklearn wants MultiIndexs to do the stuff
             [
                 "record_id_ferc1",
                 "record_id_eia",

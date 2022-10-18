@@ -90,9 +90,11 @@ DOLLAR_COLS = [
 ]
 
 
-def execute():
+def execute(start_year=None, end_year=None):
     """Generate cleaned and allocated depreciation studies."""
-    transformer = Transformer(Extractor().execute())
+    transformer = Transformer(
+        Extractor(start_year=start_year, end_year=end_year).execute()
+    )
     deprish_df = transformer.execute()
     return deprish_df
 
@@ -109,7 +111,13 @@ class Extractor:
     will want to use a datastore object to handle the path.
     """
 
-    def __init__(self, sheet_name="Depreciation Studies Raw", skiprows=0):
+    def __init__(
+        self,
+        sheet_name="Depreciation Studies Raw",
+        skiprows=0,
+        start_year=None,
+        end_year=None,
+    ):
         """
         Initialize a for deprish.Extractor.
 
@@ -118,22 +126,39 @@ class Extractor:
                 integer used for zero-indexed sheet location.
             skiprows (int): rows to skip in zero-indexed column location,
                 default is 0.
+            start_year (int): The start year of the date range to extract.
+                Default is None and all years before end_year will be extracted.
+            end_year (int): The end year of the date range to extract.
+                Default is None and all years after start_year will be extracted.
         """
         self.sheet_name = sheet_name
         self.skiprows = skiprows
+        self.start_year = start_year
+        self.end_year = end_year
 
     def execute(self):
         """Turn excel-based depreciation data into a dataframe."""
         logger.info(
             "Reading the depreciation data from " f"{pudl_rmi.DEPRISH_RAW_XLSX}"
         )
-        return pd.read_excel(
+        df = pd.read_excel(
             pudl_rmi.DEPRISH_RAW_XLSX,
             skiprows=self.skiprows,
             sheet_name=self.sheet_name,
             dtype={i: pd.Int64Dtype() for i in INT_IDS},
             na_values=NA_VALUES,
         )
+        if self.start_year is None and self.end_year is None:
+            return df
+        elif self.start_year is None:
+            return df[df.report_date.dt.year <= self.end_year]
+        elif self.end_year is None:
+            return df[df.report_date.dt.year >= self.start_year]
+        else:
+            return df[
+                (df.report_date.dt.year <= self.end_year)
+                & (df.report_date.dt.year >= self.start_year)
+            ]
 
 
 class Transformer:

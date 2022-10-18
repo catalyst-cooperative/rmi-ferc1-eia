@@ -434,7 +434,7 @@ class PlantPartScaler(BaseModel):
         # Note: Right now we are just dropping the non-connected
         # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
         connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
-
+        # does this do anything?
         df_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(df_to_scale)
         # STEP 1
         # Aggregate when there is more than one source record associated with

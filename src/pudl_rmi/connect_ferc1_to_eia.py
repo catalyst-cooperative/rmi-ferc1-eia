@@ -118,6 +118,10 @@ class InputManager:
         self.train_index = self.train_df.index
         return self.train_index
 
+    def get_plant_parts_true(self):
+        """Get the EIA plant-parts with only the unique granularities."""
+        return self.plant_parts_true_df
+
     def get_all_ferc1(self, clobber=False):
         """
         Prepare FERC1 plants data for record linkage with EIA plant-parts.
@@ -1093,7 +1097,7 @@ def prettyify_best_matches(
 
     _log_match_coverage(connects_ferc1_eia)
     for match_type in ["all", "overrides"]:
-        check_match_consistentcy(connects_ferc1_eia, train_df, match_type)
+        check_match_consistency(connects_ferc1_eia, train_df, match_type)
 
     return connects_ferc1_eia
 
@@ -1138,7 +1142,7 @@ def _log_match_coverage(connects_ferc1_eia):
     )
 
 
-def check_match_consistentcy(connects_ferc1_eia, train_df, match_type="all"):
+def check_match_consistency(connects_ferc1_eia, train_df, match_type="all"):
     """
     Check how consistent matches are across time.
 
