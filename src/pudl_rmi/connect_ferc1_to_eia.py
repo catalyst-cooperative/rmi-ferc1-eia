@@ -55,15 +55,21 @@ logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ["utility_id_ferc1", "plant_id_ferc1", "report_date"]
 
 
-def execute(train_df, pudl_out, plant_parts_eia_distinct):
+def execute(train_df, pudl_out, plant_parts_eia_distinct, five_year_test=False):
     """
     Coordinate the connection between FERC1 plants and EIA plant-parts.
 
     Args:
         train_df (pandas.DataFrame): Training data connected to EIA
-        plant-parts data such that a FERC1 plant record is reported at the same
-        granularity as the connected EIA plant-parts record. MultiIndex
-        with record_id_eia and record_id_ferc1.
+            plant-parts data such that a FERC1 plant record is reported at the
+            same granularity as the connected EIA plant-parts record.
+            MultiIndex with record_id_eia and record_id_ferc1.
+        pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`
+        plant_parts_eia_distinct (pandas.DataFrame): The EIA plant parts list
+            with only true granularity records included.
+        five_year_test (boolean): Whether the connection is being made with
+            five years of FERC and EIA data for integration testing.
+            Default is False.
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
@@ -82,6 +88,7 @@ def execute(train_df, pudl_out, plant_parts_eia_distinct):
         train_df=inputs.train_df,
         plant_parts_true_df=inputs.plant_parts_true_df,
         plants_ferc1_df=inputs.plants_ferc1_df,
+        five_year_test=five_year_test,
     )
     # add capex (this should be moved into pudl_out.plants_steam_ferc1)
     connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
@@ -1007,7 +1014,12 @@ class MatchManager:
 
 
 def prettyify_best_matches(
-    matches_best, plant_parts_true_df, plants_ferc1_df, train_df, debug=False
+    matches_best,
+    plant_parts_true_df,
+    plants_ferc1_df,
+    train_df,
+    debug=False,
+    five_year_test=False,
 ):
     """
     Make the EIA-FERC best matches usable.
@@ -1015,6 +1027,9 @@ def prettyify_best_matches(
     Use the ID columns from the best matches to merge together both EIA
     plant-parts data and FERC plant data. This removes the comparison vectors
     (the floats between 0 and 1 that compare the two columns from each dataset).
+
+    If testing the model with only five years of FERC and EIA data then
+    consistency values are lower for checks as model does not perform as well.
     """
     # if utility_id_pudl is not in the `PPE_COLS`,  we need to in include it
     ppe_cols_to_grab = connect_deprish_to_eia.PPE_COLS + [
@@ -1097,7 +1112,9 @@ def prettyify_best_matches(
 
     _log_match_coverage(connects_ferc1_eia)
     for match_type in ["all", "overrides"]:
-        check_match_consistency(connects_ferc1_eia, train_df, match_type)
+        check_match_consistency(
+            connects_ferc1_eia, train_df, match_type, five_year_test
+        )
 
     return connects_ferc1_eia
 
@@ -1142,13 +1159,17 @@ def _log_match_coverage(connects_ferc1_eia):
     )
 
 
-def check_match_consistency(connects_ferc1_eia, train_df, match_type="all"):
+def check_match_consistency(
+    connects_ferc1_eia, train_df, five_year_test=False, match_type="all"
+):
     """
     Check how consistent matches are across time.
 
     Args:
         connects_ferc1_eia (pandas.DataFrame)
         train_df (pandas.DataFrame)
+        five_year_test (boolean): Whether the connection was made with five
+            years of FERC and EIA data for integration testing.
         match_type (string): either 'all' - to check all of the matches - or
             'overrides' - to check just the overrides. Default is 'all'.
     """
@@ -1156,6 +1177,9 @@ def check_match_consistency(connects_ferc1_eia, train_df, match_type="all"):
     consistency = 0.75
     consistency_one_cap_ferc = 0.9
     mask = connects_ferc1_eia.record_id_eia.notnull()
+
+    if five_year_test:
+        consistency_one_cap_ferc = 0.8
 
     if match_type == "overrides":
         consistency = 0.39

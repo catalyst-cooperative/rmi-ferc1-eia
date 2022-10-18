@@ -48,7 +48,8 @@ class Output:
             pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
                 The frequency (`freq`) of `pudl_out` must be `AS`. For best
                 results  `fill_fuel_cost`, `roll_fuel_cost`, and `fill_net_gen`
-                should all be True.
+                should all be True. `start_date` and `end_date` should be set
+                if using only a portion of the EIA data.
         """
         self.pudl_out = pudl_out
         if pudl_out.freq != "AS":
@@ -216,6 +217,7 @@ class Output:
         clobber=False,
         clobber_plant_parts_eia=False,
         clobber_plant_parts_eia_distinct=False,
+        five_year_test=False,
     ):
         """
         Generate or grab a connection between FERC1 and EIA.
@@ -231,6 +233,9 @@ class Output:
                 the depreciaiton to FERC1 output. Default is False.
             clobber_plant_parts_eia_distinct(boolean): Generate and cache a new
                 output of the distinct EIA plant part list
+            five_year_test (boolean): Whether the connection is being made with
+                five years of FERC and EIA data for integration testing.
+                Default is False.
         """
         file_path = pudl_rmi.FERC1_EIA_PKL
         # if any of the clobbers are on, we want to regenerate the main output
@@ -262,6 +267,7 @@ class Output:
                 self.plant_parts_eia_distinct(
                     clobber=clobber_plant_parts_eia_distinct,
                 ),
+                five_year_test=five_year_test,
             )
             # export
             ferc1_eia.to_pickle(file_path)
