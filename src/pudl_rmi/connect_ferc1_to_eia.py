@@ -1113,7 +1113,10 @@ def prettyify_best_matches(
     _log_match_coverage(connects_ferc1_eia)
     for match_type in ["all", "overrides"]:
         check_match_consistency(
-            connects_ferc1_eia, train_df, match_type, five_year_test
+            connects_ferc1_eia,
+            train_df,
+            five_year_test=five_year_test,
+            match_type=match_type,
         )
 
     return connects_ferc1_eia
@@ -1179,11 +1182,13 @@ def check_match_consistency(
     mask = connects_ferc1_eia.record_id_eia.notnull()
 
     if five_year_test:
-        consistency_one_cap_ferc = 0.8
+        consistency_one_cap_ferc = 0.85
 
     if match_type == "overrides":
         consistency = 0.39
         consistency_one_cap_ferc = 0.83
+        if five_year_test:
+            consistency_one_cap_ferc = 0.75
         train_ferc1 = train_df.reset_index()
         # these bbs were missing from connects_ferc1_eia. not totally sure why
         missing = [
