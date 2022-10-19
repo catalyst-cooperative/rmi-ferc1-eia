@@ -47,9 +47,6 @@ def test_ppl_out(rmi_out, request):
     )
     assert not ppl.empty
     del ppl
-    df_keys = list(rmi_out.pudl_out._dfs.keys())
-    for k in df_keys:
-        del rmi_out.pudl_out._dfs[k]
 
 
 def test_deprish_out(rmi_out, request):
@@ -65,9 +62,6 @@ def test_deprish_out(rmi_out, request):
         deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
     del deprish
-    df_keys = list(rmi_out.pudl_out._dfs.keys())
-    for k in df_keys:
-        del rmi_out.pudl_out._dfs[k]
 
 
 def test_deprish_to_eia_out(rmi_out, request):
@@ -75,9 +69,6 @@ def test_deprish_to_eia_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-deprish-eia")
     deprish_to_eia = rmi_out.deprish_to_eia(clobber=clobber)
     assert not deprish_to_eia.empty
-    df_keys = list(rmi_out.pudl_out._dfs.keys())
-    for k in df_keys:
-        del rmi_out.pudl_out._dfs[k]
 
 
 def test_ferc1_to_eia(rmi_out, request):
