@@ -58,9 +58,7 @@ class Output:
             )
 
     # @profile
-    def plant_parts_eia(
-        self, clobber=False, pickle_distinct=False, pickle_train_connections=False
-    ):
+    def plant_parts_eia(self, clobber=False, pickle_train_connections=False):
         """
         Get the EIA plant-parts; generate it or get if from a file.
 
@@ -73,10 +71,6 @@ class Output:
         Args:
             clobber (boolean): True if you want to regenerate the EIA
                 plant-parts whether or not the output is already pickled.
-                Default is False.
-            pickle_distinct (boolean): True if you also want to pickle the
-                EIA plant-parts with only the unique granularities. This is
-                primarily used for memory efficiency when running the CI.
                 Default is False.
             pickle_train_connections (boolean): True if you also want to connect
                 and pickle the connection between the training data and EIA
@@ -106,11 +100,6 @@ class Output:
             plant_parts_eia = pd.read_pickle(file_path)
             if plant_parts_eia.index.name != "record_id_eia":
                 logger.error("Plant parts list index is not record_id_eia.")
-        if pickle_distinct:
-            distinct_file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
-            pickle_plant_parts_distinct(
-                plant_parts_eia=plant_parts_eia, file_path=distinct_file_path
-            )
         # more efficient memory use for CI
         if pickle_train_connections:
             pudl_rmi.connect_ferc1_to_eia.prep_train_connections(
@@ -124,7 +113,22 @@ class Output:
         return plant_parts_eia
 
     def plant_parts_eia_distinct(self, clobber=False, clobber_ppe=False):
-        """Get the EIA plant_parts with only the unique granularities."""
+        """Get the EIA plant_parts with only the unique granularities.
+
+        Read in the pickled dataframe or generate it from the full PPE. Get only
+        the records of the PPE that are "true granularities" and those which are not
+        duplicates based on their ownership so the FERC to EIA matching model
+        doesn't get confused as to which option to pick if there are many records
+        with duplicate data.
+
+        Arguments:
+            clobber (boolean): True if you want to regenerate the distinct
+                plant parts list whether or not the output is already pickled.
+                Default is False.
+            clobber_ppe (boolean): True if you want to regenerate the full EIA
+                plant parts list whether or not the output is already pickled.
+                Default is False.
+        """
         file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
         clobber_any = any([clobber, clobber_ppe])
@@ -133,13 +137,19 @@ class Output:
                 f"Distinct EIA plant-parts not found at {file_path}. Generating a new "
                 "distinct dataframe."
             )
-            # this is weird but the ppe needs to be deleted to free memory
-            ppe = self.plant_parts_eia(  # noqa: F841
-                clobber=clobber_ppe, pickle_distinct=True
-            )
-            del ppe
-        logger.info(f"Reading the distinct EIA plant-parts from {file_path}")
-        distinct_ppe = pd.read_pickle(file_path)
+            plant_parts_eia = self.plant_parts_eia(clobber=clobber_ppe)
+            plant_parts_eia = plant_parts_eia.assign(
+                plant_id_report_year_util_id=lambda x: x.plant_id_report_year
+                + "_"
+                + x.utility_id_pudl.map(str)
+            ).astype({"installation_year": "float"})
+            distinct_ppe = plant_parts_eia[
+                (plant_parts_eia["true_gran"]) & (~plant_parts_eia["ownership_dupe"])
+            ]
+            distinct_ppe.to_pickle(file_path)
+        else:
+            logger.info(f"Reading the distinct EIA plant-parts from {file_path}")
+            distinct_ppe = pd.read_pickle(file_path)
         if distinct_ppe.index.name != "record_id_eia":
             logger.error("Plant parts list index is not record_id_eia.")
         return distinct_ppe
@@ -418,27 +428,6 @@ def check_is_file_or_not_exists(file_path: Path):
             f"Path exists but is not a file. Check if {file_path} is a "
             "directory. It should be either a pickled file or nothing."
         )
-
-
-def pickle_plant_parts_distinct(plant_parts_eia, file_path):
-    """Pickle dataframe with only unique granularities from PPE."""
-    # Figure out where this should go. It's currently duplicated in
-    # connect_ferc1_to_eia.InputManager, should it be a PUDL function?
-    # can this be done more efficiently? use pipe?
-    # Anyways,
-    # We want only the records of the EIA plant-parts that are "true
-    # granularies" and those which are not duplicates based on their
-    # ownership  so the model doesn't get confused as to which option to
-    # pick if there are many records with duplicate data
-    plant_parts_eia = plant_parts_eia.assign(
-        plant_id_report_year_util_id=lambda x: x.plant_id_report_year
-        + "_"
-        + x.utility_id_pudl.map(str)
-    ).astype({"installation_year": "float"})
-    plant_parts_distinct = plant_parts_eia[
-        (plant_parts_eia["true_gran"]) & (~plant_parts_eia["ownership_dupe"])
-    ]
-    plant_parts_distinct.to_pickle(file_path)
 
 
 def prep_train_connections(ppe, start_date=None, end_date=None):

@@ -22,6 +22,12 @@ def pytest_addoption(parser):
         help="Use the pickled EIA Plant Parts List.",
     )
     parser.addoption(
+        "--cached-plant-parts-eia-distinct",
+        action="store_true",
+        default=False,
+        help="Use the pickled distinct EIA Plant Parts List.",
+    )
+    parser.addoption(
         "--cached-deprish",
         action="store_true",
         default=False,

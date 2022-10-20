@@ -42,11 +42,18 @@ def test_ppl_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-plant-parts-eia")
     ppl = rmi_out.plant_parts_eia(
         clobber=clobber,
-        pickle_distinct=True,
         pickle_train_connections=True,
     )
     assert not ppl.empty
     del ppl
+
+
+def test_ppl_distinct_out(rmi_out, request):
+    """Test generation of distinct EIA Plant Parts List."""
+    clobber = not request.config.getoption("--cached-plant-parts-eia-distinct")
+    ppl_distinct = rmi_out.plant_parts_eia_distinct(clobber=clobber)
+    assert not ppl_distinct.empty
+    del ppl_distinct
 
 
 def test_deprish_out(rmi_out, request):
