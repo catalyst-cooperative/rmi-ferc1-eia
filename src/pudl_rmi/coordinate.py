@@ -8,14 +8,12 @@ diagram of the relations.
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pudl
 import sqlalchemy as sa
 from pudl.output.pudltabl import PudlTabl
 
 import pudl_rmi
-from pudl_rmi import make_plant_parts_eia
 
 # from memory_profiler import profile
 
@@ -428,110 +426,6 @@ def check_is_file_or_not_exists(file_path: Path):
             f"Path exists but is not a file. Check if {file_path} is a "
             "directory. It should be either a pickled file or nothing."
         )
-
-
-def prep_train_connections(ppe, start_date=None, end_date=None):
-    """
-    Get and prepare the training connections.
-
-    We have stored training data, which consists of records with ids
-    columns for both FERC and EIA. Those id columns serve as a connection
-    between ferc1 plants and the EIA plant-parts. These connections
-    indicate that a ferc1 plant records is reported at the same granularity
-    as the connected EIA plant-parts record. These records to train a
-    machine learning model.
-
-    Arguments:
-        ppe (pandas.DataFrame): The EIA plant parts list. Records from
-            this dataframe will be connected to the training data records.
-        start_date (pd.Timestamp): Beginning date for records from the
-            training data. Should match the start date of `ppe`. Default
-            is None and all the training data will be used.
-        end_date (pd.Timestamp): Ending date for records from the
-            training data. Should match the end date of `ppe`. Default is
-            None and all the training data will be used.
-
-    Returns:
-        pandas.DataFrame: training connections. A dataframe with has a
-        MultiIndex with record_id_eia and record_id_ferc1.
-    """
-    ppe_cols = [
-        "true_gran",
-        "appro_part_label",
-        "appro_record_id_eia",
-        "plant_part",
-        "ownership_dupe",
-    ]
-    train_df = (
-        # we want to ensure that the records are associated with a
-        # "true granularity" - which is a way we filter out whether or
-        # not each record in the EIA plant-parts is actually a
-        # new/unique collection of plant parts
-        # once the true_gran is dealt with, we also need to convert the
-        # records which are ownership dupes to reflect their "total"
-        # ownership counterparts
-        pd.read_csv(
-            pudl_rmi.TRAIN_FERC1_EIA_CSV,
-        )
-        .pipe(pudl.helpers.cleanstrings_snake, ["record_id_eia"])
-        .drop_duplicates(subset=["record_id_ferc1", "record_id_eia"])
-    )
-    # filter training data by year range
-    # first get list of all years to grab from training data
-    if start_date is None and end_date is None:
-        years = None
-    elif start_date is None:
-        years = [
-            str(year) for year in np.arange(ppe.report_year.min(), end_date.year + 1)
-        ]
-    elif end_date is None:
-        years = [
-            str(year) for year in np.arange(start_date.year, ppe.report_year.max() + 1)
-        ]
-    else:
-        years = [str(year) for year in np.arange(start_date.year, end_date.year + 1)]
-    if years is not None:
-        train_df = train_df[
-            pd.DataFrame(train_df.record_id_eia.str.split("_").tolist())
-            .isin(years)
-            .any(1)
-            .values
-        ]
-
-    train_df = (
-        train_df.merge(
-            ppe[ppe_cols].reset_index(),
-            how="left",
-            on=["record_id_eia"],
-            indicator=True,
-        )
-        .assign(
-            plant_part=lambda x: x["appro_part_label"],
-            record_id_eia=lambda x: x["appro_record_id_eia"],
-        )
-        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
-        .fillna(
-            value={
-                "record_id_eia": pd.NA,
-            }
-        )
-        .set_index(  # recordlinkage and sklearn wants MultiIndexs to do the stuff
-            [
-                "record_id_ferc1",
-                "record_id_eia",
-            ]
-        )
-    )
-    not_in_ppe = train_df[train_df._merge == "left_only"]
-    # if not not_in_ppe.empty:
-    if len(not_in_ppe) > 12:
-        raise AssertionError(
-            "Not all training data is associated with EIA records.\n"
-            "record_id_ferc1's of bad training data records are: "
-            f"{list(not_in_ppe.reset_index().record_id_ferc1)}"
-        )
-    train_df = train_df.drop(columns=ppe_cols + ["_merge"])
-    return train_df
 
 
 # @profile
