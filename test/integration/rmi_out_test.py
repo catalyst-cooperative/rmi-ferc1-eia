@@ -236,7 +236,7 @@ def test_consistency_of_data_stages(
         pd.testing.assert_index_equal(
             actual_aggregation_errors.index,
             expected_aggregation_errors.index,
-            exact="equiv",
+            exact=False,
             check_order=False,
         )
         # except AssertionError:
