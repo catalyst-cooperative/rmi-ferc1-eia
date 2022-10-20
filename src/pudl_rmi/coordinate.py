@@ -113,7 +113,7 @@ class Output:
             )
         # more efficient memory use for CI
         if pickle_train_connections:
-            prep_train_connections(
+            pudl_rmi.connect_ferc1_to_eia.prep_train_connections(
                 ppe=plant_parts_eia,
                 start_date=self.pudl_out.start_date,
                 end_date=self.pudl_out.end_date,
@@ -251,14 +251,8 @@ class Output:
             # get or generate connected training data
             train_file_path = pudl_rmi.CONNECTED_TRAIN_PKL
             check_is_file_or_not_exists(train_file_path)
-            if not train_file_path.exists() or clobber_plant_parts_eia:
-                ppe = self.plant_parts_eia(clobber=clobber_plant_parts_eia)
-                train_df = prep_train_connections(
-                    ppe,
-                    start_date=self.pudl_out.start_date,
-                    end_date=self.pudl_out.end_date,
-                )
-                del ppe
+            if not train_file_path.exists():
+                train_df = None
             else:
                 train_df = pd.read_pickle(train_file_path)
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
@@ -266,6 +260,7 @@ class Output:
                 self.pudl_out,
                 self.plant_parts_eia_distinct(
                     clobber=clobber_plant_parts_eia_distinct,
+                    clobber_ppe=clobber_plant_parts_eia,
                 ),
                 five_year_test=five_year_test,
             )
