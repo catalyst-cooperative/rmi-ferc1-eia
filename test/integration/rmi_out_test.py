@@ -231,6 +231,23 @@ def test_consistency_of_data_stages(
                 EXPECTED_ERRORS_DIR / f"{expected_errors_path.stem}_five_year.csv"
             )
         expected_aggregation_errors = pd.read_csv(expected_errors_path).set_index(by)
+        idx = actual_aggregation_errors.index
+        levels_set_types = [
+            "report_year",
+            "data_source",
+            "utility_id_pudl",
+        ]
+        if idx.names == levels_set_types:
+            actual_aggregation_errors.index = (
+                actual_aggregation_errors.index.set_levels(
+                    [
+                        idx.levels[0].astype(int),
+                        idx.levels[1].astype(str),
+                        idx.levels[2].astype(int),
+                    ],
+                    level=levels_set_types,
+                )
+            )
         # the commented out lines here are here to help
         # try:
         pd.testing.assert_index_equal(
