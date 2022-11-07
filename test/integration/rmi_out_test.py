@@ -59,14 +59,7 @@ def test_ppl_distinct_out(rmi_out, request):
 def test_deprish_out(rmi_out, request):
     """Test compilation of depreciation data."""
     clobber = not request.config.getoption("--cached-deprish")
-    if request.config.getoption("--five-year-coverage"):
-        deprish = rmi_out.deprish(
-            clobber=clobber,
-            start_year=rmi_out.pudl_out.start_date.year,
-            end_year=rmi_out.pudl_out.end_date.year,
-        )
-    else:
-        deprish = rmi_out.deprish(clobber=clobber)
+    deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
     del deprish
 
@@ -81,8 +74,7 @@ def test_deprish_to_eia_out(rmi_out, request):
 def test_ferc1_to_eia(rmi_out, request):
     """Test linkage of FERC 1 data to EIA PPL using record linkage."""
     clobber = not request.config.getoption("--cached-ferc1-eia")
-    five_year_test = request.config.getoption("--five-year-coverage")
-    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber, five_year_test=five_year_test)
+    ferc1_to_eia = rmi_out.ferc1_to_eia(clobber=clobber)
     assert not ferc1_to_eia.empty
 
 

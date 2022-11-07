@@ -153,7 +153,7 @@ class Output:
         return distinct_ppe
 
     # @profile
-    def deprish(self, clobber=False, start_year=None, end_year=None):
+    def deprish(self, clobber=False):
         """
         Generate or grab the cleaned depreciation studies.
 
@@ -161,16 +161,14 @@ class Output:
             clobber (boolean): True if you want to regenerate the depreciation
                 data whether or not the output is already pickled. Default is
                 False.
-            start_year (int): The start year of the date range to extract.
-                Default is None and all years before end_year will be extracted.
-            end_year (int): The end year of the date range to extract.
-                Default is None and all years after start_year will be extracted.
         """
         file_path = pudl_rmi.DEPRISH_PKL
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber:
             logger.info("Generating new depreciation study output.")
-            deprish = pudl_rmi.deprish.execute(start_year=start_year, end_year=end_year)
+            deprish = pudl_rmi.deprish.execute(
+                start_date=self.pudl_out.start_date, end_date=self.pudl_out.end_date
+            )
             deprish.to_pickle(file_path)
         else:
             logger.info(f"Grabbing depreciation study output from {file_path}")
@@ -225,7 +223,6 @@ class Output:
         clobber=False,
         clobber_plant_parts_eia=False,
         clobber_plant_parts_eia_distinct=False,
-        five_year_test=False,
     ):
         """
         Generate or grab a connection between FERC1 and EIA.
@@ -241,9 +238,6 @@ class Output:
                 the depreciaiton to FERC1 output. Default is False.
             clobber_plant_parts_eia_distinct(boolean): Generate and cache a new
                 output of the distinct EIA plant part list
-            five_year_test (boolean): Whether the connection is being made with
-                five years of FERC and EIA data for integration testing.
-                Default is False.
         """
         file_path = pudl_rmi.FERC1_EIA_PKL
         # if any of the clobbers are on, we want to regenerate the main output
@@ -270,7 +264,6 @@ class Output:
                     clobber=clobber_plant_parts_eia_distinct,
                     clobber_ppe=clobber_plant_parts_eia,
                 ),
-                five_year_test=five_year_test,
             )
             # export
             ferc1_eia.to_pickle(file_path)

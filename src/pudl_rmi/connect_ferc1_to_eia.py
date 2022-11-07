@@ -55,7 +55,7 @@ logging.getLogger("recordlinkage").setLevel(logging.ERROR)
 IDX_STEAM = ["utility_id_ferc1", "plant_id_ferc1", "report_date"]
 
 
-def execute(train_df, pudl_out, plant_parts_eia_distinct, five_year_test=False):
+def execute(train_df, pudl_out, plant_parts_eia_distinct):
     """
     Coordinate the connection between FERC1 plants and EIA plant-parts.
 
@@ -67,9 +67,6 @@ def execute(train_df, pudl_out, plant_parts_eia_distinct, five_year_test=False):
         pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`
         plant_parts_eia_distinct (pandas.DataFrame): The EIA plant parts list
             with only true granularity records included.
-        five_year_test (boolean): Whether the connection is being made with
-            five years of FERC and EIA data for integration testing.
-            Default is False.
     Note: idk if this will end up as a script or what, but I wanted a place to
     coordinate the connection. May be temporary.
     """
@@ -88,7 +85,6 @@ def execute(train_df, pudl_out, plant_parts_eia_distinct, five_year_test=False):
         train_df=inputs.get_train_df(),
         plant_parts_true_df=inputs.get_plant_parts_true(),
         plants_ferc1_df=inputs.get_all_ferc1(),
-        five_year_test=five_year_test,
     )
     # add capex (this should be moved into pudl_out.plants_steam_ferc1)
     connects_ferc1_eia = calc_annual_capital_additions_ferc1(connects_ferc1_eia)
@@ -1145,7 +1141,6 @@ def prettyify_best_matches(
     plants_ferc1_df,
     train_df,
     debug=False,
-    five_year_test=False,
 ):
     """
     Make the EIA-FERC best matches usable.
@@ -1241,7 +1236,6 @@ def prettyify_best_matches(
         check_match_consistency(
             connects_ferc1_eia,
             train_df,
-            five_year_test=five_year_test,
             match_type=match_type,
         )
 
@@ -1288,33 +1282,24 @@ def _log_match_coverage(connects_ferc1_eia):
     )
 
 
-def check_match_consistency(
-    connects_ferc1_eia, train_df, five_year_test=False, match_type="all"
-):
+def check_match_consistency(connects_ferc1_eia, train_df, match_type="all"):
     """
     Check how consistent matches are across time.
 
     Args:
         connects_ferc1_eia (pandas.DataFrame)
         train_df (pandas.DataFrame)
-        five_year_test (boolean): Whether the connection was made with five
-            years of FERC and EIA data for integration testing.
         match_type (string): either 'all' - to check all of the matches - or
             'overrides' - to check just the overrides. Default is 'all'.
     """
     # these are the default
     consistency = 0.75
-    consistency_one_cap_ferc = 0.9
+    consistency_one_cap_ferc = 0.85
     mask = connects_ferc1_eia.record_id_eia.notnull()
-
-    if five_year_test:
-        consistency_one_cap_ferc = 0.85
 
     if match_type == "overrides":
         consistency = 0.39
-        consistency_one_cap_ferc = 0.83
-        if five_year_test:
-            consistency_one_cap_ferc = 0.75
+        consistency_one_cap_ferc = 0.75
         train_ferc1 = train_df.reset_index()
         # these bbs were missing from connects_ferc1_eia. not totally sure why
         missing = [
