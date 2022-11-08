@@ -204,7 +204,6 @@ class Output:
         self,
         clobber=False,
         clobber_plant_parts_eia=False,
-        clobber_plant_parts_eia_distinct=False,
     ):
         """
         Generate or grab a connection between FERC1 and EIA.
@@ -218,14 +217,10 @@ class Output:
             clobber_plant_parts_eia (boolean): Generate and cache a new interim
                 output of the EIA plant part list and generate a new version of
                 the depreciaiton to FERC1 output. Default is False.
-            clobber_plant_parts_eia_distinct(boolean): Generate and cache a new
-                output of the distinct EIA plant part list
         """
         file_path = pudl_rmi.FERC1_EIA_PKL
         # if any of the clobbers are on, we want to regenerate the main output
-        clobber_any = any(
-            [clobber, clobber_plant_parts_eia, clobber_plant_parts_eia_distinct]
-        )
+        clobber_any = any([clobber, clobber_plant_parts_eia])
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber_any:
             logger.info(
@@ -235,7 +230,6 @@ class Output:
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
                 self.pudl_out,
                 self.plant_parts_eia_distinct(
-                    clobber=clobber_plant_parts_eia_distinct,
                     clobber_ppe=clobber_plant_parts_eia,
                 ),
             )
