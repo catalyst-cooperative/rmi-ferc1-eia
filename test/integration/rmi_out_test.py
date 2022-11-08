@@ -49,8 +49,7 @@ def test_ppl_out(rmi_out, request):
 
 def test_ppl_distinct_out(rmi_out, request):
     """Test generation of distinct EIA Plant Parts List."""
-    clobber = not request.config.getoption("--cached-plant-parts-eia-distinct")
-    ppl_distinct = rmi_out.plant_parts_eia_distinct(clobber=clobber)
+    ppl_distinct = rmi_out.plant_parts_eia_distinct()
     assert not ppl_distinct.empty
     del ppl_distinct
 
@@ -221,31 +220,13 @@ def test_consistency_of_data_stages(
             expected_errors_path = (
                 EXPECTED_ERRORS_DIR / f"{expected_errors_path.stem}_five_year.csv"
             )
-        expected_aggregation_errors = pd.read_csv(expected_errors_path).set_index(by)
-        idx = actual_aggregation_errors.index
-        levels_set_types = [
-            "report_year",
-            "data_source",
-            "utility_id_pudl",
-        ]
-        if idx.names == levels_set_types:
-            actual_aggregation_errors.index = (
-                actual_aggregation_errors.index.set_levels(
-                    [
-                        idx.levels[0].astype(int),
-                        idx.levels[1].astype(str),
-                        idx.levels[2].astype(int),
-                    ],
-                    level=levels_set_types,
-                )
-            )
+        expected_aggregation_errors = pd.read_csv(expected_errors_path)
         # the commented out lines here are here to help
         # try:
-        pd.testing.assert_index_equal(
-            actual_aggregation_errors.index,
-            expected_aggregation_errors.index,
-            exact=False,
-            check_order=False,
+        pd.testing.assert_frame_equal(
+            actual_aggregation_errors.index.to_frame(index=False),
+            expected_aggregation_errors,
+            check_dtype=False,
         )
         # except AssertionError:
         #     actual_aggregation_errors.reset_index()[by].to_csv(
