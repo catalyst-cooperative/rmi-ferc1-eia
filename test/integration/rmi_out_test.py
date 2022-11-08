@@ -42,7 +42,6 @@ def test_ppl_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-plant-parts-eia")
     ppl = rmi_out.plant_parts_eia(
         clobber=clobber,
-        pickle_train_connections=True,
     )
     assert not ppl.empty
     del ppl

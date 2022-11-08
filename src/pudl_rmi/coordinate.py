@@ -56,7 +56,7 @@ class Output:
             )
 
     # @profile
-    def plant_parts_eia(self, clobber=False, pickle_train_connections=False):
+    def plant_parts_eia(self, clobber=False):
         """
         Get the EIA plant-parts; generate it or get if from a file.
 
@@ -69,11 +69,6 @@ class Output:
         Args:
             clobber (boolean): True if you want to regenerate the EIA
                 plant-parts whether or not the output is already pickled.
-                Default is False.
-            pickle_train_connections (boolean): True if you also want to connect
-                and pickle the connection between the training data and EIA
-                plant-parts for use in EIA to FERC1 matching. This is
-                primarily used for memory efficiency when running the CI.
                 Default is False.
         """
         file_path = pudl_rmi.PLANT_PARTS_EIA_PKL
@@ -98,15 +93,6 @@ class Output:
             plant_parts_eia = pd.read_pickle(file_path)
             if plant_parts_eia.index.name != "record_id_eia":
                 logger.error("Plant parts list index is not record_id_eia.")
-        # more efficient memory use for CI
-        if pickle_train_connections:
-            pudl_rmi.connect_ferc1_to_eia.prep_train_connections(
-                ppe=plant_parts_eia,
-                start_date=self.pudl_out.start_date,
-                end_date=self.pudl_out.end_date,
-            ).to_pickle(
-                pudl_rmi.CONNECTED_TRAIN_PKL,
-            )
 
         return plant_parts_eia
 
@@ -250,15 +236,7 @@ class Output:
                 f"FERC to EIA granular connection not found at {file_path}... "
                 "Generating a new output."
             )
-            # get or generate connected training data
-            train_file_path = pudl_rmi.CONNECTED_TRAIN_PKL
-            check_is_file_or_not_exists(train_file_path)
-            if not train_file_path.exists():
-                train_df = None
-            else:
-                train_df = pd.read_pickle(train_file_path)
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
-                train_df,
                 self.pudl_out,
                 self.plant_parts_eia_distinct(
                     clobber=clobber_plant_parts_eia_distinct,

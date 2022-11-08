@@ -55,8 +55,7 @@ FERC1_EIA_PKL: Path = OUTPUTS_DIR / "ferc1_eia.pkl.gz"
 """Path to connection between FERC1 plants and the EIA plant-part list."""
 DEPRISH_FERC1_PKL: Path = OUTPUTS_DIR / "deprish_ferc1.pkl.gz"
 """Path to connection between depreciation data and FERC1 plants."""
-CONNECTED_TRAIN_PKL: Path = OUTPUTS_DIR / "connected_train_ferc1_eia.pkl"
-"""Path to training data connected to EIA plant-part true granulity record."""
+
 
 __author__ = "Catalyst Cooperative"
 __contact__ = "pudl@catalyst.coop"
