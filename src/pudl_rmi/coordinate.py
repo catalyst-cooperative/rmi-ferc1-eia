@@ -96,7 +96,7 @@ class Output:
 
         return plant_parts_eia
 
-    def plant_parts_eia_distinct(self, clobber=False, clobber_ppe=False):
+    def plant_parts_eia_distinct(self, clobber_ppe=False):
         """Get the EIA plant_parts with only the unique granularities.
 
         Read in the pickled dataframe or generate it from the full PPE. Get only
@@ -106,17 +106,13 @@ class Output:
         with duplicate data.
 
         Arguments:
-            clobber (boolean): True if you want to regenerate the distinct
-                plant parts list whether or not the output is already pickled.
-                Default is False.
             clobber_ppe (boolean): True if you want to regenerate the full EIA
                 plant parts list whether or not the output is already pickled.
                 Default is False.
         """
         file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
         check_is_file_or_not_exists(file_path)
-        clobber_any = any([clobber, clobber_ppe])
-        if not file_path.exists() or clobber_any:
+        if not file_path.exists() or clobber_ppe:
             logger.info(
                 f"Distinct EIA plant-parts not found at {file_path}. Generating a new "
                 "distinct dataframe."
