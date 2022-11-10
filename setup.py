@@ -38,7 +38,7 @@ setup(
             "pep8-naming~=0.12",
             "pre-commit>=2.9,<3",
             "pytest>=6.2,<8.0",
-            "pytest-cov>=2.10,<4",
+            "pytest-cov>=2.10,<5",
             "rstcheck>=5,<6",
             "tox>=3.20,<4",
         ]
