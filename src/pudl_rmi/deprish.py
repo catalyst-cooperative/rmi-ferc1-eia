@@ -90,9 +90,11 @@ DOLLAR_COLS = [
 ]
 
 
-def execute():
+def execute(start_date=None, end_date=None):
     """Generate cleaned and allocated depreciation studies."""
-    transformer = Transformer(Extractor().execute())
+    transformer = Transformer(
+        Extractor(start_date=start_date, end_date=end_date).execute()
+    )
     deprish_df = transformer.execute()
     return deprish_df
 
@@ -109,7 +111,13 @@ class Extractor:
     will want to use a datastore object to handle the path.
     """
 
-    def __init__(self, sheet_name="Depreciation Studies Raw", skiprows=0):
+    def __init__(
+        self,
+        sheet_name="Depreciation Studies Raw",
+        skiprows=0,
+        start_date=None,
+        end_date=None,
+    ):
         """
         Initialize a for deprish.Extractor.
 
@@ -118,22 +126,35 @@ class Extractor:
                 integer used for zero-indexed sheet location.
             skiprows (int): rows to skip in zero-indexed column location,
                 default is 0.
+            start_date (int): The start date of the date range to extract.
+                Default is None and all records before end_date will be extracted.
+            end_date (int): The end date of the date range to extract.
+                Default is None and all records after start_date will be extracted.
         """
         self.sheet_name = sheet_name
         self.skiprows = skiprows
+        self.start_date = start_date
+        self.end_date = end_date
 
     def execute(self):
         """Turn excel-based depreciation data into a dataframe."""
         logger.info(
             "Reading the depreciation data from " f"{pudl_rmi.DEPRISH_RAW_XLSX}"
         )
-        return pd.read_excel(
+        df = pd.read_excel(
             pudl_rmi.DEPRISH_RAW_XLSX,
             skiprows=self.skiprows,
             sheet_name=self.sheet_name,
             dtype={i: pd.Int64Dtype() for i in INT_IDS},
             na_values=NA_VALUES,
         )
+        if self.start_date is None:
+            self.start_date = min(df.report_date)
+        if self.end_date is None:
+            self.end_date = max(df.report_date)
+        return df[
+            (df.report_date <= self.end_date) & (df.report_date >= self.start_date)
+        ]
 
 
 class Transformer:
@@ -387,7 +408,7 @@ class Transformer:
         # and decimal rates (i.e. .882 for 88.2%).
         # numbers of decimals (e.g. 88.2% would either be represented as
         # 88.2 or .882). Some % columns have boolean columns (ending in
-        # type_pct) that we fleshed out to know wether the values were
+        # "type_pct") that we fleshed out to know wether the values were
         # reported as numbers or %s.
         to_num_cols = ["net_salvage_rate", "reserve_rate", "depreciation_annual_rate"]
         for col in to_num_cols:

@@ -18,7 +18,7 @@ setup(
     license="MIT",
     version="0.1.0",
     install_requires=[
-        "catalystcoop.pudl",
+        "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@dev",
         "fuzzywuzzy>=0.18,<0.19",
         "python-levenshtein>=0.12,<0.13",
         "recordlinkage>=0.14,<0.16",
@@ -39,6 +39,7 @@ setup(
             "pre-commit>=2.9,<3",
             "pytest>=6.2,<8.0",
             "pytest-cov>=2.10,<4",
+            "rstcheck>=5,<6",
             "tox>=3.20,<4",
         ]
     },

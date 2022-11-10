@@ -35,11 +35,11 @@ RESTRICT_MATCH_COLS = ["plant_id_eia", "utility_id_pudl", "report_year"]
 
 PPE_COLS = [
     "record_id_eia",
-    "plant_name_new",
+    "plant_name_ppe",
     "plant_part",
     "report_year",
     "report_date",
-    "ownership",
+    "ownership_record_type",
     "plant_name_eia",
     "plant_id_eia",
     "generator_id",
@@ -293,7 +293,7 @@ def log_match_coverage(deprish: pd.DataFrame, check_col: str) -> None:
 def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
     """Prepare the depreciation and EIA plant-parts and match on name cols."""
     key_deprish = "plant_part_name"
-    key_ppe = "plant_name_new"
+    key_ppe = "plant_name_ppe"
     deprish = prep_deprish(
         deprish=deprish, plant_parts_eia=plant_parts_eia, key_deprish=key_deprish
     )
@@ -366,7 +366,7 @@ def add_record_id_fuzzy(deprish, plant_parts_eia, key_ppe):
     # record_id_eia_fuzzy below
     match_merge_df = pd.merge(
         deprish,
-        plant_parts_eia.drop_duplicates(subset=["report_year", "plant_name_new"])[
+        plant_parts_eia.drop_duplicates(subset=["report_year", "plant_name_ppe"])[
             right_on + ["appro_record_id_eia"]
         ],
         left_on=left_on,

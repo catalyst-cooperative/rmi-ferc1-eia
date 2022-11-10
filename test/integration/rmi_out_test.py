@@ -40,11 +40,18 @@ def test_pudl_engine(pudl_engine, table_name):
 def test_ppl_out(rmi_out, request):
     """Test generation of the EIA Plant Parts List."""
     clobber = not request.config.getoption("--cached-plant-parts-eia")
-    ppl = rmi_out.plant_parts_eia(clobber=clobber)
+    ppl = rmi_out.plant_parts_eia(
+        clobber=clobber,
+    )
     assert not ppl.empty
-    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
-        if ppl_df in rmi_out.pudl_out._dfs:
-            del rmi_out.pudl_out._dfs[ppl_df]
+    del ppl
+
+
+def test_ppl_distinct_out(rmi_out, request):
+    """Test generation of distinct EIA Plant Parts List."""
+    ppl_distinct = rmi_out.plant_parts_eia_distinct()
+    assert not ppl_distinct.empty
+    del ppl_distinct
 
 
 def test_deprish_out(rmi_out, request):
@@ -52,6 +59,7 @@ def test_deprish_out(rmi_out, request):
     clobber = not request.config.getoption("--cached-deprish")
     deprish = rmi_out.deprish(clobber=clobber)
     assert not deprish.empty
+    del deprish
 
 
 def test_deprish_to_eia_out(rmi_out, request):
@@ -138,6 +146,7 @@ def test_consistency_of_data_stages(
     df2_name: str,
     data_cols: List[str],
     by_name: Literal["plants", "utilities"],
+    request,
 ):
     """
     Test the consistency of a data column at two stages.
@@ -207,14 +216,17 @@ def test_consistency_of_data_stages(
             EXPECTED_ERRORS_DIR
             / f"expected_errors_{data_col}_{by_name}_{df1_name}_vs_{df2_name}.csv"
         )
-        expected_aggregation_errors = pd.read_csv(expected_errors_path).set_index(by)
+        if request.config.getoption("--five-year-coverage"):
+            expected_errors_path = (
+                EXPECTED_ERRORS_DIR / f"{expected_errors_path.stem}_five_year.csv"
+            )
+        expected_aggregation_errors = pd.read_csv(expected_errors_path)
         # the commented out lines here are here to help
         # try:
-        pd.testing.assert_index_equal(
-            actual_aggregation_errors.index,
-            expected_aggregation_errors.index,
-            exact="equiv",
-            check_order=False,
+        pd.testing.assert_frame_equal(
+            actual_aggregation_errors.index.to_frame(index=False),
+            expected_aggregation_errors,
+            check_dtype=False,
         )
         # except AssertionError:
         #     actual_aggregation_errors.reset_index()[by].to_csv(

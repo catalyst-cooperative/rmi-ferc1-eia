@@ -46,7 +46,8 @@ class Output:
             pudl_out (object): instance of `pudl.output.pudltabl.PudlTabl()`.
                 The frequency (`freq`) of `pudl_out` must be `AS`. For best
                 results  `fill_fuel_cost`, `roll_fuel_cost`, and `fill_net_gen`
-                should all be True.
+                should all be True. `start_date` and `end_date` should be set
+                if using only a portion of the EIA data.
         """
         self.pudl_out = pudl_out
         if pudl_out.freq != "AS":
@@ -79,6 +80,9 @@ class Output:
             )
             # actually make the master plant parts list
             plant_parts_eia = self.pudl_out.plant_parts_eia()
+            # verify that record_id_eia is the index
+            if plant_parts_eia.index.name != "record_id_eia":
+                logger.error("Plant parts list index is not record_id_eia.")
             plant_parts_eia = plant_parts_eia[
                 ~plant_parts_eia.index.duplicated(keep="first")
             ]
@@ -87,7 +91,48 @@ class Output:
         else:
             logger.info(f"Reading the EIA plant-parts from {file_path}")
             plant_parts_eia = pd.read_pickle(file_path)
+            if plant_parts_eia.index.name != "record_id_eia":
+                logger.error("Plant parts list index is not record_id_eia.")
+
         return plant_parts_eia
+
+    def plant_parts_eia_distinct(self, clobber_ppe=False):
+        """Get the EIA plant_parts with only the unique granularities.
+
+        Read in the pickled dataframe or generate it from the full PPE. Get only
+        the records of the PPE that are "true granularities" and those which are not
+        duplicates based on their ownership so the FERC to EIA matching model
+        doesn't get confused as to which option to pick if there are many records
+        with duplicate data.
+
+        Arguments:
+            clobber_ppe (boolean): True if you want to regenerate the full EIA
+                plant parts list whether or not the output is already pickled.
+                Default is False.
+        """
+        file_path = pudl_rmi.DISTINCT_PLANT_PARTS_EIA_PKL
+        check_is_file_or_not_exists(file_path)
+        if not file_path.exists() or clobber_ppe:
+            logger.info(
+                f"Distinct EIA plant-parts not found at {file_path}. Generating a new "
+                "distinct dataframe."
+            )
+            plant_parts_eia = self.plant_parts_eia(clobber=clobber_ppe)
+            plant_parts_eia = plant_parts_eia.assign(
+                plant_id_report_year_util_id=lambda x: x.plant_id_report_year
+                + "_"
+                + x.utility_id_pudl.map(str)
+            ).astype({"installation_year": "float"})
+            distinct_ppe = plant_parts_eia[
+                (plant_parts_eia["true_gran"]) & (~plant_parts_eia["ownership_dupe"])
+            ]
+            distinct_ppe.to_pickle(file_path)
+        else:
+            logger.info(f"Reading the distinct EIA plant-parts from {file_path}")
+            distinct_ppe = pd.read_pickle(file_path)
+        if distinct_ppe.index.name != "record_id_eia":
+            logger.error("Plant parts list index is not record_id_eia.")
+        return distinct_ppe
 
     # @profile
     def deprish(self, clobber=False):
@@ -103,7 +148,9 @@ class Output:
         check_is_file_or_not_exists(file_path)
         if not file_path.exists() or clobber:
             logger.info("Generating new depreciation study output.")
-            deprish = pudl_rmi.deprish.execute()
+            deprish = pudl_rmi.deprish.execute(
+                start_date=self.pudl_out.start_date, end_date=self.pudl_out.end_date
+            )
             deprish.to_pickle(file_path)
         else:
             logger.info(f"Grabbing depreciation study output from {file_path}")
@@ -153,7 +200,11 @@ class Output:
             deprish_eia = pd.read_pickle(file_path)
         return deprish_eia
 
-    def ferc1_to_eia(self, clobber=False, clobber_plant_parts_eia=False):
+    def ferc1_to_eia(
+        self,
+        clobber=False,
+        clobber_plant_parts_eia=False,
+    ):
         """
         Generate or grab a connection between FERC1 and EIA.
 
@@ -178,7 +229,9 @@ class Output:
             )
             ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
                 self.pudl_out,
-                self.plant_parts_eia(clobber=clobber_plant_parts_eia),
+                self.plant_parts_eia_distinct(
+                    clobber_ppe=clobber_plant_parts_eia,
+                ),
             )
             # export
             ferc1_eia.to_pickle(file_path)
@@ -351,7 +404,7 @@ def main():
     rmi_out = Output(pudl_out)
     ppl = rmi_out.plant_parts_eia(clobber=True)
     del ppl
-    for ppl_df in ["plant_parts_eia", "gens_mega_eia", "true_grans_eia"]:
+    for ppl_df in ["plant_parts_eia", "gens_mega_eia"]:
         if ppl_df in rmi_out.pudl_out._dfs:
             del rmi_out.pudl_out._dfs[ppl_df]
 

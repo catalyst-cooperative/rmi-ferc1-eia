@@ -434,8 +434,6 @@ class PlantPartScaler(BaseModel):
         # Note: Right now we are just dropping the non-connected
         # not_connected = df_to_scale[df_to_scale.record_id_eia.isnull()]
         connected_to_scale = df_to_scale[~df_to_scale.record_id_eia.isnull()]
-
-        df_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(df_to_scale)
         # STEP 1
         # Aggregate when there is more than one source record associated with
         # the same EIA plant-part.
@@ -607,7 +605,7 @@ class PlantPartScaler(BaseModel):
             data_to_scale.report_date.dt.year, format="%Y"
         )
         out_dfs = []
-        for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS_ORDERED:
+        for merge_part in pudl.analysis.plant_parts_eia.PLANT_PARTS:
             pk_cols = (
                 pudl.analysis.plant_parts_eia.PLANT_PARTS[merge_part]["id_cols"]
                 + pudl.analysis.plant_parts_eia.IDX_TO_ADD
