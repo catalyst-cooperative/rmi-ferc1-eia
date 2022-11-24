@@ -27,7 +27,7 @@ setup(
         "test": [
             "black>=22,<23",
             "coverage>=5.3,<7.0",
-            "flake8>=4.0,<5",
+            "flake8>=4.0,<7",
             "flake8-builtins~=1.5",
             "flake8-colors~=0.1",
             "flake8-docstrings~=1.5",
