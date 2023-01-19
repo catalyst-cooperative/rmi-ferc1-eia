@@ -57,6 +57,11 @@ DEPRISH_FERC1_PKL: Path = OUTPUTS_DIR / "deprish_ferc1.pkl.gz"
 """Path to connection between depreciation data and FERC1 plants."""
 
 
+EQR_DATA_DIR: Path = INPUTS_DIR / "eqr_data"
+"""Path to raw EQR zipfiles."""
+EQR_DB_PATH: Path = OUTPUTS_DIR / "eqr.db"
+"""Path to procesesed EQR sqlite database."""
+
 __author__ = "Catalyst Cooperative"
 __contact__ = "pudl@catalyst.coop"
 __maintainer__ = "Catalyst Cooperative"

@@ -55,4 +55,9 @@ setup(
     maintainer="Christina Gosnell",
     maintainer_email="cgosnell@catalyst.coop",
     keywords=["depreciation", "ferc1", "eia", "rmi"],
+    entry_points={
+        "console_scripts": [
+            "process_eqr = pudl_rmi.process_eqr:main",
+        ]
+    },
 )
