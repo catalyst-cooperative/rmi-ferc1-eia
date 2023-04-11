@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pkg_resources
-
 import pudl_rmi.connect_deprish_to_eia
 import pudl_rmi.connect_deprish_to_ferc1
 import pudl_rmi.connect_ferc1_to_eia
@@ -35,8 +34,10 @@ and stored as pickled dataframes. If these files do exist,
 
 TRAIN_FERC1_EIA_CSV: Path = INPUTS_DIR / "train_ferc1_eia.csv"
 """Path to training data for FERC1 plants and EIA plant-part list."""
-DEPRISH_RAW_XLSX: Path = INPUTS_DIR / "deprish_raw.xlsx"
+DEPRISH_RAW_CSV: Path = INPUTS_DIR / "deprish_raw.csv"
 """Path to the raw depreciation data."""
+DEPRISH_EIA_XLSX: Path = INPUTS_DIR / "deprish_eia.xlsx"
+"""Path to the EIA depreciation column maps and plant parts linkages."""
 DEPRISH_COMMON_LABELS_XLSX: Path = INPUTS_DIR / "deprish_common_labels.xlsx"
 """Path to mannual label of common records in depreciation studies."""
 FERC_ACCT_NAMES_CSV: Path = INPUTS_DIR / "ferc_acct_names.csv"
