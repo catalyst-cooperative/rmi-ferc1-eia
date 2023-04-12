@@ -4,26 +4,25 @@ requires = [
     "setuptools>=66,<68",
     "setuptools_scm[toml]>=3.5.0",
     "wheel",
-    "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@dev",
-    "fuzzywuzzy>=0.18,<0.19",
-    "python-levenshtein>=0.12,<0.13",
-    "recordlinkage>=0.14,<0.16",
 ]
 
 [project]
 # This should be the *installed* package name e.g. catalystcoop.pudl not pudl
 name = "catalystcoop.pudl_rmi"
 description = "A one line description of the package."
-readme = {file = "README.rst", content-type = "text/x-rst"}
+readme = {file = "README.md", content-type = "text/markdown"}
 authors = [
     {name = "Catalyst Cooperative", email = "pudl@catalyst.coop"}
 ]
-requires-python = ">=3.8,<3.12"
+requires-python = ">=3.11,<3.12"
 dynamic = ["version"]
 license = {file = "LICENSE.txt"}
 dependencies = [
-    "pandas>=1.5,<3.0",
-    "sqlalchemy>=1.4,<3.0",
+    "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@main",
+    "fuzzywuzzy>=0.18,<0.19",
+    "recordlinkage>=0.14,<0.16",
+    "pandas>=1.5,<2.0",
+    "sqlalchemy>=1.4,<2.0",
     
 ]
 classifiers = [
@@ -33,11 +32,6 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
 ]
 keywords=["depreciation", "ferc1", "eia", "rmi"]
@@ -102,7 +96,7 @@ where = ["src"]
 
 [tool.black]
 line-length = 88
-target-version = ["py38", "py39", "py310", "py311"]
+target-version = ["py311"]
 include = "\\.pyi?$"
 
 [tool.isort]
