@@ -62,6 +62,6 @@ __contact__ = "pudl@catalyst.coop"
 __maintainer__ = "Catalyst Cooperative"
 __license__ = "MIT License"
 __maintainer_email__ = "cgosnell@catalyst.coop"
-__version__ = pkg_resources.get_distribution("pudl_rmi").version
+__version__ = pkg_resources.get_distribution("catalystcoop.pudl_rmi").version
 __docformat__ = "restructuredtext en"
 __description__ = "This repository is a collaboration between RMI and Catalyst Cooperative to connect FERC Form 1 plant records, EIA plant records and depreciation study records at the most granular level."
