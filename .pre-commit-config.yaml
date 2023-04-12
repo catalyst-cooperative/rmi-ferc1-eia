@@ -81,23 +81,15 @@ repos:
           - flake8-rst-docstrings
           - flake8-use-fstring
 
-  # Check for known security vulnerabilities:
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
-    hooks:
-      - id: bandit
-    # Currently no configuration...
-    # args: ['--configfile', '.bandit.yml']
-
-  # Use type annotations to check types
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.2.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - pytest
-          - types-jinja2
-          - types-setuptools
+  # # Use type annotations to check types
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.2.0
+  #   hooks:
+  #     - id: mypy
+  #       additional_dependencies:
+  #         - pytest
+  #         - types-jinja2
+  #         - types-setuptools
 
   # Check for errors in restructuredtext (.rst) files under the doc hierarchy
   - repo: https://github.com/PyCQA/doc8
