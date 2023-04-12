@@ -51,15 +51,6 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture(scope="session")
-def pudl_env(pudl_input_dir: dict[Any, Any]) -> None:
-    """Set PUDL_OUTPUT/PUDL_INPUT/DAGSTER_HOME environment variables."""
-    pudl.workspace.setup.get_defaults(**pudl_input_dir)
-
-    logger.info(f"PUDL_OUTPUT path: {os.environ['PUDL_OUTPUT']}")
-    logger.info(f"PUDL_INPUT path: {os.environ['PUDL_INPUT']}")
-
-
-@pytest.fixture(scope="session")
 def pudl_input_dir() -> dict[Any, Any]:
     """Determine where the PUDL input/output dirs should be."""
     input_override = None
