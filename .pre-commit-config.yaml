@@ -36,7 +36,7 @@ repos:
 
   # Make sure import statements are sorted uniformly.
   - repo: https://github.com/PyCQA/isort
-    rev: 5.12.1
+    rev: 5.12.0
     hooks:
       - id: isort
 
@@ -101,7 +101,7 @@ repos:
 
   # Check for errors in restructuredtext (.rst) files under the doc hierarchy
   - repo: https://github.com/PyCQA/doc8
-    rev: 1.1.1
+    rev: v1.1.1
     hooks:
       - id: doc8
         args: ["--config", "tox.ini"]
@@ -114,12 +114,12 @@ repos:
         additional_dependencies: [sphinx]
         args: ["--config", "tox.ini"]
 
-   # Lint Dockerfiles for errors and to ensure best practices
+    # Lint Dockerfiles for errors and to ensure best practices
   - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.12.0.2
     hooks:
       - id: hadolint
-      
+
   # Our own pre-commit hooks, which don't come from the pre-commit project
   - repo: local
     hooks:
