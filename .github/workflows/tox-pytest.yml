@@ -3,6 +3,10 @@ name: tox-pytest
 
 on: [push, pull_request]
 
+env:
+  PUDL_OUTPUT: ~/pudl-work/output/
+  PUDL_INPUT: ~/pudl-work/data/
+
 jobs:
   ci-test:
     runs-on: ubuntu-latest
@@ -26,7 +30,7 @@ jobs:
           mamba-version: "*"
           channels: conda-forge,defaults
           channel-priority: true
-          python-version: "3.10"
+          python-version: "3.11"
           activate-environment: pudl-rmi
           environment-file: environment.yml
 
@@ -41,15 +45,15 @@ jobs:
       - name: Cache PUDL DB
         uses: actions/cache@v3.0.5
         with:
-          path: ~/pudl-work/sqlite/pudl.sqlite
+          path: ~/pudl-work/data/pudl.sqlite
           # The last time we deployed Datasette. Update if we redeploy.
           key: "2022-05-05"
 
       - name: Download PUDL DB and log pre-test PUDL workspace contents
         run: |
-          mkdir -p ~/pudl-work/sqlite/
-          if [ ! -f ~/pudl-work/sqlite/pudl.sqlite ]
-          then curl -o ~/pudl-work/sqlite/pudl.sqlite https://data.catalyst.coop/pudl.db
+          mkdir -p ~/pudl-work/data/
+          if [ ! -f ~/pudl-work/data/pudl.sqlite ]
+          then curl -o ~/pudl-work/data/pudl.sqlite https://data.catalyst.coop/pudl.db
           fi
           find ~/pudl-work/
 
