@@ -13,6 +13,7 @@ functions that will read those new/updated/validated matches from the spreadshee
 validate them, and incorporate them into the existing training data.
 
 """
+import importlib
 import logging
 import os
 from typing import Dict, List, Literal
@@ -575,7 +576,11 @@ def validate_override_fixes(
 def _add_to_training(new_overrides) -> None:
     """Add the new overrides to the old override sheet."""
     logger.info("Combining all new overrides with existing training data")
-    current_training = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
+    current_training = pd.read_csv(
+        pd.read_csv(
+            importlib.resources.path("pudl.package_data.glue", "ferc1_eia_train.csv")
+        )
+    )
     new_training = (
         new_overrides[
             ["record_id_eia", "record_id_ferc1", "signature_1", "signature_2", "notes"]
@@ -590,7 +595,12 @@ def _add_to_training(new_overrides) -> None:
         subset=["record_id_eia", "record_id_ferc1"]
     )
     # Output combined training data
-    training_data_out.to_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV, index=False)
+    training_data_out.to_csv(
+        pd.read_csv(
+            importlib.resources.path("pudl.package_data.glue", "ferc1_eia_train.csv"),
+        ),
+        index=False,
+    )
 
 
 def _add_to_null_overrides(null_matches) -> None:
@@ -600,11 +610,16 @@ def _add_to_null_overrides(null_matches) -> None:
     new_null_matches = null_matches[["record_id_ferc1"]].copy()
     logger.debug(f"Found {len(new_null_matches)} new null matches")
     # Get current null matches
-    current_null_matches = pd.read_csv(pudl_rmi.NULL_FERC1_EIA_CSV)
+    current_null_matches = pd.read_csv(
+        importlib.resources.path("pudl.package_data.glue", "ferc1_eia_null.csv")
+    )
     # Combine new and current record_id_ferc1 values that have no EIA match
     out_null_matches = current_null_matches.append(new_null_matches).drop_duplicates()
     # Write the combined values out to the same location as before
-    out_null_matches.to_csv(pudl_rmi.NULL_FERC1_EIA_CSV, index=False)
+    out_null_matches.to_csv(
+        importlib.resources.path("pudl.package_data.glue", "ferc1_eia_null.csv"),
+        index=False,
+    )
 
 
 def validate_and_add_to_training(
@@ -628,7 +643,9 @@ def validate_and_add_to_training(
     ferc1_eia_df = rmi_out.ferc1_to_eia()
     ppl_df = rmi_out.plant_parts_eia().reset_index()
     utils_df = pudl_out.utils_eia860()
-    training_df = pd.read_csv(pudl_rmi.TRAIN_FERC1_EIA_CSV)
+    training_df = pd.read_csv(
+        importlib.resources.path("pudl.package_data.glue", "ferc1_eia_train.csv")
+    )
     path_to_new_training = pudl_rmi.INPUTS_DIR / "add_to_training"
     override_cols = [
         "record_id_eia",
