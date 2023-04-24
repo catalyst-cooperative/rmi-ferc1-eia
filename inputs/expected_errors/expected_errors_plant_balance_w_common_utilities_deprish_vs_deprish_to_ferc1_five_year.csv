@@ -26,6 +26,7 @@ report_year,data_source,utility_id_pudl
 2016,FERC-filed study,238
 2016,Hybrid,363
 2016,Hybrid,365
+2016,MODERNIZED,81
 2016,PUC,97
 2016,PUC,130
 2016,PUC,144
@@ -53,6 +54,7 @@ report_year,data_source,utility_id_pudl
 2018,FERC,29
 2018,FERC,35
 2018,FERC,42
+2018,FERC,62
 2018,FERC,89
 2018,FERC,90
 2018,FERC,93
@@ -73,6 +75,7 @@ report_year,data_source,utility_id_pudl
 2018,FERC,359
 2018,FERC,364
 2018,MODERNIZED,69
+2018,MODERNIZED,81
 2018,MODERNIZED,178
 2018,MODERNIZED,191
 2018,PUC,19
@@ -89,7 +92,6 @@ report_year,data_source,utility_id_pudl
 2018,PUC,295
 2018,PUC,302
 2018,PUC,334
-2019,FERC,7
 2019,FERC,35
 2019,FERC,89
 2019,FERC,105
