@@ -15,13 +15,13 @@ import logging
 import sys
 
 import pandas as pd
-import pudl_rmi
+import pudl
 import sqlalchemy as sa
 from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
 from xlrd import XLRDError
 
-import pudl
+import pudl_rmi
 
 logger = logging.getLogger(__name__)
 
