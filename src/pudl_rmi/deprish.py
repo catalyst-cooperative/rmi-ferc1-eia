@@ -1224,8 +1224,8 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
         .drop(columns=["_merge"])
     )
     common_labeling = common_labeling.assign(
-        line_id_main_all=lambda l: np.where(
-            l.line_id_main_1.notnull(), l.line_id_main_1, ""
+        line_id_main_all=lambda label: np.where(
+            label.line_id_main_1.notnull(), label.line_id_main_1, ""
         )
     )
     for col in [
@@ -1234,8 +1234,10 @@ def make_common_assn_labeling(pudl_out, file_path_deprish, transformer=None):
         if x != "line_id_main_all" and x != "line_id_main_1"
     ]:
         common_labeling = common_labeling.assign(
-            line_id_main_all=lambda l: np.where(
-                l[col].notnull(), l.line_id_main_all + "; " + l[col], l.line_id_main_all
+            line_id_main_all=lambda label: np.where(
+                label[col].notnull(),
+                label.line_id_main_all + "; " + label[col],
+                label.line_id_main_all,
             )
         )
 
