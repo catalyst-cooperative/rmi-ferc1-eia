@@ -227,11 +227,8 @@ class Output:
                 f"FERC to EIA granular connection not found at {file_path}... "
                 "Generating a new output."
             )
-            ferc1_eia = pudl_rmi.connect_ferc1_to_eia.execute(
-                self.pudl_out,
-                self.plant_parts_eia_distinct(
-                    clobber_ppe=clobber_plant_parts_eia,
-                ),
+            ferc1_eia = self.pudl_out.ferc1_eia(
+                update=clobber, update_plant_parts_eia=clobber_plant_parts_eia
             )
             # export
             ferc1_eia.to_pickle(file_path)
