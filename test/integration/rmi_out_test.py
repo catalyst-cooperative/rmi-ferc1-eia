@@ -8,9 +8,10 @@ import logging
 from typing import List, Literal
 
 import pandas as pd
-import pudl_rmi
 import pytest
 import sqlalchemy as sa
+
+import pudl_rmi
 
 logger = logging.getLogger(__name__)
 
