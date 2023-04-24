@@ -62,8 +62,6 @@ import pandas as pd
 import pudl
 from pydantic import BaseModel, validator
 
-from pudl_rmi import make_plant_parts_eia
-
 logger = logging.getLogger(__name__)
 
 SCALE_CAP_GEN_COST: "FieldTreatment" = {
@@ -212,10 +210,10 @@ def scale_to_fraction_owned(
     # and "owned" records are the same (i.e. there is only one owner)
     # this step could be done at basically any step before merging two
     # scaled_dfs together
-    scaled_deprish_eia = make_plant_parts_eia.reassign_id_ownership_dupes(
+    scaled_deprish_eia = pudl.analysis.plant_parts_eia.reassign_id_ownership_dupes(
         scaled_deprish_eia
     )
-    scaled_ferc1_eia = make_plant_parts_eia.reassign_id_ownership_dupes(
+    scaled_ferc1_eia = pudl.analysis.plant_parts_eia.reassign_id_ownership_dupes(
         scaled_ferc1_eia
     )
 
@@ -487,7 +485,7 @@ class PlantPartScaler(BaseModel):
 
     def aggregate_duplicate_eia(self, connected_to_scale, plant_parts_eia):
         """Aggregate duplicate EIA plant-part records."""
-        connected_to_scale = make_plant_parts_eia.reassign_id_ownership_dupes(
+        connected_to_scale = pudl.analysis.plant_parts_eia.reassign_id_ownership_dupes(
             connected_to_scale
         )
         dupe_mask = connected_to_scale.duplicated(subset=self.ppe_pk, keep=False)

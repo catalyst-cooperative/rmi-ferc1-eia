@@ -3,7 +3,7 @@ Connect the EIA plant-parts with depreciation records from PUCs and FERC1.
 
 This module connects the records from the depreciation data to their
 appropirate ids in the EIA plant-parts. The plant-parts is generated
-via `make_plant_parts_eia.py`; see the documenation there for additional
+via `pudl.analysis.plant_parts_eia.py`; see the documenation there for additional
 details about the plant-parts. The depreciation data is annual
 depreciation studies from PUC and FERC1 data that have been compiled into an
 excel spreadsheet. The plant-parts is a compilation of various slices of
@@ -16,7 +16,6 @@ import sys
 
 import pandas as pd
 import pudl_rmi
-import pudl_rmi.make_plant_parts_eia as make_plant_parts_eia
 import sqlalchemy as sa
 from fuzzywuzzy import fuzz, process
 from openpyxl import load_workbook
@@ -32,34 +31,6 @@ STRINGS_TO_CLEAN = {
 }
 
 RESTRICT_MATCH_COLS = ["plant_id_eia", "utility_id_pudl", "report_year"]
-
-PPE_COLS = [
-    "record_id_eia",
-    "plant_name_ppe",
-    "plant_part",
-    "report_year",
-    "report_date",
-    "ownership_record_type",
-    "plant_name_eia",
-    "plant_id_eia",
-    "generator_id",
-    "unit_id_pudl",
-    "prime_mover_code",
-    "energy_source_code_1",
-    "technology_description",
-    "ferc_acct_name",
-    "operating_year",
-    "utility_id_eia",
-    "utility_id_pudl",
-    "true_gran",
-    "appro_part_label",
-    "appro_record_id_eia",
-    "record_count",
-    "fraction_owned",
-    "ownership_dupe",
-    "operational_status",
-    "operational_status_pudl",
-]
 
 PPE_RENAME = {
     # 'record_id_eia': 'record_id_eia_name_match',
@@ -316,7 +287,9 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
     # merge in the rest of the ppe columns
     # we want to have the columns from the PPE, not from the fuzzy merged
     # option. so we're dropping all of the shared columns before merging
-    ppe_non_id_cols = [c for c in PPE_COLS if c != "record_id_eia"]
+    ppe_non_id_cols = [
+        c for c in pudl.analysis.plant_parts_eia.PPE_COLS if c != "record_id_eia"
+    ]
     deprish_match = (
         deprish_match.drop(
             columns=[
@@ -326,7 +299,7 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
             ]
         )
         .merge(
-            ppe.reset_index()[PPE_COLS],
+            ppe.reset_index()[pudl.analysis.plant_parts_eia.PPE_COLS],
             on=["record_id_eia"] + RESTRICT_MATCH_COLS,
             how="left",
             validate="m:1",
@@ -341,7 +314,7 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
         .rename(columns=PPE_RENAME)
         # reassign_id_ownership_dupes will fail with nulls in this bool col
         .assign(ownership_dupe=lambda x: x.ownership_dupe.fillna(False))
-        .pipe(make_plant_parts_eia.reassign_id_ownership_dupes)
+        .pipe(pudl.analysis.plant_parts_eia.reassign_id_ownership_dupes)
         .convert_dtypes(convert_floating=False)
     )
     first_cols = [
@@ -392,7 +365,7 @@ def grab_possible_plant_part_eia_matches(plant_parts_eia, deprish):
         .dropna(subset=RESTRICT_MATCH_COLS),
         deprish[RESTRICT_MATCH_COLS].drop_duplicates(),
         on=RESTRICT_MATCH_COLS,
-    ).pipe(pudl.helpers.organize_cols, PPE_COLS)
+    ).pipe(pudl.helpers.organize_cols, pudl.analysis.plant_parts_eia.PPE_COLS)
     return possible_matches_ppe
 
 

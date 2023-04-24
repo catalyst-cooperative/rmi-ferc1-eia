@@ -9,6 +9,7 @@
 **/*.db
 **/*.pq
 **/*.swp
+**/*~
 .hypothesis
 .tox
 .env
