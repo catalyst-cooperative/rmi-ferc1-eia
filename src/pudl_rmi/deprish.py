@@ -40,9 +40,9 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-import pudl_rmi
-
 import pudl
+
+import pudl_rmi
 
 logger = logging.getLogger(__name__)
 
