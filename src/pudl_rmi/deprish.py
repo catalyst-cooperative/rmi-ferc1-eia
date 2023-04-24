@@ -40,9 +40,9 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-import pudl
-
 import pudl_rmi
+
+import pudl
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,10 @@ class Extractor:
             dtype={i: pd.Int64Dtype() for i in INT_IDS},
             na_values=NA_VALUES,
         )
+        df["report_date"] = pd.to_datetime(df["report_date"])
+        logger.info(df)
+        logger.info(df.dtypes)
+
         if self.start_date is None:
             self.start_date = min(df.report_date)
         if self.end_date is None:
@@ -397,7 +401,7 @@ class Transformer:
         # and decimal rates (i.e. .882 for 88.2%).
         # numbers of decimals (e.g. 88.2% would either be represented as
         # 88.2 or .882). Some % columns have boolean columns (ending in
-        # "type_pct") that we fleshed out to know wether the values were
+        # "type_pct") that we fleshed out to know whether the values were
         # reported as numbers or %s.
         to_num_cols = ["net_salvage_rate", "reserve_rate", "depreciation_annual_rate"]
         for col in to_num_cols:
