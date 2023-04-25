@@ -26,11 +26,9 @@ The main transform method is Transformer.execute(), which has four steps:
 
 how to run this module:
 file_path_deprish = pathlib.Path().cwd().parent/'depreciation_rmi.xlsx'
-sheet_name_deprish='Depreciation Studies Raw'
 transformer = deprish.Transformer(
     deprish.Extractor(
-        file_path=file_path_deprish,
-        sheet_name=sheet_name_deprish
+        file_path=file_path_deprish
     ).execute())
 deprish_df = transformer.execute()
 """
@@ -101,19 +99,16 @@ def execute(start_date=None, end_date=None):
 
 class Extractor:
     """
-    Extractor for turning excel based depreciation data into a dataframe.
+    Extractor for turning CSV-based depreciation data into a dataframe.
 
-    Note: this should be overhualed if/when we switch from storing the
-    depreciation studies into a CSV. Also, if/when we integrate this into pudl,
-    we need to think more seriously about where to store the excel sheet/CSV.
-    Is it in pudl.package_data or do we store it through the datastore? If it
-    felt stable would it be worthwhile to store via zendo?.. in which case we
-    will want to use a datastore object to handle the path.
+    Note: If/when we integrate this into pudl, we need to think more seriously about
+    where to store the CSV. Is it in pudl.package_data or do we store it
+    through the datastore? If it felt stable would it be worthwhile to store via zenodo?
+    In which case we will want to use a datastore object to handle the path.
     """
 
     def __init__(
         self,
-        sheet_name="Depreciation Studies Raw",
         skiprows=0,
         start_date=None,
         end_date=None,
@@ -122,8 +117,6 @@ class Extractor:
         Initialize a for deprish.Extractor.
 
         Args:
-            sheet_name (str, int): String used for excel sheet name or
-                integer used for zero-indexed sheet location.
             skiprows (int): rows to skip in zero-indexed column location,
                 default is 0.
             start_date (int): The start date of the date range to extract.
@@ -131,23 +124,23 @@ class Extractor:
             end_date (int): The end date of the date range to extract.
                 Default is None and all records after start_date will be extracted.
         """
-        self.sheet_name = sheet_name
         self.skiprows = skiprows
         self.start_date = start_date
         self.end_date = end_date
 
     def execute(self):
-        """Turn excel-based depreciation data into a dataframe."""
-        logger.info(
-            "Reading the depreciation data from " f"{pudl_rmi.DEPRISH_RAW_XLSX}"
-        )
-        df = pd.read_excel(
-            pudl_rmi.DEPRISH_RAW_XLSX,
+        """Turn CSV-based depreciation data into a dataframe."""
+        logger.info("Reading the depreciation data from " f"{pudl_rmi.DEPRISH_RAW_CSV}")
+        df = pd.read_csv(
+            pudl_rmi.DEPRISH_RAW_CSV,
             skiprows=self.skiprows,
-            sheet_name=self.sheet_name,
             dtype={i: pd.Int64Dtype() for i in INT_IDS},
             na_values=NA_VALUES,
         )
+        df["report_date"] = pd.to_datetime(df["report_date"])
+        logger.info(df)
+        logger.info(df.dtypes)
+
         if self.start_date is None:
             self.start_date = min(df.report_date)
         if self.end_date is None:
@@ -408,7 +401,7 @@ class Transformer:
         # and decimal rates (i.e. .882 for 88.2%).
         # numbers of decimals (e.g. 88.2% would either be represented as
         # 88.2 or .882). Some % columns have boolean columns (ending in
-        # "type_pct") that we fleshed out to know wether the values were
+        # "type_pct") that we fleshed out to know whether the values were
         # reported as numbers or %s.
         to_num_cols = ["net_salvage_rate", "reserve_rate", "depreciation_annual_rate"]
         for col in to_num_cols:

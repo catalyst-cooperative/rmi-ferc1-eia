@@ -101,7 +101,7 @@ def prep_deprish(deprish, plant_parts_eia, key_deprish):
         raise AssertionError(
             f"Found {len(baddies)} depreciation records which don't have "
             "cooresponding EIA plant-parts records. Check plant_id_eia's "
-            f"in {pudl_rmi.DEPRISH_RAW_XLSX}"
+            f"in {pudl_rmi.DEPRISH_EIA_XLSX}"
         )
     deprish_ids = (
         deprish_ids.loc[deprish_ids._merge == "both"]
@@ -280,7 +280,7 @@ def match_deprish_eia(deprish, plant_parts_eia, sheet_name_output):
         .pipe(add_record_id_fuzzy, plant_parts_eia=ppe, key_ppe=key_ppe)
         .pipe(
             add_overrides,
-            file_path_deprish=pudl_rmi.DEPRISH_RAW_XLSX,
+            file_path_deprish=pudl_rmi.DEPRISH_EIA_XLSX,
             sheet_name_output=sheet_name_output,
         )
     )
@@ -418,7 +418,7 @@ def execute(
             "Subset of Master Unit List": possible_matches_ppe,
         }
         save_to_workbook(
-            file_path=pudl_rmi.DEPRISH_RAW_XLSX, sheets_df_dict=sheets_df_dict
+            file_path=pudl_rmi.DEPRISH_EIA_XLSX, sheets_df_dict=sheets_df_dict
         )
     return deprish_match
 
