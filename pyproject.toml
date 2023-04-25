@@ -21,7 +21,7 @@ dependencies = [
     "catalystcoop-pudl @ git+https://github.com/catalyst-cooperative/pudl@main",
     "fuzzywuzzy>=0.18,<0.19",
     "recordlinkage>=0.14,<0.16",
-    "pandas>=1.5,<2.0",
+    "pandas>=1.5,<3.0",
     "python-levenshtein>=0.20,<1.0",
     "sqlalchemy>=1.4,<3.0",
 ]
