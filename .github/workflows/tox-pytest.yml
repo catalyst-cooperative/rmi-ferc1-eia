@@ -70,7 +70,7 @@ jobs:
         run: find ~/pudl-work/
 
       - name: Upload test coverage report to CodeCov
-        uses: codecov/codecov-action@v3.1.3
+        uses: codecov/codecov-action@v3.1.4
         with:
           verbose: true
           files: ./coverage.xml
