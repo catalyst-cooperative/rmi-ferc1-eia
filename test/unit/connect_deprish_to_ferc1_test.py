@@ -1,4 +1,5 @@
 """Unit tests for connection between Depreciation and FERC1."""
+
 import pandas as pd
 
 from pudl_rmi.connect_deprish_to_ferc1 import allocate_cols
