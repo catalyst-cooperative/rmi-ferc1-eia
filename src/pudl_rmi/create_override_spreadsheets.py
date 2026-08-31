@@ -13,6 +13,7 @@ functions that will read those new/updated/validated matches from the spreadshee
 validate them, and incorporate them into the existing training data.
 
 """
+
 import importlib
 import logging
 import os
@@ -114,9 +115,9 @@ def _pct_diff(df, col) -> pd.DataFrame:
     # Fed in the _pct_diff column so make sure it is neutral for this analysis
     col = col.replace("_pct_diff", "")
     # Fill in the _pct_diff column with the actual percent difference value
-    df.loc[
-        (df[f"{col}_eia"] > 0) & (df[f"{col}_ferc1"] > 0), f"{col}_pct_diff"
-    ] = round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
+    df.loc[(df[f"{col}_eia"] > 0) & (df[f"{col}_ferc1"] > 0), f"{col}_pct_diff"] = (
+        round(((df[f"{col}_ferc1"] - df[f"{col}_eia"]) / df[f"{col}_ferc1"] * 100), 2)
+    )
 
     return df
 
@@ -189,9 +190,9 @@ def _prep_ferc1_eia(ferc1_eia, pudl_out) -> pd.DataFrame:
     )
 
     # Add in installation_year diff (diff vs. pct_diff)
-    ferc1_eia_prep.loc[
-        :, "installation_year_ferc1"
-    ] = ferc1_eia_prep.installation_year_ferc1.astype("Int64")
+    ferc1_eia_prep.loc[:, "installation_year_ferc1"] = (
+        ferc1_eia_prep.installation_year_ferc1.astype("Int64")
+    )
 
     ferc1_eia_prep.loc[
         ferc1_eia_prep.installation_year_eia.notna()
@@ -295,11 +296,9 @@ def _get_util_year_subsets(inputs_dict, util_id_eia_list, years) -> dict:
         ].copy()
         # Make sure dfs aren't too big...
         if len(subset_df) > 500000:
-            raise AssertionError(
-                "Your subset is more than 500,000 rows...this \
+            raise AssertionError("Your subset is more than 500,000 rows...this \
                 is going to make excel reaaalllllyyy slow. Try entering a smaller utility \
-                or year subset"
-            )
+                or year subset")
 
         if df_name == "ferc_eia":
             # Add column with excel formula to check if the override record id is the
