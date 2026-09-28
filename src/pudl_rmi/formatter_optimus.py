@@ -206,9 +206,9 @@ def execute(
     model_input.loc[:, "resource_type"] = model_input.technology_description.replace(
         TECHNOLOGY_DESCRIPTION_TO_RESOURCE_TYPE
     )
-    model_input.loc[
-        :, "operational_status"
-    ] = model_input.operational_status.str.title()
+    model_input.loc[:, "operational_status"] = (
+        model_input.operational_status.str.title()
+    )
 
     # Create a bunch of "faked"  columns
     for faked_col in [x for x in RENAME_COLS.keys() if "faked_" in x]:
